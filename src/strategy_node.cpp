@@ -8,7 +8,7 @@ StrategyNode::StrategyNode(const rclcpp::NodeOptions & options)
 {
   declare_parameter<int>("robot_amount", 3);
   timer_ = create_wall_timer(500ms, std::bind(&StrategyNode::tick, this));
-  RCLCPP_INFO(get_logger(), "StrategyNode started. robot_amount=%d",
+  RCLCPP_INFO(get_logger(), "StrategyNode started. robot_amount=%ld",
               get_parameter("robot_amount").as_int());
 }
 
