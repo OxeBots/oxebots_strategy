@@ -1,45 +1,66 @@
-
-
-#include "behaviortree_cpp/action_node.h"
-#include "rclcpp/rclcpp.hpp"
-#include "oxebots_interfaces/msg/robot_cmd.hpp"
-#include "oxebots_interfaces/msg/robot_game_data.hpp"
-#include "oxebots_interfaces/msg/robot_position.hpp"
-#include <chrono>
-#include <cmath>
+#include "oxebots_strategy/go_to_point_node.h"
 
 namespace oxebots_strategy
 {
 
-class GoToPointNode : public BT::StatefulActionNode
+GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
+  : BT::StatefulActionNode(name, config), node_(node)
 {
-public:
-  GoToPointNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node);
+  publisher_ = node_->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
+   RCLCPP_INFO(node_->get_logger(), "!!! Construtor do GoToPointNode executado. Publisher criado. !!!");
+}
 
-  static BT::PortsList providedPorts();
+BT::PortsList GoToPointNode::providedPorts()
+{
+  // As portas não são usadas neste exemplo simples, mas podemos mantê-las
+  return { BT::InputPort<unsigned int>("robot_id"),
+           BT::InputPort<double>("x"),
+           BT::InputPort<double>("y"),
+           BT::InputPort<double>("w") };
+}
 
-  void setRobotId(unsigned int robot_ID) {robot_id_= robot_ID;}
-  unsigned int getRobotId() {return robot_id_;} 
-  void setTarget(double X, double Y, double W) {target_x_ = X; target_y_ = Y;  target_w_ = W;}
-  void setCurrentPosition(double X, double Y, double W){current_x_ = X; current_y_ = Y; current_w_ = W; has_current_state_ = true;}
+BT::NodeStatus GoToPointNode::onStart()
+{
+  RCLCPP_INFO(node_->get_logger(), "Iniciando 'AndarParaFrente'");
+    // MODIFICADO: Lógica com verificação de tempo
+  unsigned int robot_id = 0;
+  getInput<unsigned int>("robot_id", robot_id);
 
-  BT::NodeStatus onStart() override;
-  BT::NodeStatus onRunning() override;
-  void onHalted() override;
-
-private:
-  rclcpp::Node::SharedPtr node_;
-  rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr publisher_;
-  rclcpp::Subscription<oxebots_interfaces::msg::RobotPosition>::SharedPtr robot_state_sub_; // Subscriber para a posição do robô
+  oxebots_interfaces::msg::RobotCmd msg;
+  oxebots_interfaces::msg::RobotCmdData robot_data;
+  robot_data.id = robot_id;
   
-  unsigned int robot_id_;
-  double target_x_, target_y_, target_w_;
-  double current_x_, current_y_, current_w_; // Posição atual do robô
-  bool has_current_state_ = false; // Flag para garantir que temos a posição do robô
+  float forward_speed = 100.0;
+  robot_data.x_velocity = forward_speed;  // Velocidade para frente
+  robot_data.y_velocity = 0.0;            // Sem movimento lateral
+  robot_data.angular_velocity = 0.0;      // Sem rotação
 
-  // Callback do subscriber
-  void robotStateCallback(const oxebots_interfaces::msg::RobotPosition::SharedPtr msg);
+  msg.robots.push_back(robot_data);
+  publisher_->publish(msg);
+  RCLCPP_INFO(node_->get_logger(), "Enviando 'AndarParaFrente'");
+  return BT::NodeStatus::RUNNING;
+}
 
-};
+BT::NodeStatus GoToPointNode::onRunning()
+{
 
-} // namespace oxebots_strategy
+  
+  return BT::NodeStatus::RUNNING; // Continue rodando...
+}
+
+void GoToPointNode::onHalted()
+{
+  // onHalted é chamado se a ação for interrompida. É importante parar o robô aqui também.
+  RCLCPP_WARN(node_->get_logger(), "Ação 'AndarParaFrente' interrompida. Parando o robô.");
+  
+  oxebots_interfaces::msg::RobotCmd msg;
+  oxebots_interfaces::msg::RobotCmdData robot_data;
+  robot_data.id = 0;
+  robot_data.x_velocity = 0.0;
+  robot_data.y_velocity = 0.0;
+  robot_data.angular_velocity = 0.0;
+  msg.robots.push_back(robot_data);
+  publisher_->publish(msg);
+}
+
+}  // namespace oxebots_strategy

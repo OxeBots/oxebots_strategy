@@ -20,8 +20,8 @@ public:
 
   void setRobotId(unsigned int robot_ID) {robot_id_= robot_ID;}
   unsigned int getRobotId() {return robot_id_;} 
-  void setTarget(double X, double Y, double W) {target_x_ = X; target_y_ = Y;  target_w_ = W;}
-  void setCurrentPosition(double X, double Y, double W){current_x_ = X; current_y_ = Y; current_w_ = W; has_current_state_ = true;}
+  void setTarget(double vel_x, double vel_y, double angle_vel) {target_vel_x_ = vel_x; target_vel_y_ = vel_y;  target_angle_vel_ = angle_vel;}
+  void setCurrentPosition(double vel_x_current, double vel_y_current, double angle_vel_current){current_vel_x_ = vel_x_current; current_vel_y_ = vel_y_current; current_angle_vel_ = angle_vel_current; has_current_state_ = true;}
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
@@ -33,8 +33,8 @@ private:
   rclcpp::Subscription<oxebots_interfaces::msg::RobotPosition>::SharedPtr robot_state_sub_; // Subscriber para a posição do robô
   
   unsigned int robot_id_;
-  double target_x_, target_y_, target_w_;
-  double current_x_, current_y_, current_w_; // Posição atual do robô
+  double target_vel_x_, target_vel_y_, target_angle_vel_;
+  double current_vel_x_, current_vel_y_, current_angle_vel_; // Posição atual do robô
   bool has_current_state_ = false; // Flag para garantir que temos a posição do robô
 
   // Callback do subscriber
