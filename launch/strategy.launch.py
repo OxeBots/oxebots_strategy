@@ -16,26 +16,16 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            # 1. Executa o grSim (Simulador)
-            # ExecuteProcess(
-            #     cmd=['/home/matheus/grSim/bin/grSim'],
-            #     name='grsim_simulator',
-            #     output='screen'
-            # ),
-            # # 2. Executa o nó de comunicação (sender_node)
-            # Node(
-            #     package='oxebots_comms',
-            #     executable='sender_node',
-            #     name='sender_node',
-            #     output='screen',
-            #     parameters=[
-            #         {
-            #             "grsim_addr": "127.0.0.1",      # IP padrão do grSim
-            #             "grsim_port": 20011,            # Porta de comando padrão
-            #             "topic": "robot_commands"       # Tópico que a estratégia publica
-            #         }
-            #     ]
-            # ),
+            Node(
+                package="oxebots_strategy",
+                executable="movement_calculation_node",
+                name="movement_calculation_node",
+                output="screen",
+                parameters=[
+                    {'max_linear_speed': 2.0},
+                    {'p_gain_linear': 0.5}
+                ]
+            ),
             # 3. Executa o nó de estratégia (strategy_node)
             Node(
                 package="oxebots_strategy",
