@@ -19,7 +19,7 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100), std::bind(&PotentialFieldNode::calculate_and_move, this));
     
-    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial iniciado para o robô %d.", robot_id_);
+    //RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial iniciado para o robô %d.", robot_id_);
 }
 
 void PotentialFieldNode::goal_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
@@ -28,7 +28,7 @@ void PotentialFieldNode::goal_callback(const geometry_msgs::msg::PoseStamped::Sh
         (float)msg->pose.position.x, 
         (float)msg->pose.position.y
     };
-    RCLCPP_INFO(this->get_logger(), "[DEBUG] Novo alvo recebido: (%.2f, %.2f)", target_pos_->x, target_pos_->y);
+    //RCLCPP_INFO(this->get_logger(), "[DEBUG] Novo alvo recebido: (%.2f, %.2f)", target_pos_->x, target_pos_->y);
 }
 
 void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
@@ -73,7 +73,7 @@ void PotentialFieldNode::calculate_and_move()
     }
     movement::Coordinate current_pos = *current_pos_opt;
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[DEBUG] Using current_pos: (%.2f, %.2f) to target: (%.2f, %.2f)", current_pos.x, current_pos.y, target_pos_->x, target_pos_->y);
+    //RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[DEBUG] Using current_pos: (%.2f, %.2f) to target: (%.2f, %.2f)", current_pos.x, current_pos.y, target_pos_->x, target_pos_->y);
 
     auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     auto cmd_data = oxebots_interfaces::msg::RobotCmdData();
@@ -91,7 +91,7 @@ void PotentialFieldNode::calculate_and_move()
          cmd_data.y_velocity = 0.0;
          cmd_data.angular_velocity = 0.0;
          target_pos_.reset(); // Para de se mover até receber novo alvo
-         RCLCPP_INFO(this->get_logger(), "Alvo alcançado!");
+         //RCLCPP_INFO(this->get_logger(), "Alvo alcançado!");
     } else {
         movement::PotentialField pf_calculator;
         std::vector<double> force = pf_calculator.calculate(current_pos, *target_pos_, obstacles);

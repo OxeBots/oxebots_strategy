@@ -65,7 +65,7 @@ BT::NodeStatus GoToPointNode::onStart()
 
   goal_pub_->publish(std::move(goal_msg));
 
-  RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Published new goal (%.2f, %.2f) for robot %d", target_pos_.x, target_pos_.y, robot_id_);
+  //RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Published new goal (%.2f, %.2f) for robot %d", target_pos_.x, target_pos_.y, robot_id_);
 
   return BT::NodeStatus::RUNNING;
 }
@@ -84,12 +84,12 @@ BT::NodeStatus GoToPointNode::onRunning()
   double dist_to_goal = std::hypot(robot_data->x - target_pos_.x, robot_data->y - target_pos_.y);
 
   // *** MELHORIA: Adiciona log para feedback contínuo ***
-  RCLCPP_INFO_THROTTLE(
+  /*RCLCPP_INFO_THROTTLE(
     node_->get_logger(), *node_->get_clock(), 1000, // Log a cada 1000ms (1 segundo)
-    "GoToPointNode: Robot %d is %.1fmm from target.", robot_id_, dist_to_goal);
+    "GoToPointNode: Robot %d is %.1fmm from target.", robot_id_, dist_to_goal);*/
 
   if (dist_to_goal < 150.0) { // Limiar de 150mm (15cm)
-      RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Robot %d reached goal.", robot_id_);
+      //RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Robot %d reached goal.", robot_id_);
       return BT::NodeStatus::SUCCESS;
   }
 
@@ -98,7 +98,7 @@ BT::NodeStatus GoToPointNode::onRunning()
 
 void GoToPointNode::onHalted()
 {
-  RCLCPP_INFO(node_->get_logger(), "GoToPointNode halted. Commanding robot %d to stop.", robot_id_);
+  //RCLCPP_INFO(node_->get_logger(), "GoToPointNode halted. Commanding robot %d to stop.", robot_id_);
   
   // Publica a posição atual do robô como o novo alvo para fazê-lo parar.
   if (auto robot_data = getRobotData(robot_id_)) {
