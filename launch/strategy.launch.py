@@ -22,7 +22,7 @@ def generate_launch_description():
                 name="movement_calculation_node",
                 output="screen",
                 parameters=[
-                    {'max_linear_speed': 2.0},
+                    {'max_linear_speed': 1.0},
                     {'p_gain_linear': 0.5}
                 ]
             ),

@@ -37,7 +37,6 @@ void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameD
     last_game_data_ = msg; // Apenas armazena a última mensagem recebida
     if(last_game_data_){
         game_data_received_ = true;
-        RCLCPP_INFO(this->get_logger(), "Recebi GameData: %d",game_data_received_);
     }
     else{
         game_data_received_ = false;

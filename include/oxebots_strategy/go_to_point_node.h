@@ -31,7 +31,6 @@ private:
 
   // Estado do Mundo e do Robô
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
-  bool game_data_received_ = false;
   unsigned int robot_id_;
   geometry_msgs::msg::Point target_pos_;
 };

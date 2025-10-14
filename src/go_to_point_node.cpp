@@ -3,7 +3,7 @@
 #include <cmath>
 
 namespace oxebots_strategy
-{
+{ 
 
 GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
   : BT::StatefulActionNode(name, config), node_(node)
@@ -28,7 +28,6 @@ BT::PortsList GoToPointNode::providedPorts()
 void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
 {
   last_game_data_ = msg;
-  game_data_received_ = true;
 }
 
 std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotData(unsigned int robot_id) {
@@ -73,19 +72,21 @@ BT::NodeStatus GoToPointNode::onStart()
 
 BT::NodeStatus GoToPointNode::onRunning()
 {
-  if (!game_data_received_) {
-    RCLCPP_INFO(node_->get_logger(), "Waiting for game data...");
-    return BT::NodeStatus::RUNNING;
-  }
-
   auto robot_data = getRobotData(robot_id_);
   if (!robot_data) {
-      RCLCPP_WARN(node_->get_logger(), "No data for robot %d, cannot check goal condition.", robot_id_);
+      RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 1000, 
+        "No data for robot %d, cannot check goal condition. Waiting...", robot_id_);
       return BT::NodeStatus::RUNNING; // Continua em execução esperando por dados
   }
 
   // Verifica a condição de sucesso
   double dist_to_goal = std::hypot(robot_data->x - target_pos_.x, robot_data->y - target_pos_.y);
+
+  // *** MELHORIA: Adiciona log para feedback contínuo ***
+  RCLCPP_INFO_THROTTLE(
+    node_->get_logger(), *node_->get_clock(), 1000, // Log a cada 1000ms (1 segundo)
+    "GoToPointNode: Robot %d is %.1fmm from target.", robot_id_, dist_to_goal);
 
   if (dist_to_goal < 150.0) { // Limiar de 150mm (15cm)
       RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Robot %d reached goal.", robot_id_);
