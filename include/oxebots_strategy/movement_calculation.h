@@ -2,7 +2,8 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
+// #include "geometry_msgs/msg/pose_stamped.hpp" // <<<--- 1. LINHA ANTIGA
+#include "oxebots_interfaces/msg/robot_goal.hpp" // <<<--- 1. LINHA NOVA
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
 
@@ -62,12 +63,20 @@ public:
 
 private:
     void game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
-    void goal_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    
+    // <<<--- 2. ALTERAÇÃO NA ASSINATURA DA FUNÇÃO ---
+    void goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg);
+    // <<<--- FIM DA ALTERAÇÃO ---
+
     void calculate_and_move();
 
     rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr cmd_vel_pub_;
     rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+    
+    // <<<--- 3. ALTERAÇÃO NO TIPO DA VARIÁVEL ---
+    rclcpp::Subscription<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_sub_;
+    // <<<--- FIM DA ALTERAÇÃO ---
+    
     rclcpp::TimerBase::SharedPtr timer_;
 
     std::mutex data_mutex_;

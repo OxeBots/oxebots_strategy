@@ -1,4 +1,8 @@
 #include "oxebots_strategy/movement_calculation.h"
+// <<<--- ADICIONE ESTA LINHA ---
+// (Você também deve remover o include "geometry_msgs/msg/pose_stamped.hpp" do seu movement_calculation.h)
+#include "oxebots_interfaces/msg/robot_goal.hpp" 
+// <<<--- FIM DA ADIÇÃO ---
 
 PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
     this->declare_parameter("robot_id", 0);
@@ -14,22 +18,39 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
     cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
     game_data_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
         "/game_data", qosData, std::bind(&PotentialFieldNode::game_data_callback, this, std::placeholders::_1));
-    goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-        "/goal_pose", qosPose, std::bind(&PotentialFieldNode::goal_callback, this, std::placeholders::_1));
+    
+    // <<<--- ALTERAÇÃO NO SUBSCRIBER ---
+    goal_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotGoal>(
+        "/robot_goal", qosPose, std::bind(&PotentialFieldNode::goal_callback, this, std::placeholders::_1));
+    // <<<--- FIM DA ALTERAÇÃO ---
+
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100), std::bind(&PotentialFieldNode::calculate_and_move, this));
     
-    //RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial iniciado para o robô %d.", robot_id_);
+    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial iniciado para o robô %d.", robot_id_);
 }
 
-void PotentialFieldNode::goal_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+// <<<--- ALTERAÇÃO NO CALLBACK (ASSINATURA E CONTEÚDO) ---
+void PotentialFieldNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg) {
+    
+    // --- O FILTRO DE ID ---
+    // 'robot_id_' é a variável de membro deste nó (lida do launch file, ex: 1)
+    // 'msg->robot_id' é o ID que veio na mensagem do "Técnico" (BT).
+    // A correção:
+if (msg->robot_id != static_cast<int>(robot_id_)) {
+        //RCLCPP_INFO(this->get_logger(), "Recebi alvo para o robô %d, mas eu sou o %d. Ignorando.", msg->robot_id, robot_id_);
+        return; // A ordem não é para mim, ignoro.
+    }
+
+    // A ordem É para mim. Processa o alvo.
     std::lock_guard<std::mutex> lock(data_mutex_);
     target_pos_ = movement::Coordinate{
-        (float)msg->pose.position.x, 
-        (float)msg->pose.position.y
+        (float)msg->pose.pose.position.x, // <<<--- Note a mudança aqui (pose.pose)
+        (float)msg->pose.pose.position.y  // <<<--- Note a mudança aqui (pose.pose)
     };
-    //RCLCPP_INFO(this->get_logger(), "[DEBUG] Novo alvo recebido: (%.2f, %.2f)", target_pos_->x, target_pos_->y);
+    //RCLCPP_INFO(this->get_logger(), "[DEBUG] Novo alvo recebido para mim (%d): (%.2f, %.2f)", robot_id_, target_pos_->x, target_pos_->y);
 }
+// <<<--- FIM DA ALTERAÇÃO ---
 
 void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
 {
@@ -40,7 +61,7 @@ void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameD
     }
     else{
         game_data_received_ = false;
-    RCLCPP_INFO(this->get_logger(), "Não Recebi GameData: %d",game_data_received_);
+    //RCLCPP_INFO(this->get_logger(), "Não Recebi GameData: %d",game_data_received_); // <-- O seu } estava no sítio errado, eu corrigi
 
     }
 }

@@ -2,7 +2,8 @@
 
 #include "behaviortree_cpp/action_node.h"
 #include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
+// #include "geometry_msgs/msg/pose_stamped.hpp"      // <<<--- LINHA ANTIGA
+#include "oxebots_interfaces/msg/robot_goal.hpp" // <<<--- LINHA NOVA
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include <optional>
 
@@ -26,7 +27,8 @@ private:
 
   // Nós ROS e Comunicação
   rclcpp::Node::SharedPtr node_;
-  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+  // rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_; // <<<--- LINHA ANTIGA
+  rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_; // <<<--- LINHA NOVA
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
 
   // Estado do Mundo e do Robô
