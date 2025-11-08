@@ -6,7 +6,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # --- Configuração dos Caminhos (igual ao seu) ---
+
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
     behavior_tree_path = os.path.join(strategy_pkg_share, "test_tree.xml")
 
@@ -16,7 +16,7 @@ def generate_launch_description():
         {'p_gain_linear': 0.5}
     ]
 
-    # --- INÍCIO DA CORREÇÃO ---
+
     # Lançar um "cérebro" de movimento (Jogador) para CADA robô
 
     # Nó de movimento para o Robô 0
@@ -46,15 +46,18 @@ def generate_launch_description():
         parameters=common_movement_params + [{'robot_id': 2}] # Passa o ID 2
     )
 
-    # --- FIM DA CORREÇÃO ---
 
-    # Executa o nó de estratégia (Técnico) - (igual ao seu)
+
+    # Executa o nó de estratégia
     strategy_node = Node(
         package="oxebots_strategy",
         executable="strategy_node",
         name="strategy_node",
         output="screen",
-        parameters=[{"bt_xml_path": behavior_tree_path}],
+        parameters=[
+            {"bt_xml_path": behavior_tree_path},
+            {"is_yellow": False}
+        ],
         cwd=strategy_pkg_share,
     )
 

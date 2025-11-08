@@ -2,8 +2,7 @@
 
 #include "behaviortree_cpp/action_node.h"
 #include "rclcpp/rclcpp.hpp"
-// #include "geometry_msgs/msg/pose_stamped.hpp"      // <<<--- LINHA ANTIGA
-#include "oxebots_interfaces/msg/robot_goal.hpp" // <<<--- LINHA NOVA
+#include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include <optional>
 
@@ -25,16 +24,14 @@ private:
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
   std::optional<oxebots_interfaces::msg::RobotGameData> getRobotData(unsigned int robot_id);
 
-  // Nós ROS e Comunicação
   rclcpp::Node::SharedPtr node_;
-  // rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_; // <<<--- LINHA ANTIGA
-  rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_; // <<<--- LINHA NOVA
+  rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
 
-  // Estado do Mundo e do Robô
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
   unsigned int robot_id_;
   geometry_msgs::msg::Point target_pos_;
+  double target_w_;
 };
 
 } // namespace oxebots_strategy

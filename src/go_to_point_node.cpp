@@ -1,6 +1,14 @@
 #include "oxebots_strategy/go_to_point_node.h"
-// #include "geometry_msgs/msg/pose_stamped.hpp" // <<<--- REMOVIDO (Já está no .h através do RobotGoal.hpp)
 #include <cmath>
+
+namespace {
+double normalizeAngle(double angle)
+{
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+} // namespace
 
 namespace oxebots_strategy
 { 
@@ -8,24 +16,20 @@ namespace oxebots_strategy
 GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
   : BT::StatefulActionNode(name, config), node_(node)
 {
-  
   auto goal_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
-  // <<<--- ALTERAÇÃO NO PUBLISHER ---
   goal_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotGoal>("/robot_goal", goal_qos);
-  // <<<--- FIM DA ALTERAÇÃO ---
   
   game_data_sub_ = node_->create_subscription<oxebots_interfaces::msg::GameData>(
     "/game_data", 10, std::bind(&GoToPointNode::gameDataCallback, this, std::placeholders::_1));
   
-  RCLCPP_INFO(node_->get_logger(), "GoToPointNode configured to publish goals.");
+  RCLCPP_INFO(node_->get_logger(), "GoToPointNode (com mira fixa) configurado.");
 }
 
 BT::PortsList GoToPointNode::providedPorts()
 {
   return { BT::InputPort<unsigned int>("robot_id"),
            BT::InputPort<double>("x"),
-           BT::InputPort<double>("y"),
-           BT::InputPort<double>("w") };
+           BT::InputPort<double>("y") };
 }
 
 void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
@@ -54,28 +58,32 @@ BT::NodeStatus GoToPointNode::onStart()
       return BT::NodeStatus::FAILURE;
   }
 
-  // Armazena o alvo
   target_pos_.x = target_x;
   target_pos_.y = target_y;
 
-  // <<<--- ALTERAÇÃO NA CRIAÇÃO DA MENSAGEM ---
-  // Publica o alvo para o nó de campo potencial
+  double opponent_goal_x, opponent_goal_y;
+  auto blackboard = config().blackboard;
+  if (!blackboard->get("opponent_goal_x", opponent_goal_x) || !blackboard->get("opponent_goal_y", opponent_goal_y)) {
+      RCLCPP_ERROR(node_->get_logger(), "Missing opponent goal from blackboard");
+      return BT::NodeStatus::FAILURE;
+  }
+ 
+  target_w_ = std::atan2(opponent_goal_y - target_pos_.y, opponent_goal_x - target_pos_.x);
+  
   auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
-
-  // 1. Preenche o ID do robô que veio da BT
   goal_msg->robot_id = robot_id_; 
   
-  // 2. Preenche os dados da pose (agora dentro de um sub-campo 'pose')
   goal_msg->pose.header.stamp = node_->now();
   goal_msg->pose.header.frame_id = "odom"; 
   goal_msg->pose.pose.position.x = target_pos_.x;
   goal_msg->pose.pose.position.y = target_pos_.y;
-  goal_msg->pose.pose.orientation.w = 1.0; // Orientação neutra (1.0 é melhor que 0.0)
+  
+  goal_msg->pose.pose.orientation.x = 0.0;
+  goal_msg->pose.pose.orientation.y = 0.0;
+  goal_msg->pose.pose.orientation.z = std::sin(target_w_ * 0.5);
+  goal_msg->pose.pose.orientation.w = std::cos(target_w_ * 0.5);
 
   goal_pub_->publish(std::move(goal_msg));
-  // <<<--- FIM DA ALTERAÇÃO ---
-
-  //RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Published new goal (%.2f, %.2f) for robot %d", target_pos_.x, target_pos_.y, robot_id_);
 
   return BT::NodeStatus::RUNNING;
 }
@@ -87,19 +95,17 @@ BT::NodeStatus GoToPointNode::onRunning()
       RCLCPP_WARN_THROTTLE(
         node_->get_logger(), *node_->get_clock(), 1000, 
         "No data for robot %d, cannot check goal condition. Waiting...", robot_id_);
-      return BT::NodeStatus::RUNNING; // Continua em execução esperando por dados
+      return BT::NodeStatus::RUNNING; 
   }
 
-  // Verifica a condição de sucesso
   double dist_to_goal = std::hypot(robot_data->x - target_pos_.x, robot_data->y - target_pos_.y);
+  bool position_ok = (dist_to_goal < 150.0);
 
-  // *** MELHORIA: Adiciona log para feedback contínuo ***
-  /*RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 1000, // Log a cada 1000ms (1 segundo)
-    "GoToPointNode: Robot %d is %.1fmm from target.", robot_id_, dist_to_goal);*/
+  double current_w = robot_data->orientation; 
+  double angle_error = normalizeAngle(target_w_ - current_w);
+  bool orientation_ok = (std::abs(angle_error) < 0.1);
 
-  if (dist_to_goal < 150.0) { // Limiar de 150mm (15cm)
-      //RCLCPP_INFO(node_->get_logger(), "GoToPointNode: Robot %d reached goal.", robot_id_);
+  if (position_ok && orientation_ok) {
       return BT::NodeStatus::SUCCESS;
   }
 
@@ -108,25 +114,23 @@ BT::NodeStatus GoToPointNode::onRunning()
 
 void GoToPointNode::onHalted()
 {
-  //RCLCPP_INFO(node_->get_logger(), "GoToPointNode halted. Commanding robot %d to stop.", robot_id_);
-  
-  // Publica a posição atual do robô como o novo alvo para fazê-lo parar.
   if (auto robot_data = getRobotData(robot_id_)) {
-    // <<<--- ALTERAÇÃO NA CRIAÇÃO DA MENSAGEM (onHalted) ---
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
-    
-    // 1. Preenche o ID
     goal_msg->robot_id = robot_id_;
     
-    // 2. Preenche a pose (posição atual para parar)
+    double current_w = robot_data->orientation;
+
     goal_msg->pose.header.stamp = node_->now();
     goal_msg->pose.header.frame_id = "odom";
     goal_msg->pose.pose.position.x = robot_data->x;
     goal_msg->pose.pose.position.y = robot_data->y;
-    goal_msg->pose.pose.orientation.w = 1.0;
+    
+    goal_msg->pose.pose.orientation.x = 0.0;
+    goal_msg->pose.pose.orientation.y = 0.0;
+    goal_msg->pose.pose.orientation.z = std::sin(current_w * 0.5);
+    goal_msg->pose.pose.orientation.w = std::cos(current_w * 0.5);
     
     goal_pub_->publish(std::move(goal_msg));
-    // <<<--- FIM DA ALTERAÇÃO ---
   }
 }
 

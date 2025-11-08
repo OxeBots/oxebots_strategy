@@ -1,80 +1,91 @@
-#include "oxebots_strategy/movement_calculation.h"
-// <<<--- ADICIONE ESTA LINHA ---
-// (Você também deve remover o include "geometry_msgs/msg/pose_stamped.hpp" do seu movement_calculation.h)
-#include "oxebots_interfaces/msg/robot_goal.hpp" 
-// <<<--- FIM DA ADIÇÃO ---
+#include "oxebots_strategy/movement_calculation.h" 
+
+
+#include <algorithm> 
+#include <cmath>    
+
+
+
+namespace {
+double normalizeAngle(double angle)
+{
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+} // namespace
+
 
 PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
+    
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
-
-    this->declare_parameter("max_linear_speed", 1.0); // m/s
+    this->declare_parameter("max_linear_speed", 1.0);
     this->declare_parameter("p_gain_linear", 0.5);
-    this->declare_parameter("max_angular_speed", 4.0); // rad/s
-
+    this->declare_parameter("max_angular_speed", 4.0);
+    this->declare_parameter("p_gain_angular", 1.5);
+    this->declare_parameter("angle_tolerance", 0.1);
     auto qosData = 10;
     auto qosPose = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
-
     cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
     game_data_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
         "/game_data", qosData, std::bind(&PotentialFieldNode::game_data_callback, this, std::placeholders::_1));
-    
-    // <<<--- ALTERAÇÃO NO SUBSCRIBER ---
     goal_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotGoal>(
         "/robot_goal", qosPose, std::bind(&PotentialFieldNode::goal_callback, this, std::placeholders::_1));
-    // <<<--- FIM DA ALTERAÇÃO ---
-
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100), std::bind(&PotentialFieldNode::calculate_and_move, this));
-    
-    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial iniciado para o robô %d.", robot_id_);
+    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial (com Controle Angular) iniciado para o robô %d.", robot_id_);
 }
 
-// <<<--- ALTERAÇÃO NO CALLBACK (ASSINATURA E CONTEÚDO) ---
+
 void PotentialFieldNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg) {
     
-    // --- O FILTRO DE ID ---
-    // 'robot_id_' é a variável de membro deste nó (lida do launch file, ex: 1)
-    // 'msg->robot_id' é o ID que veio na mensagem do "Técnico" (BT).
-    // A correção:
-if (msg->robot_id != static_cast<int>(robot_id_)) {
-        //RCLCPP_INFO(this->get_logger(), "Recebi alvo para o robô %d, mas eu sou o %d. Ignorando.", msg->robot_id, robot_id_);
-        return; // A ordem não é para mim, ignoro.
+    if (msg->robot_id != static_cast<int>(robot_id_)) {
+        return; // A ordem não é para mim
     }
 
-    // A ordem É para mim. Processa o alvo.
     std::lock_guard<std::mutex> lock(data_mutex_);
+    
+    // 1. Armazena a posição alvo (como antes)
     target_pos_ = movement::Coordinate{
-        (float)msg->pose.pose.position.x, // <<<--- Note a mudança aqui (pose.pose)
-        (float)msg->pose.pose.position.y  // <<<--- Note a mudança aqui (pose.pose)
+        (float)msg->pose.pose.position.x, 
+        (float)msg->pose.pose.position.y  
     };
-    //RCLCPP_INFO(this->get_logger(), "[DEBUG] Novo alvo recebido para mim (%d): (%.2f, %.2f)", robot_id_, target_pos_->x, target_pos_->y);
+
+    // 2. Armazena a orientação alvo (convertendo de Quaternion para Yaw)
+    // target_w_ = tf2::getYaw(msg->pose.pose.orientation); 
+
+   
+    // Converte Quaternion para ângulo Yaw (rotação em Z)
+    const auto& q = msg->pose.pose.orientation;
+    
+    // fórmula: atan2(2*(w*z + x*y), 1 - 2*(y^2 + z^2))
+    double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+    double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    
+    target_w_ = std::atan2(siny_cosp, cosy_cosp);
+    
 }
-// <<<--- FIM DA ALTERAÇÃO ---
+
 
 void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
 {
+    
     std::lock_guard<std::mutex> lock(data_mutex_);
-    last_game_data_ = msg; // Apenas armazena a última mensagem recebida
-    if(last_game_data_){
-        game_data_received_ = true;
-    }
-    else{
-        game_data_received_ = false;
-    //RCLCPP_INFO(this->get_logger(), "Não Recebi GameData: %d",game_data_received_); // <-- O seu } estava no sítio errado, eu corrigi
-
-    }
+    last_game_data_ = msg; 
+    game_data_received_ = (last_game_data_ != nullptr);
 }
+
 
 void PotentialFieldNode::calculate_and_move()
 {
+   
     std::lock_guard<std::mutex> lock(data_mutex_);
     
-    if (!target_pos_.has_value() || !game_data_received_ || !last_game_data_) {
-        return; // Precisa de alvo e dados do jogo
+    if (!target_pos_.has_value() || !target_w_.has_value() || !game_data_received_ || !last_game_data_) {
+        return; 
     }
 
-    // Encontra o robô e os obstáculos na última mensagem recebida
     std::optional<movement::Coordinate> current_pos_opt;
     std::vector<movement::Coordinate> obstacles;
     for (const auto& ally : last_game_data_->robots.allies) {
@@ -88,55 +99,59 @@ void PotentialFieldNode::calculate_and_move()
         obstacles.push_back(movement::Coordinate{enemy.x, enemy.y, enemy.orientation});
     }
 
-    // Se não encontrou nosso robô, não faz nada
     if (!current_pos_opt) {
-        return;
+        return; 
     }
-    movement::Coordinate current_pos = *current_pos_opt;
-
-    //RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[DEBUG] Using current_pos: (%.2f, %.2f) to target: (%.2f, %.2f)", current_pos.x, current_pos.y, target_pos_->x, target_pos_->y);
+    movement::Coordinate current_pos = *current_pos_opt; 
 
     auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     auto cmd_data = oxebots_interfaces::msg::RobotCmdData();
     cmd_data.id = robot_id_;
 
-    // P-Controller para velocidade linear
-    double distance_to_target = movement::calculateDistance(current_pos, *target_pos_);
-    double p_gain = this->get_parameter("p_gain_linear").as_double();
+    double p_gain_linear = this->get_parameter("p_gain_linear").as_double();
     double max_linear = this->get_parameter("max_linear_speed").as_double();
-    double desired_speed = std::min(max_linear, distance_to_target * p_gain);
+    double p_gain_angular = this->get_parameter("p_gain_angular").as_double();
+    double max_angular = this->get_parameter("max_angular_speed").as_double();
+    double angle_tol = this->get_parameter("angle_tolerance").as_double();
 
-    // Se estiver muito perto, considera que chegou e para.
-    if (distance_to_target < 100.0) { // Limiar de 10cm para parada total
+    // === 1. CÁLCULO DE VELOCIDADE LINEAR (vx, vy) ===
+    double distance_to_target = movement::calculateDistance(current_pos, *target_pos_);
+
+    if (distance_to_target < 100.0) { 
          cmd_data.x_velocity = 0.0;
          cmd_data.y_velocity = 0.0;
-         cmd_data.angular_velocity = 0.0;
-         target_pos_.reset(); // Para de se mover até receber novo alvo
-         //RCLCPP_INFO(this->get_logger(), "Alvo alcançado!");
     } else {
+        double desired_speed = std::min(max_linear, distance_to_target * p_gain_linear);
         movement::PotentialField pf_calculator;
         std::vector<double> force = pf_calculator.calculate(current_pos, *target_pos_, obstacles);
-        
         double force_magnitude = std::hypot(force[0], force[1]);
         
-        // Converte a força em velocidades no referencial do MUNDO, usando a velocidade proporcional
-        double desired_vx = 0.0;
-        double desired_vy = 0.0;
-        if (force_magnitude > 0.01) { // Evita divisão por zero
-            desired_vx = (force[0] / force_magnitude) * desired_speed;
-            desired_vy = (force[1] / force_magnitude) * desired_speed;
+        if (force_magnitude > 0.01) { 
+            cmd_data.x_velocity = (force[0] / force_magnitude) * desired_speed;
+            cmd_data.y_velocity = (force[1] / force_magnitude) * desired_speed;
+        } else {
+             cmd_data.x_velocity = 0.0;
+             cmd_data.y_velocity = 0.0;
         }
-
-        cmd_data.x_velocity = desired_vx;
-        cmd_data.y_velocity = desired_vy;
-
-        // Robô omnidirecional não precisa girar para se mover
-        cmd_data.angular_velocity = 0.0;
     }
 
+    // === 2. CÁLCULO DE VELOCIDADE ANGULAR (vw) ===
+    double current_w = current_pos.orientation; 
+    double target_w = *target_w_;                
+    double angle_error = normalizeAngle(target_w - current_w);
+
+    if (std::abs(angle_error) < angle_tol) {
+        cmd_data.angular_velocity = 0.0; 
+    } else {
+        double desired_vw = angle_error * p_gain_angular;
+        cmd_data.angular_velocity = std::clamp(desired_vw, -max_angular, max_angular);
+    }
+
+    // === 3. PUBLICA O COMANDO COMPLETO ===
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
 }
+
 
 int main(int argc, char *argv[]) {
     rclcpp::init(argc, argv);
