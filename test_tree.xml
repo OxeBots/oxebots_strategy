@@ -1,11 +1,17 @@
 <root main_tree_to_execute = "MainTree" BTCPP_format="4">
   <BehaviorTree ID="MainTree">
-    <Sequence name="Exemplo">
+    <Sequence>
+      <!-- Escreve a saída das portas 'ball_x' e 'ball_y' para as variáveis do blackboard -->
+      <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}"/>
       
-      <GoToPoint robot_id="0" x="1200.0" y="500.0" />
+      <!-- Move o robô para as coordenadas da bola lidas do blackboard -->
+      <GoToPoint robot_id="1" x="{ball_x}" y="{ball_y}"/>
+
+      <!-- Verifica se o robô está perto da bola -->
+      <IsBallClose robot_id="1" distance_threshold="180"/>
       
-      
-      
+      <!-- Chuta a bola se a condição acima for verdadeira -->
+      <KickBall robot_id="1" kick_speed="3.0"/>
     </Sequence>
   </BehaviorTree>
 </root>

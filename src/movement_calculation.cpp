@@ -1,10 +1,7 @@
 #include "oxebots_strategy/movement_calculation.h" 
 
-
 #include <algorithm> 
 #include <cmath>    
-
-
 
 namespace {
 double normalizeAngle(double angle)
@@ -21,10 +18,18 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
     this->declare_parameter("max_linear_speed", 1.0);
-    this->declare_parameter("p_gain_linear", 0.5);
+
+
+    this->declare_parameter("p_gain_linear", 0.5); // Usado para escalar a velocidade final
+
     this->declare_parameter("max_angular_speed", 4.0);
     this->declare_parameter("p_gain_angular", 1.5);
     this->declare_parameter("angle_tolerance", 0.1);
+
+    this->declare_parameter("attractive_gain", 1.0); 
+    this->declare_parameter("repulsive_gain", 2.0);   
+    this->declare_parameter("repulsive_radius", 500.0); 
+
     auto qosData = 10;
     auto qosPose = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
     cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
@@ -41,36 +46,22 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
 void PotentialFieldNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg) {
     
     if (msg->robot_id != static_cast<int>(robot_id_)) {
-        return; // A ordem não é para mim
+        return;
     }
-
     std::lock_guard<std::mutex> lock(data_mutex_);
-    
-    // 1. Armazena a posição alvo (como antes)
     target_pos_ = movement::Coordinate{
         (float)msg->pose.pose.position.x, 
         (float)msg->pose.pose.position.y  
     };
-
-    // 2. Armazena a orientação alvo (convertendo de Quaternion para Yaw)
-    // target_w_ = tf2::getYaw(msg->pose.pose.orientation); 
-
-   
-    // Converte Quaternion para ângulo Yaw (rotação em Z)
     const auto& q = msg->pose.pose.orientation;
-    
-    // fórmula: atan2(2*(w*z + x*y), 1 - 2*(y^2 + z^2))
     double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
     double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
-    
     target_w_ = std::atan2(siny_cosp, cosy_cosp);
-    
 }
 
 
 void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
 {
-    
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_game_data_ = msg; 
     game_data_received_ = (last_game_data_ != nullptr);
@@ -79,7 +70,6 @@ void PotentialFieldNode::game_data_callback(const oxebots_interfaces::msg::GameD
 
 void PotentialFieldNode::calculate_and_move()
 {
-   
     std::lock_guard<std::mutex> lock(data_mutex_);
     
     if (!target_pos_.has_value() || !target_w_.has_value() || !game_data_received_ || !last_game_data_) {
@@ -104,6 +94,26 @@ void PotentialFieldNode::calculate_and_move()
     }
     movement::Coordinate current_pos = *current_pos_opt; 
 
+    
+    movement::Coordinate ball_pos{
+        last_game_data_->ball.x, 
+        last_game_data_->ball.y, 
+        0.0
+    };
+
+    double vec_RT_x = target_pos_->x - current_pos.x;
+    double vec_RT_y = target_pos_->y - current_pos.y;
+    double vec_RB_x = ball_pos.x - current_pos.x;
+    double vec_RB_y = ball_pos.y - current_pos.y;
+    double dot_product = (vec_RT_x * vec_RB_x) + (vec_RT_y * vec_RB_y);
+    double dist_RT_sq = (vec_RT_x * vec_RT_x) + (vec_RT_y * vec_RT_y);
+    double dist_RB_sq = (vec_RB_x * vec_RB_x) + (vec_RB_y * vec_RB_y);
+
+    if (dot_product > 0 && dist_RB_sq < dist_RT_sq && dist_RT_sq > (150.0 * 150.0)) {
+        obstacles.push_back(ball_pos);
+    }
+    
+
     auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     auto cmd_data = oxebots_interfaces::msg::RobotCmdData();
     cmd_data.id = robot_id_;
@@ -114,6 +124,10 @@ void PotentialFieldNode::calculate_and_move()
     double max_angular = this->get_parameter("max_angular_speed").as_double();
     double angle_tol = this->get_parameter("angle_tolerance").as_double();
 
+    double k_att = this->get_parameter("attractive_gain").as_double();
+    double k_rep = this->get_parameter("repulsive_gain").as_double();
+    double d0_rep = this->get_parameter("repulsive_radius").as_double();
+
     // === 1. CÁLCULO DE VELOCIDADE LINEAR (vx, vy) ===
     double distance_to_target = movement::calculateDistance(current_pos, *target_pos_);
 
@@ -123,7 +137,16 @@ void PotentialFieldNode::calculate_and_move()
     } else {
         double desired_speed = std::min(max_linear, distance_to_target * p_gain_linear);
         movement::PotentialField pf_calculator;
-        std::vector<double> force = pf_calculator.calculate(current_pos, *target_pos_, obstacles);
+
+        std::vector<double> force = pf_calculator.calculate(
+            current_pos, 
+            *target_pos_, 
+            obstacles,
+            k_att,
+            k_rep,
+            d0_rep
+        );
+        
         double force_magnitude = std::hypot(force[0], force[1]);
         
         if (force_magnitude > 0.01) { 

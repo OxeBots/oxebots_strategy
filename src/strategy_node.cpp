@@ -2,6 +2,9 @@
 #include "behaviortree_cpp/bt_factory.h"
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/go_to_point_node.h"
+#include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/is_ball_close_condition.h"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 
 int main(int argc, char * argv[])
@@ -19,6 +22,9 @@ int main(int argc, char * argv[])
 
   BT::BehaviorTreeFactory factory;
   factory.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", node);
+  factory.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", node);
+  factory.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", node);
+  factory.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", node);
 
   auto blackboard = BT::Blackboard::create();
   node->declare_parameter<bool>("is_yellow", false);
