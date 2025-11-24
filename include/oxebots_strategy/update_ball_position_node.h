@@ -8,16 +8,16 @@ namespace oxebots_strategy
 {
 
 // Este nó subscreve ao /game_data e escreve a posição da bola no blackboard
-class UpdateBallPositionNode : public BT::SyncActionNode
+class UpdateBallPositionNode : public BT::StatefulActionNode
 {
 public:
   UpdateBallPositionNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node);
 
-  static BT::PortsList providedPorts() {
-    return { BT::OutputPort<double>("ball_x"), BT::OutputPort<double>("ball_y") };
-  }
+  static BT::PortsList providedPorts();
 
-  BT::NodeStatus tick() override;
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
 
 private:
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);

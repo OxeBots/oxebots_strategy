@@ -32,6 +32,7 @@ add_executable(
   src/kick_ball_node.cpp
   src/update_ball_position_node.cpp
   src/is_ball_close_condition.cpp
+  src/goalkeeper_node.cpp
 )
 
 ament_target_dependencies(

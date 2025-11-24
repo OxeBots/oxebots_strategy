@@ -19,6 +19,12 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
     this->get_parameter("robot_id", robot_id_);
     this->declare_parameter("max_linear_speed", 1.0);
 
+    this->declare_parameter("is_yellow", false);
+    this->get_parameter("is_yellow", is_yellow_team_);
+    
+    // Calcular as posições dos gols com base na cor do time
+    my_goal_x_ = is_yellow_team_ ? 2200.0 : -2200.0;
+    opponent_goal_x_ = is_yellow_team_ ? -2200.0 : 2200.0;
 
     this->declare_parameter("p_gain_linear", 0.5); // Usado para escalar a velocidade final
 
@@ -39,7 +45,7 @@ PotentialFieldNode::PotentialFieldNode() : Node("movement_calculation_node") {
         "/robot_goal", qosPose, std::bind(&PotentialFieldNode::goal_callback, this, std::placeholders::_1));
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100), std::bind(&PotentialFieldNode::calculate_and_move, this));
-    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial (com Controle Angular) iniciado para o robô %d.", robot_id_);
+    RCLCPP_INFO(this->get_logger(), "Nó de Campo Potencial (com Controle Angular) iniciado para o robô %d. Time %s, meu gol em X: %.1f", robot_id_, is_yellow_team_ ? "amarelo" : "azul", my_goal_x_);
 }
 
 
@@ -113,6 +119,55 @@ void PotentialFieldNode::calculate_and_move()
         obstacles.push_back(ball_pos);
     }
     
+    // --- Lógica de restrição de área do gol ---
+    
+    // Função auxiliar para ajustar o alvo se ele estiver dentro de uma área restrita
+    auto adjust_target_if_in_area = [&](double area_x_min, double area_x_max, double area_y_min, double area_y_max, const std::string& area_name) {
+        bool is_target_in_area =
+            target_pos_->x >= area_x_min && target_pos_->x <= area_x_max &&
+            target_pos_->y >= area_y_min && target_pos_->y <= area_y_max;
+
+        if (is_target_in_area) {
+            // Ajustar o target_pos_ para a borda mais próxima da área do gol
+            double dist_to_min_x = std::abs(target_pos_->x - area_x_min);
+            double dist_to_max_x = std::abs(target_pos_->x - area_x_max);
+            double dist_to_min_y = std::abs(target_pos_->y - area_y_min);
+            double dist_to_max_y = std::abs(target_pos_->y - area_y_max);
+
+            double min_dist = std::min({dist_to_min_x, dist_to_max_x, dist_to_min_y, dist_to_max_y});
+
+            if (min_dist == dist_to_min_x) {
+                target_pos_->x = area_x_min - 100.0; // Empurra para fora
+            } else if (min_dist == dist_to_max_x) {
+                target_pos_->x = area_x_max + 100.0; // Empurra para fora
+            } else if (min_dist == dist_to_min_y) {
+                target_pos_->y = area_y_min - 100.0; // Empurra para fora
+            } else {
+                target_pos_->y = area_y_max + 100.0; // Empurra para fora
+            }
+            RCLCPP_WARN(this->get_logger(), "Robô %d: Alvo ajustado para fora da %s.", robot_id_, area_name.c_str());
+        }
+    };
+
+    // Definir áreas
+    double goal_area_y_min = -675.0; // 1350mm / 2
+    double goal_area_y_max = 675.0;
+
+    // Área Aliada
+    double my_goal_area_x_min = is_yellow_team_ ? my_goal_x_ - 500.0 : my_goal_x_;
+    double my_goal_area_x_max = is_yellow_team_ ? my_goal_x_ : my_goal_x_ + 500.0;
+
+    // Área Inimiga
+    double opponent_goal_area_x_min = is_yellow_team_ ? opponent_goal_x_ : opponent_goal_x_ - 500.0;
+    double opponent_goal_area_x_max = is_yellow_team_ ? opponent_goal_x_ + 500.0 : opponent_goal_x_;
+
+    // Restrição 1: Nenhum robô pode entrar na área inimiga
+    adjust_target_if_in_area(opponent_goal_area_x_min, opponent_goal_area_x_max, goal_area_y_min, goal_area_y_max, "área inimiga");
+
+    // Restrição 2: Apenas o goleiro (ID 0) pode entrar na área aliada
+    if (robot_id_ != 0) {
+        adjust_target_if_in_area(my_goal_area_x_min, my_goal_area_x_max, goal_area_y_min, goal_area_y_max, "área aliada");
+    }
 
     auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     auto cmd_data = oxebots_interfaces::msg::RobotCmdData();

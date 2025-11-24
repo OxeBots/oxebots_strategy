@@ -1,17 +1,27 @@
-<root main_tree_to_execute = "MainTree" BTCPP_format="4">
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
   <BehaviorTree ID="MainTree">
-    <Sequence>
-      <!-- Escreve a saída das portas 'ball_x' e 'ball_y' para as variáveis do blackboard -->
-      <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}"/>
-      
-      <!-- Move o robô para as coordenadas da bola lidas do blackboard -->
-      <GoToPoint robot_id="1" x="{ball_x}" y="{ball_y}"/>
+    <Parallel>
+      <Goalkeeper robot_id="0" />
 
-      <!-- Verifica se o robô está perto da bola -->
-      <IsBallClose robot_id="1" distance_threshold="180"/>
+      <KeepRunningUntilFailure name="Always_Run_Attacker_Strategy">
       
-      <!-- Chuta a bola se a condição acima for verdadeira -->
-      <KickBall robot_id="1" kick_speed="3.0"/>
-    </Sequence>
+        <Fallback name="Attacker_1_Strategy">
+        
+          <Sequence name="See_Ball_and_Attack">
+            <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}"/>
+            <Fallback name="Attack_or_Follow">
+              <Sequence name="Check_and_Kick">
+                <IsBallClose robot_id="1" distance_threshold="180" />
+                <KickBall robot_id="1"  kick_speed="3.0" />
+              </Sequence>
+              <GoToPoint name="Follow_Ball" robot_id="1" x="{ball_x}" y="{ball_y}" />
+            </Fallback>
+          </Sequence>
+          
+          <GoToPoint name="Go_to_Center_to_Search" robot_id="1" x="0.0" y="0.0" />
+          
+        </Fallback>
+        
+      </KeepRunningUntilFailure> </Parallel>
   </BehaviorTree>
 </root>

@@ -120,4 +120,9 @@ private:
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     unsigned int robot_id_ = 0; 
     bool game_data_received_ = false;
+
+    // Variáveis para a lógica de restrição de área
+    bool is_yellow_team_;
+    double my_goal_x_;
+    double opponent_goal_x_;
 };

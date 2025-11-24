@@ -5,7 +5,9 @@
 #include "oxebots_strategy/kick_ball_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/is_ball_close_condition.h"
+#include "oxebots_strategy/goalkeeper_node.h"
 #include "ament_index_cpp/get_package_share_directory.hpp"
+#include <thread>
 
 int main(int argc, char * argv[])
 {
@@ -25,14 +27,27 @@ int main(int argc, char * argv[])
   factory.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", node);
   factory.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", node);
   factory.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", node);
+  factory.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", node);
 
   auto blackboard = BT::Blackboard::create();
   node->declare_parameter<bool>("is_yellow", false);
   bool is_yellow = node->get_parameter("is_yellow").as_bool();
+  
+  double my_goal_x = is_yellow ? 2200.0 : -2200.0;
   double opponent_goal_x = is_yellow ? -2200.0 : 2200.0;
+  
+  blackboard->set("my_goal_x", my_goal_x);
   blackboard->set("opponent_goal_x", opponent_goal_x);
   blackboard->set("opponent_goal_y", 0.0);
-  RCLCPP_INFO(node->get_logger(), "Time %s, gol do oponente em: (%.1f, 0.0)", is_yellow ? "amarelo" : "azul", opponent_goal_x);
+  blackboard->set("is_yellow", is_yellow);
+  blackboard->set("robot_id", 0);
+
+  RCLCPP_INFO(node->get_logger(), "Time %s, meu gol em X: %.1f, gol do oponente em: (%.1f, 0.0)", is_yellow ? "amarelo" : "azul", my_goal_x, opponent_goal_x);
+
+  // Executor ROS em uma thread separada
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread executor_thread([&executor]() { executor.spin(); });
 
   try
   {
@@ -42,7 +57,6 @@ int main(int argc, char * argv[])
     while (rclcpp::ok())
     {
       tree.tickOnce();
-      rclcpp::spin_some(node);
       rate.sleep();
     }
   }
@@ -51,6 +65,8 @@ int main(int argc, char * argv[])
     RCLCPP_ERROR(node->get_logger(), "ERRO DE EXECUÇÃO DA ÁRVORE: %s", e.what());
   }
 
+  executor.cancel();
+  executor_thread.join();
   rclcpp::shutdown();
   return 0;
 }
