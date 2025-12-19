@@ -252,10 +252,16 @@ void DStarLitePlannerNode::follow_path_point_P(const geometry_msgs::msg::PoseSta
     double dy = next.pose.position.y - current_pos_world_.y;
     double dist = std::hypot(dx, dy);
     
+    d.x_velocity = 0.0;
+    d.y_velocity = 0.0;
+    
     if (dist > 0.02) {
         d.x_velocity = (dx/dist) * std::min(1.0, dist * 0.8);
         d.y_velocity = (dy/dist) * std::min(1.0, dist * 0.8);
     }
+
+    RCLCPP_INFO(this->get_logger(), "Follow - Dist: %.2f, Vel_X: %.2f, Vel_Y: %.2f", 
+                dist, d.x_velocity, d.y_velocity);
 
     if (target_goal_msg_.has_value()) {
         const auto& q = target_goal_msg_.value()->pose.pose.orientation;
@@ -278,17 +284,34 @@ void DStarLitePlannerNode::plan_and_move() {
     planning::GridCell s = planner_->worldToGrid(current_pos_world_.x, current_pos_world_.y, origin.x, origin.y);
     planning::GridCell g = planner_->worldToGrid(target.x, target.y, origin.x, origin.y);
     
-    if (!planner_->getGoal().has_value() || planner_->getGoal().value() != g) planner_->initialize(s, g);
+    RCLCPP_INFO(this->get_logger(), "Planning from (%d, %d) to (%d, %d)", s.x, s.y, g.x, g.y);
+    
+    if (!planner_->getGoal().has_value() || planner_->getGoal().value() != g) {
+        RCLCPP_INFO(this->get_logger(), "Initializing planner.");
+        planner_->initialize(s, g);
+    }
     
     planner_->setStart(s);
     planner_->checkAndModifyCosts(s);
     
-    if (planner_->computePath()) {
+    bool path_found = planner_->computePath();
+    RCLCPP_INFO(this->get_logger(), "Compute path result: %s", path_found ? "true" : "false");
+
+    if (path_found) {
         auto path = planner_->reconstructPath(s, origin.x, origin.y);
         path.header.frame_id = last_map_data_->header.frame_id;
         path.header.stamp = this->now();
         path_pub_->publish(path);
-        if (path.poses.size() > 1) follow_path_point_P(path.poses[1]);
+        
+        RCLCPP_INFO(this->get_logger(), "Path reconstructed with %zu poses.", path.poses.size());
+
+        if (path.poses.size() > 1) {
+            follow_path_point_P(path.poses[1]);
+        } else {
+            RCLCPP_WARN(this->get_logger(), "Path too short, not moving.");
+        }
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Path not found!");
     }
 }
 
