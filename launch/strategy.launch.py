@@ -33,8 +33,8 @@ def generate_launch_description():
     # Nó de movimento para o Robô 0
     movement_node_0 = Node(
         package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="movement_calculation_node_0",  # Nome único
+        executable="d_star_lite_planner_node",
+        name="d_star_lite_planner_node_0",  # Nome único
         output="screen",
         parameters=common_movement_params + [{'robot_id': 0}] # Passa o ID 0
     )
@@ -42,8 +42,8 @@ def generate_launch_description():
     # Nó de movimento para o Robô 1
     movement_node_1 = Node(
         package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="movement_calculation_node_1",  # Nome único
+        executable="d_star_lite_planner_node",
+        name="d_star_lite_planner_node_1",  # Nome único
         output="screen",
         parameters=common_movement_params + [{'robot_id': 1}] # Passa o ID 1
     )
@@ -51,8 +51,8 @@ def generate_launch_description():
     # Nó de movimento para o Robô 2
     movement_node_2 = Node(
         package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="movement_calculation_node_2",  # Nome único
+        executable="d_star_lite_planner_node",
+        name="d_star_lite_planner_node_2",  # Nome único
         output="screen",
         parameters=common_movement_params + [{'robot_id': 2}] # Passa o ID 2
     )

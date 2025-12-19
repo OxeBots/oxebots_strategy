@@ -69,9 +69,28 @@ target_include_directories(movement_calculation_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+add_executable(
+  d_star_lite_planner_node
+  src/d_star_lite_planner_node.cpp
+)
+
+ament_target_dependencies(
+  d_star_lite_planner_node
+  rclcpp
+  oxebots_interfaces
+  nav_msgs
+  geometry_msgs
+)
+
+target_include_directories(d_star_lite_planner_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
 install(TARGETS
   strategy_node
   movement_calculation_node
+  d_star_lite_planner_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

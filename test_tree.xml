@@ -1,27 +1,7 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
   <BehaviorTree ID="MainTree">
-    <Parallel>
-      <Goalkeeper robot_id="0" />
-
-      <KeepRunningUntilFailure name="Always_Run_Attacker_Strategy">
-      
-        <Fallback name="Attacker_1_Strategy">
-        
-          <Sequence name="See_Ball_and_Attack">
-            <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}"/>
-            <Fallback name="Attack_or_Follow">
-              <Sequence name="Check_and_Kick">
-                <IsBallClose robot_id="1" distance_threshold="180" />
-                <KickBall robot_id="1"  kick_speed="3.0" />
-              </Sequence>
-              <GoToPoint name="Follow_Ball" robot_id="1" x="{ball_x}" y="{ball_y}" />
-            </Fallback>
-          </Sequence>
-          
-          <GoToPoint name="Go_to_Center_to_Search" robot_id="1" x="0.0" y="0.0" />
-          
-        </Fallback>
-        
-      </KeepRunningUntilFailure> </Parallel>
+    <Sequence>
+      <GoToPoint name="Go_to_Center_for_Test" robot_id="0" x="0.0" y="0.0" />
+    </Sequence>
   </BehaviorTree>
 </root>
