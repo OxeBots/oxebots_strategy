@@ -15,11 +15,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-# A LINHA 'find_package(tf2_geometry_msgs REQUIRED)' FOI REMOVIDA
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # ... (restante da seção de testes) ...
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
@@ -61,7 +59,6 @@ ament_target_dependencies(
   nav_msgs
   sensor_msgs
   tf2_ros
-  # A LINHA 'tf2_geometry_msgs' FOI REMOVIDA
 )
 
 target_include_directories(movement_calculation_node PUBLIC
@@ -70,19 +67,19 @@ target_include_directories(movement_calculation_node PUBLIC
 )
 
 add_executable(
-  d_star_lite_planner_node
-  src/d_star_lite_planner_node.cpp
+  d_star_planner_node
+  src/d_star_planner.cpp
 )
 
 ament_target_dependencies(
-  d_star_lite_planner_node
+  d_star_planner_node
   rclcpp
   oxebots_interfaces
   nav_msgs
   geometry_msgs
 )
 
-target_include_directories(d_star_lite_planner_node PUBLIC
+target_include_directories(d_star_planner_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
@@ -90,11 +87,10 @@ target_include_directories(d_star_lite_planner_node PUBLIC
 install(TARGETS
   strategy_node
   movement_calculation_node
-  d_star_lite_planner_node
+  d_star_planner_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# ... (resto do arquivo install) ...
 install(
   DIRECTORY include/
   DESTINATION include
