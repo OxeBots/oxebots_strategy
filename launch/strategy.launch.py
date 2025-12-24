@@ -2,9 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
 from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -27,37 +27,30 @@ def generate_launch_description():
         {'is_yellow': is_yellow}, # Passa o parâmetro is_yellow
     ]
 
-
-    # Lançar um "cérebro" de movimento (Jogador) para CADA robô
-
-    # Nó de movimento para o Robô 0
-    movement_node_0 = Node(
+    # Planejadores de rotas para cada robô
+    path_planner_node_0 = Node(
         package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_0",  # Nome único
+        executable="d_star_planner_node",
+        name="d_star_planner_node_0",
         output="screen",
         parameters=common_movement_params + [{'robot_id': 0}] # Passa o ID 0
     )
 
-    # Nó de movimento para o Robô 1
-    movement_node_1 = Node(
+    path_planner_node_1 = Node(
         package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_1",  # Nome único
+        executable="d_star_planner_node",
+        name="d_star_planner_node_1",
         output="screen",
         parameters=common_movement_params + [{'robot_id': 1}] # Passa o ID 1
     )
 
-    # Nó de movimento para o Robô 2
-    movement_node_2 = Node(
+    path_planner_node_2 = Node(
         package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_2",  # Nome único
+        executable="d_star_planner_node",
+        name="d_star_planner_node_2",
         output="screen",
         parameters=common_movement_params + [{'robot_id': 2}] # Passa o ID 2
     )
-
-
 
     # Executa o nó de estratégia
     strategy_node = Node(
@@ -75,8 +68,8 @@ def generate_launch_description():
     # Retorna a lista de todos os nós que devem ser lançados
     return LaunchDescription([
         declare_is_yellow_arg,
-        movement_node_0,
-        movement_node_1,
-        movement_node_2,
+        path_planner_node_0,
+        path_planner_node_1,
+        path_planner_node_2,
         strategy_node
     ])
