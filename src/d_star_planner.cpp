@@ -122,9 +122,7 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
 {
     // Critical: Always treat Start/Goal as traversable to prevent getting stuck immediately if the
     // robot is slightly inside an inflation zone.
-    if (start_cell_.has_value() && u == *start_cell_)
-        return 1.0;
-    if (goal_cell_.has_value() && u == *goal_cell_)
+    if (start_cell_.has_value() && u == *start_cell_ || goal_cell_.has_value() && u == *goal_cell_)
         return 1.0;
     if (!current_grid_)
         return std::numeric_limits<double>::infinity();

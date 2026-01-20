@@ -29,7 +29,6 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
-#include "oxebots_interfaces/msg/planner_metrics.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -308,7 +307,6 @@ class DStarPlannerNode : public rclcpp::Node
 
     // ROS Handles
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-    rclcpp::Publisher<oxebots_interfaces::msg::PlannerMetrics>::SharedPtr metrics_pub_;
     rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
