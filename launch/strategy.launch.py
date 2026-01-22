@@ -28,37 +28,6 @@ def generate_launch_description():
     ]
 
 
-    # Lançar um "cérebro" de movimento (Jogador) para CADA robô
-
-    # Nó de movimento para o Robô 0
-    movement_node_0 = Node(
-        package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_0",  # Nome único
-        output="screen",
-        parameters=common_movement_params + [{'robot_id': 0}] # Passa o ID 0
-    )
-
-    # Nó de movimento para o Robô 1
-    movement_node_1 = Node(
-        package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_1",  # Nome único
-        output="screen",
-        parameters=common_movement_params + [{'robot_id': 1}] # Passa o ID 1
-    )
-
-    # Nó de movimento para o Robô 2
-    movement_node_2 = Node(
-        package="oxebots_strategy",
-        executable="d_star_lite_planner_node",
-        name="d_star_lite_planner_node_2",  # Nome único
-        output="screen",
-        parameters=common_movement_params + [{'robot_id': 2}] # Passa o ID 2
-    )
-
-
-
     # Executa o nó de estratégia
     strategy_node = Node(
         package="oxebots_strategy",
@@ -75,8 +44,5 @@ def generate_launch_description():
     # Retorna a lista de todos os nós que devem ser lançados
     return LaunchDescription([
         declare_is_yellow_arg,
-        movement_node_0,
-        movement_node_1,
-        movement_node_2,
         strategy_node
     ])

@@ -3,9 +3,10 @@
 
 #include "behaviortree_cpp/behavior_tree.h"
 #include "rclcpp/rclcpp.hpp"
-#include "oxebots_interfaces/msg/robot_goal.hpp"
-#include "oxebots_interfaces/msg/ball_position.hpp"
-#include "oxebots_interfaces/msg/game_data.hpp" // Para obter a posição do próprio robô, se necessário
+#include "oxebots_interfaces/msg/robot_cmd.hpp"
+#include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_strategy/rrt_star_planner.hpp"
+#include <vector>
 
 namespace oxebots_strategy
 {
@@ -22,22 +23,24 @@ public:
   void onHalted() override;
 
 private:
-  void ball_callback(const oxebots_interfaces::msg::BallPosition::SharedPtr msg);
   void game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
+  Point find_lookahead_point(const std::vector<Point>& path, const Point& robot_pos, double lookahead_distance);
 
   rclcpp::Node::SharedPtr node_;
-  rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
-  rclcpp::Subscription<oxebots_interfaces::msg::BallPosition>::SharedPtr ball_subscription_;
+  rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr cmd_pub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_subscription_;
   
   int robot_id_;
   double my_goal_x_;
-  bool is_yellow_team_; // Para saber a cor do time
+  bool is_yellow_team_;
   
-  oxebots_interfaces::msg::BallPosition last_ball_pos_;
-  oxebots_interfaces::msg::RobotGameData current_robot_data_; // Para a posição do próprio goleiro
-  bool ball_pos_updated_;
+  oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
   bool robot_data_updated_;
+  
+  std::vector<Point> current_path_;
+  Point lookahead_point_;
+  Point target_pos_;
+  double target_w_;
 };
 
 }  // namespace oxebots_strategy

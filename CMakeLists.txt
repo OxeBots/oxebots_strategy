@@ -15,11 +15,11 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-# A LINHA 'find_package(tf2_geometry_msgs REQUIRED)' FOI REMOVIDA
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # ... (restante da seção de testes) ...
+  
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
@@ -33,6 +33,7 @@ add_executable(
   src/update_ball_position_node.cpp
   src/is_ball_close_condition.cpp
   src/goalkeeper_node.cpp
+  src/rrt_star_planner.cpp
 )
 
 ament_target_dependencies(
@@ -61,7 +62,7 @@ ament_target_dependencies(
   nav_msgs
   sensor_msgs
   tf2_ros
-  # A LINHA 'tf2_geometry_msgs' FOI REMOVIDA
+  
 )
 
 target_include_directories(movement_calculation_node PUBLIC
@@ -94,7 +95,7 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# ... (resto do arquivo install) ...
+
 install(
   DIRECTORY include/
   DESTINATION include
