@@ -8,32 +8,28 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
     behavior_tree_path = os.path.join(strategy_pkg_share, "test_tree.xml")
 
-    # Argumento para a cor do time (herdado do ssl.launch.py ou definido aqui)
     declare_is_yellow_arg = DeclareLaunchArgument(
-        'is_yellow',
-        default_value='false',
-        description='Whether the team is yellow (true) or blue (false)'
+        "is_yellow",
+        default_value="false",
+        description="Whether the team is yellow (true) or blue (false)",
     )
-    is_yellow = LaunchConfiguration('is_yellow')
+    is_yellow = LaunchConfiguration("is_yellow")
 
-    # --- Parâmetros comuns para todos os nós de movimento ---
     common_movement_params = [
-        {'max_linear_speed': 0.5},
-        {'p_gain_linear': 0.5},
-        {'is_yellow': is_yellow}, # Passa o parâmetro is_yellow
+        {"max_linear_speed": 0.5},
+        {"p_gain_linear": 0.5},
+        {"is_yellow": is_yellow},
     ]
 
-    # Planejadores de rotas para cada robô
     path_planner_node_0 = Node(
         package="oxebots_strategy",
         executable="d_star_planner_node",
         name="d_star_planner_node_0",
         output="screen",
-        parameters=common_movement_params + [{'robot_id': 0}] # Passa o ID 0
+        parameters=common_movement_params + [{"robot_id": 0}],
     )
 
     path_planner_node_1 = Node(
@@ -41,7 +37,7 @@ def generate_launch_description():
         executable="d_star_planner_node",
         name="d_star_planner_node_1",
         output="screen",
-        parameters=common_movement_params + [{'robot_id': 1}] # Passa o ID 1
+        parameters=common_movement_params + [{"robot_id": 1}],
     )
 
     path_planner_node_2 = Node(
@@ -49,10 +45,9 @@ def generate_launch_description():
         executable="d_star_planner_node",
         name="d_star_planner_node_2",
         output="screen",
-        parameters=common_movement_params + [{'robot_id': 2}] # Passa o ID 2
+        parameters=common_movement_params + [{"robot_id": 2}],
     )
 
-    # Executa o nó de estratégia
     strategy_node = Node(
         package="oxebots_strategy",
         executable="strategy_node",
@@ -60,16 +55,17 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {"bt_xml_path": behavior_tree_path},
-            {"is_yellow": is_yellow} # Passa o parâmetro is_yellow para o strategy_node também
+            {"is_yellow": is_yellow},
         ],
         cwd=strategy_pkg_share,
     )
 
-    # Retorna a lista de todos os nós que devem ser lançados
-    return LaunchDescription([
-        declare_is_yellow_arg,
-        path_planner_node_0,
-        path_planner_node_1,
-        path_planner_node_2,
-        strategy_node
-    ])
+    return LaunchDescription(
+        [
+            declare_is_yellow_arg,
+            path_planner_node_0,
+            path_planner_node_1,
+            path_planner_node_2,
+            strategy_node,
+        ]
+    )
