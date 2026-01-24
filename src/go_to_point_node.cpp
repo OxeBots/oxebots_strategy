@@ -1,78 +1,98 @@
 #include "oxebots_strategy/go_to_point_node.h"
+#include <cmath>
 
-#include "oxebots_interfaces/msg/robot_cmd.hpp"
-#include "oxebots_interfaces/msg/robot_cmd_data.hpp"
+namespace {
+double normalizeAngle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+}
 
+namespace oxebots_strategy {
 
-namespace oxebots_strategy
-{
-
-// Construtor: Cria o publisher quando o nó é instanciado
 GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
-  : BT::StatefulActionNode(name, config), node_(node)
-{
-  publisher_ = node_->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
-  RCLCPP_INFO(node_->get_logger(), "!!! Construtor do GoToPointNode executado. Publisher criado. !!!");
+  : BT::StatefulActionNode(name, config), node_(node) {
+    // QoS Transient Local para garantir que o Planner receba o último Goal enviado
+    auto goal_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
+    goal_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotGoal>("/robot_goal", goal_qos);
+    
+    game_data_sub_ = node_->create_subscription<oxebots_interfaces::msg::GameData>(
+        "/game_data", 10, std::bind(&GoToPointNode::gameDataCallback, this, std::placeholders::_1));
+    
+    RCLCPP_INFO(node_->get_logger(), "GoToPointNode pronto. Convertendo MM para Metros.");
 }
 
-// providedPorts: Define as entradas que o nó aceita no XML da árvore de comportamento
-BT::PortsList GoToPointNode::providedPorts()
-{
-  return { BT::InputPort<unsigned int>("robot_id"),
-           BT::InputPort<double>("x"),
-           BT::InputPort<double>("y"),
-           BT::InputPort<double>("w") };
+BT::PortsList GoToPointNode::providedPorts() {
+    return { BT::InputPort<unsigned int>("robot_id"),
+             BT::InputPort<double>("x"),
+             BT::InputPort<double>("y") };
 }
 
-// onStart: Chamado apenas na primeira vez que o nó é executado
-BT::NodeStatus GoToPointNode::onStart()
-{
-  // Agora, este método apenas registra que a ação começou.
-  RCLCPP_INFO(node_->get_logger(), "Iniciando 'AndarParaFrente'");
-  return BT::NodeStatus::RUNNING;
+void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
+    last_game_data_ = msg;
 }
 
-// onRunning: Chamado repetidamente enquanto a ação estiver ativa
-BT::NodeStatus GoToPointNode::onRunning()
-{
-  // A lógica de criar e publicar a mensagem foi movida para cá.
-  // Isso garante que o comando seja enviado continuamente.
-  unsigned int robot_id = 0;
-  getInput<unsigned int>("robot_id", robot_id);
-
-  auto msg = oxebots_interfaces::msg::RobotCmd();
-  auto robot_data = oxebots_interfaces::msg::RobotCmdData();
-  
-  robot_data.id = robot_id;
-  
-  float forward_speed = -5000000000.0;
-  robot_data.x_velocity = forward_speed;  // Velocidade para frente
-  robot_data.y_velocity = 0.0;            // Sem movimento lateral
-  robot_data.angular_velocity = 0.0;      // Sem rotação
-
-  msg.robots.push_back(robot_data);
-  publisher_->publish(msg);
-  
-  // Continua retornando RUNNING para que a árvore continue executando este nó
-  return BT::NodeStatus::RUNNING;
+std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotData(unsigned int robot_id) {
+    if (!last_game_data_) return std::nullopt;
+    for (const auto& ally : last_game_data_->robots.allies) {
+        if (ally.id == robot_id) return ally;
+    }
+    return std::nullopt;
 }
 
-// onHalted: Chamado se a ação for interrompida
-void GoToPointNode::onHalted()
-{
-  // Medida de segurança: parar o robô se a ação for cancelada
-  RCLCPP_WARN(node_->get_logger(), "Ação 'AndarParaFrente' interrompida. Parando o robô.");
-  
-  auto msg = oxebots_interfaces::msg::RobotCmd();
-  auto robot_data = oxebots_interfaces::msg::RobotCmdData();
+BT::NodeStatus GoToPointNode::onStart() {
+    if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
 
-  robot_data.id = 0; // Você pode querer usar o robot_id obtido anteriormente
-  robot_data.x_velocity = 0.0;
-  robot_data.y_velocity = 0.0;
-  robot_data.angular_velocity = 0.0;
-  
-  msg.robots.push_back(robot_data);
-  publisher_->publish(msg);
+    double tx, ty;
+    if (!getInput<double>("x", tx) || !getInput<double>("y", ty)) return BT::NodeStatus::FAILURE;
+
+    target_pos_.x = tx; // Mantém em mm para cálculo interno
+    target_pos_.y = ty;
+
+    double op_x, op_y;
+    auto blackboard = config().blackboard;
+    if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+        target_w_ = std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
+    } else {
+        target_w_ = 0.0;
+    }
+
+    // PUBLICAÇÃO PARA O PLANNER (CONVERSÃO MM -> METROS)
+    auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
+    goal_msg->robot_id = robot_id_;
+    goal_msg->pose.header.stamp = node_->now();
+    goal_msg->pose.header.frame_id = "map"; 
+    
+    // AQUI ESTÁ A CHAVE: Planner recebe em metros
+    goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
+    goal_msg->pose.pose.position.y = target_pos_.y / 1000.0;
+    
+    goal_msg->pose.pose.orientation.z = std::sin(target_w_ * 0.5);
+    goal_msg->pose.pose.orientation.w = std::cos(target_w_ * 0.5);
+
+    goal_pub_->publish(std::move(goal_msg));
+    return BT::NodeStatus::RUNNING;
 }
 
-}  // namespace oxebots_strategy
+BT::NodeStatus GoToPointNode::onRunning() {
+    auto robot = getRobotData(robot_id_);
+    if (!robot) return BT::NodeStatus::RUNNING;
+
+    // Se robot->x vem da visão em mm, comparamos com target em mm
+    double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);
+    
+    // 150mm de tolerância
+    bool pos_ok = (dist < 150.0);
+    bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.15);
+
+    if (pos_ok && ori_ok) {
+        RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo.", robot_id_);
+        return BT::NodeStatus::SUCCESS;
+    }
+    return BT::NodeStatus::RUNNING;
+}
+
+void GoToPointNode::onHalted() {}
+
+} // namespace oxebots_strategy
