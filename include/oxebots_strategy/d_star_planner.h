@@ -307,6 +307,7 @@ class DStarPlannerNode : public rclcpp::Node
 
     // ROS Handles
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr rviz_path_pub_;
     rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;

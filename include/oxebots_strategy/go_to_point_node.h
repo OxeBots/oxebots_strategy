@@ -21,6 +21,7 @@ public:
   void onHalted() override;
 
 private:
+  void publishGoal();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
   std::optional<oxebots_interfaces::msg::RobotGameData> getRobotData(unsigned int robot_id);
 

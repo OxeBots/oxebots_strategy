@@ -48,6 +48,30 @@ def generate_launch_description():
         parameters=common_movement_params + [{"robot_id": 2}],
     )
 
+    path_follower_node_0 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_0",
+        output="screen",
+        parameters=common_movement_params + [{"robot_id": 0}],
+    )
+
+    path_follower_node_1 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_1",
+        output="screen",
+        parameters=common_movement_params + [{"robot_id": 1}],
+    )
+
+    path_follower_node_2 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_2",
+        output="screen",
+        parameters=common_movement_params + [{"robot_id": 2}],
+    )
+
     strategy_node = Node(
         package="oxebots_strategy",
         executable="strategy_node",
@@ -66,6 +90,9 @@ def generate_launch_description():
             path_planner_node_0,
             path_planner_node_1,
             path_planner_node_2,
+            path_follower_node_0,
+            path_follower_node_1,
+            path_follower_node_2,
             strategy_node,
         ]
     )

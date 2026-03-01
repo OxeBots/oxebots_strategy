@@ -41,15 +41,7 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
     return std::nullopt;
 }
 
-BT::NodeStatus GoToPointNode::onStart() {
-    if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
-
-    double tx, ty;
-    if (!getInput<double>("x", tx) || !getInput<double>("y", ty)) return BT::NodeStatus::FAILURE;
-
-    target_pos_.x = tx; // Mantém em mm para cálculo interno
-    target_pos_.y = ty;
-
+void GoToPointNode::publishGoal() {
     double op_x, op_y;
     auto blackboard = config().blackboard;
     if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
@@ -58,13 +50,11 @@ BT::NodeStatus GoToPointNode::onStart() {
         target_w_ = 0.0;
     }
 
-    // PUBLICAÇÃO PARA O PLANNER (CONVERSÃO MM -> METROS)
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
     goal_msg->pose.header.stamp = node_->now();
     goal_msg->pose.header.frame_id = "map"; 
     
-    // AQUI ESTÁ A CHAVE: Planner recebe em metros
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
     goal_msg->pose.pose.position.y = target_pos_.y / 1000.0;
     
@@ -72,14 +62,36 @@ BT::NodeStatus GoToPointNode::onStart() {
     goal_msg->pose.pose.orientation.w = std::cos(target_w_ * 0.5);
 
     goal_pub_->publish(std::move(goal_msg));
+}
+
+BT::NodeStatus GoToPointNode::onStart() {
+    if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
+
+    double tx, ty;
+    if (!getInput<double>("x", tx) || !getInput<double>("y", ty)) return BT::NodeStatus::FAILURE;
+
+    target_pos_.x = tx; 
+    target_pos_.y = ty;
+
+    publishGoal();
     return BT::NodeStatus::RUNNING;
 }
 
 BT::NodeStatus GoToPointNode::onRunning() {
+    // Verificar se o alvo mudou no Blackboard
+    double tx, ty;
+    if (getInput<double>("x", tx) && getInput<double>("y", ty)) {
+        if (std::abs(tx - target_pos_.x) > 10.0 || std::abs(ty - target_pos_.y) > 10.0) {
+            target_pos_.x = tx;
+            target_pos_.y = ty;
+            publishGoal();
+            RCLCPP_INFO(node_->get_logger(), "Alvo do robô %d atualizado para (%.1f, %.1f)", robot_id_, tx, ty);
+        }
+    }
+
     auto robot = getRobotData(robot_id_);
     if (!robot) return BT::NodeStatus::RUNNING;
 
-    // Se robot->x vem da visão em mm, comparamos com target em mm
     double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);
     
     // 150mm de tolerância

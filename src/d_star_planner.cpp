@@ -453,15 +453,21 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
 
     planner_ = std::make_unique<planning::DStarPlanner>(0.05, config, this->get_logger());
 
-    path_pub_ = create_publisher<nav_msgs::msg::Path>("/dstar_path", 10);
+    std::string path_topic = "/robot_" + std::to_string(robot_id_) + "/path";
+    path_pub_ = create_publisher<nav_msgs::msg::Path>(path_topic, 10);
+    
+    // Para compatibilidade com o RViz atual (robô 0)
+    if (robot_id_ == 0) {
+        rviz_path_pub_ = create_publisher<nav_msgs::msg::Path>("/dstar_path", 10);
+    }
 
     // Subscribers with Transient Local QoS for map/goals (latched topics)
     auto qos = rclcpp::QoS(1).transient_local().reliable();
     map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-      "/map", qos, std::bind(&DStarPlannerNode::map_callback, this, std::placeholders::_1));
+      "map", qos, std::bind(&DStarPlannerNode::map_callback, this, std::placeholders::_1));
 
     game_data_sub_ = create_subscription<oxebots_interfaces::msg::GameData>(
-      "/game_data", 10, std::bind(&DStarPlannerNode::game_data_callback, this, std::placeholders::_1));
+      "game_data", 10, std::bind(&DStarPlannerNode::game_data_callback, this, std::placeholders::_1));
 
     goal_sub_ = create_subscription<oxebots_interfaces::msg::RobotGoal>(
       "/robot_goal", qos, std::bind(&DStarPlannerNode::goal_callback, this, std::placeholders::_1));
@@ -511,8 +517,15 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
 void DStarPlannerNode::plan_and_publish()
 {
     std::lock_guard<std::mutex> lock(node_mutex_);
-    if (!planner_ || !target_goal_msg_ || !last_map_data_)
+    if (!planner_ || !target_goal_msg_ || !last_map_data_) {
+        if (!target_goal_msg_) {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000, "D* aguardando objetivo (/robot_goal)...");
+        }
+        if (!last_map_data_) {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000, "D* aguardando mapa (map)...");
+        }
         return;
+    }
 
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
@@ -543,6 +556,9 @@ void DStarPlannerNode::plan_and_publish()
     auto path = planner_->reconstructPath(s, origin.x, origin.y);
     path.header = last_map_data_->header;
     path_pub_->publish(path);
+    if (rviz_path_pub_) {
+        rviz_path_pub_->publish(path);
+    }
 }
 
 }  // namespace planning

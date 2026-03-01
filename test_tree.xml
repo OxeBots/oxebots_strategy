@@ -1,7 +1,22 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
   <BehaviorTree ID="MainTree">
-    <Sequence>
-      <GoToPoint name="Go_to_Center_for_Test" robot_id="0" x="0.0" y="0.0" />
-    </Sequence>
+    <Repeat num_cycles="-1">
+      <ReactiveSequence>
+        <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}" 
+                            pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+        <Fallback>
+           <Sequence>
+              <!-- Threshold ajustado para 450mm para casar com o pre_kick a 300mm -->
+              <IsBallClose robot_id="0" distance_threshold="450.0" />
+              <Sequence>
+                 <GoToPoint robot_id="0" x="{ball_x}" y="{ball_y}" />
+                 <KickBall robot_id="0" kick_speed="3.0" />
+              </Sequence>
+           </Sequence>
+           <GoToPoint robot_id="0" x="{pkx}" y="{pky}" />
+        </Fallback>
+      </ReactiveSequence>
+    </Repeat>
   </BehaviorTree>
 </root>
