@@ -15,9 +15,9 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->get_parameter("robot_id", robot_id_);
     
     this->declare_parameter("max_linear_speed", 1.0);
-    this->declare_parameter("p_gain_linear", 1.5);
+    this->declare_parameter("p_gain_linear", 2.0);
     this->declare_parameter("max_angular_speed", 4.0);
-    this->declare_parameter("p_gain_angular", 2.0);
+    this->declare_parameter("p_gain_angular", 3.0);
     this->declare_parameter("angle_tolerance", 0.1);
     this->declare_parameter("lookahead_distance", 300.0); // mm
 

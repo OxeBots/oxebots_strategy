@@ -19,8 +19,8 @@ def generate_launch_description():
     is_yellow = LaunchConfiguration("is_yellow")
 
     common_movement_params = [
-        {"max_linear_speed": 0.5},
-        {"p_gain_linear": 0.5},
+        {"max_linear_speed": 1.0},
+        {"p_gain_linear": 1.5},
         {"is_yellow": is_yellow},
     ]
 

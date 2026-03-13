@@ -6,67 +6,139 @@
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/is_ball_close_condition.h"
 #include "oxebots_strategy/goalkeeper_node.h"
+#include "oxebots_interfaces/msg/role_assignment.hpp"
+#include "oxebots_interfaces/msg/game_data.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <thread>
+#include <mutex>
+#include <fstream>
+
+class StrategyNode : public rclcpp::Node
+{
+public:
+  StrategyNode() : Node("strategy_node")
+  {
+    this->declare_parameter<std::string>("bt_xml_path", "");
+    this->declare_parameter<bool>("is_yellow", false);
+    this->declare_parameter<double>("execution_rate", 60.0);
+
+    is_yellow_ = this->get_parameter("is_yellow").as_bool();
+    blackboard_ = BT::Blackboard::create();
+    setup_blackboard();
+
+    role_sub_ = this->create_subscription<oxebots_interfaces::msg::RoleAssignment>(
+      "/role_assignment", 10, std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
+    
+    game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
+      "game_data", 10, std::bind(&StrategyNode::game_callback, this, std::placeholders::_1));
+  }
+
+  bool init()
+  {
+    try {
+      std::string package_share_directory = ament_index_cpp::get_package_share_directory("oxebots_strategy");
+      std::string default_tree_path = package_share_directory + "/test_tree.xml";
+      
+      std::string tree_path = this->get_parameter("bt_xml_path").as_string();
+      if (tree_path.empty()) tree_path = default_tree_path;
+
+      // Verificar se o arquivo existe
+      std::ifstream file(tree_path);
+      if (!file.good()) {
+        RCLCPP_ERROR(this->get_logger(), "Arquivo da árvore NÃO ENCONTRADO: %s", tree_path.c_str());
+        return false;
+      }
+      file.close();
+
+      RCLCPP_INFO(this->get_logger(), "Registrando nós e carregando árvore: %s", tree_path.c_str());
+
+      factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
+
+      tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
+      return true;
+    } catch (const std::exception& e) {
+      RCLCPP_ERROR(this->get_logger(), "EXCEÇÃO NO INIT: %s", e.what());
+      return false;
+    }
+  }
+
+  void run()
+  {
+    double rate_hz = this->get_parameter("execution_rate").as_double();
+    if (rate_hz <= 0.0) rate_hz = 60.0;
+    rclcpp::Rate rate(rate_hz);
+
+    while (rclcpp::ok()) {
+      if (has_data_) {
+        try {
+          tree_.tickOnce();
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR(this->get_logger(), "Erro ao executar tick: %s", e.what());
+        }
+      } else {
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Aguardando dados...");
+      }
+      rate.sleep();
+    }
+  }
+
+private:
+  void setup_blackboard()
+  {
+    double my_goal_x = is_yellow_ ? 2200.0 : -2200.0;
+    double opponent_goal_x = is_yellow_ ? -2200.0 : 2200.0;
+    blackboard_->set("my_goal_x", my_goal_x);
+    blackboard_->set("opponent_goal_x", opponent_goal_x);
+    blackboard_->set("opponent_goal_y", 0.0);
+    blackboard_->set("is_yellow", is_yellow_);
+    blackboard_->set("attacker_id", static_cast<uint32_t>(0)); 
+    blackboard_->set("defender_id", static_cast<uint32_t>(1));
+    blackboard_->set("robot_id", static_cast<uint32_t>(0));
+  }
+
+  void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg)
+  {
+    blackboard_->set("attacker_id", msg->attacker_id);
+    blackboard_->set("defender_id", msg->defender_id);
+  }
+
+  void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
+  {
+    (void)msg;
+    has_data_ = true;
+  }
+
+  bool is_yellow_;
+  bool has_data_ = false;
+  BT::BehaviorTreeFactory factory_;
+  BT::Tree tree_;
+  BT::Blackboard::Ptr blackboard_;
+  rclcpp::Subscription<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_sub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_sub_;
+};
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<rclcpp::Node>("strategy_node");
-
-  std::string package_share_directory = ament_index_cpp::get_package_share_directory("oxebots_strategy");
-  std::string default_tree_path = package_share_directory + "/test_tree.xml";
+  auto node = std::make_shared<StrategyNode>();
   
-  node->declare_parameter<std::string>("bt_xml_path", default_tree_path);
-  std::string tree_path = node->get_parameter("bt_xml_path").as_string();
+  if (node->init()) {
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    std::thread executor_thread([&executor]() { executor.spin(); });
 
-  RCLCPP_INFO(node->get_logger(), "Carregando árvore de comportamento de: %s", tree_path.c_str());
+    node->run();
 
-  BT::BehaviorTreeFactory factory;
-  factory.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", node);
-  factory.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", node);
-  factory.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", node);
-  factory.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", node);
-  factory.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", node);
-
-  auto blackboard = BT::Blackboard::create();
-  node->declare_parameter<bool>("is_yellow", false);
-  bool is_yellow = node->get_parameter("is_yellow").as_bool();
-  
-  double my_goal_x = is_yellow ? 2200.0 : -2200.0;
-  double opponent_goal_x = is_yellow ? -2200.0 : 2200.0;
-  
-  blackboard->set("my_goal_x", my_goal_x);
-  blackboard->set("opponent_goal_x", opponent_goal_x);
-  blackboard->set("opponent_goal_y", 0.0);
-  blackboard->set("is_yellow", is_yellow);
-  blackboard->set("robot_id", 0);
-
-  RCLCPP_INFO(node->get_logger(), "Time %s, meu gol em X: %.1f, gol do oponente em: (%.1f, 0.0)", is_yellow ? "amarelo" : "azul", my_goal_x, opponent_goal_x);
-
-  // Executor ROS em uma thread separada
-  rclcpp::executors::MultiThreadedExecutor executor;
-  executor.add_node(node);
-  std::thread executor_thread([&executor]() { executor.spin(); });
-
-  try
-  {
-    auto tree = factory.createTreeFromFile(tree_path, blackboard);
-
-    rclcpp::Rate rate(10);
-    while (rclcpp::ok())
-    {
-      tree.tickOnce();
-      rate.sleep();
-    }
-  }
-  catch (const BT::RuntimeError& e)
-  {
-    RCLCPP_ERROR(node->get_logger(), "ERRO DE EXECUÇÃO DA ÁRVORE: %s", e.what());
+    executor.cancel();
+    if (executor_thread.joinable()) executor_thread.join();
+  } else {
+    RCLCPP_FATAL(node->get_logger(), "Falha crítica na inicialização do StrategyNode.");
   }
 
-  executor.cancel();
-  executor_thread.join();
   rclcpp::shutdown();
   return 0;
 }

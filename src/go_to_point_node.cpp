@@ -94,8 +94,8 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
     double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);
     
-    // 150mm de tolerância
-    bool pos_ok = (dist < 150.0);
+    // 50mm de tolerância para garantir o chute
+    bool pos_ok = (dist < 50.0);
     bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.15);
 
     if (pos_ok && ori_ok) {

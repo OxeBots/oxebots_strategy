@@ -2,20 +2,28 @@
   <BehaviorTree ID="MainTree">
     <Repeat num_cycles="-1">
       <ReactiveSequence>
+        <!-- 1. Atualiza as informações globais da bola -->
         <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}" 
                             pre_kick_x="{pkx}" pre_kick_y="{pky}" 
                             goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-        <Fallback>
-           <Sequence>
-              <!-- Threshold ajustado para 450mm para casar com o pre_kick a 300mm -->
-              <IsBallClose robot_id="0" distance_threshold="450.0" />
-              <Sequence>
-                 <GoToPoint robot_id="0" x="{ball_x}" y="{ball_y}" />
-                 <KickBall robot_id="0" kick_speed="3.0" />
-              </Sequence>
-           </Sequence>
-           <GoToPoint robot_id="0" x="{pkx}" y="{pky}" />
-        </Fallback>
+        
+        <!-- 2. Lógica simplificada para o Robô ID 1 -->
+        <Sequence name="Robot1Logic">
+          <Fallback>
+             <Sequence>
+                <!-- Verifica se o robô 1 está perto da bola -->
+                <IsBallClose robot_id="1" distance_threshold="350.0" />
+                <Sequence>
+                   <!-- Robô 1 vai para a bola e chuta -->
+                   <GoToPoint robot_id="0" x="{ball_x}" y="{ball_y}" />
+                   <KickBall robot_id="0" kick_speed="3.0" />
+                </Sequence>
+             </Sequence>
+             <!-- Caso contrário, robô 1 vai para o ponto de pre-kick -->
+             <GoToPoint robot_id="0" x="{pkx}" y="{pky}" />
+          </Fallback>
+        </Sequence>
+
       </ReactiveSequence>
     </Repeat>
   </BehaviorTree>

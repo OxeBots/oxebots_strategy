@@ -120,10 +120,16 @@ double DStarPlanner::calculateHeuristic(const GridCell & a, const GridCell & b) 
 
 double DStarPlanner::getSiteCost(const GridCell & u) const
 {
-    // Critical: Always treat Start/Goal as traversable to prevent getting stuck immediately if the
-    // robot is slightly inside an inflation zone.
-    if ((start_cell_.has_value() && u == *start_cell_) || (goal_cell_.has_value() && u == *goal_cell_))
-        return 1.0;
+    // CRÍTICO: Sempre tratar a vizinhança imediata do Início e do Alvo como navegável.
+    // Isso evita que o robô trave se o alvo (bola) for marcado como obstáculo 
+    // ou se o robô estiver ligeiramente dentro de uma zona de inflação.
+    if (start_cell_.has_value()) {
+        if (std::abs(u.x - start_cell_->x) <= 1 && std::abs(u.y - start_cell_->y) <= 1) return 1.0;
+    }
+    if (goal_cell_.has_value()) {
+        if (std::abs(u.x - goal_cell_->x) <= 1 && std::abs(u.y - goal_cell_->y) <= 1) return 1.0;
+    }
+
     if (!current_grid_)
         return std::numeric_limits<double>::infinity();
 
@@ -422,8 +428,8 @@ nav_msgs::msg::Path DStarPlanner::reconstructPath(const GridCell & start, double
 
 GridCell DStarPlanner::worldToGrid(double wx, double wy, double ox, double oy) const
 {
-    return {static_cast<int>(std::round((wx - ox) / resolution_ - 0.5)),
-            static_cast<int>(std::round((wy - oy) / resolution_ - 0.5))};
+    return {static_cast<int>(std::floor((wx - ox) / resolution_)),
+            static_cast<int>(std::floor((wy - oy) / resolution_))};
 }
 
 geometry_msgs::msg::PoseStamped DStarPlanner::gridToWorld(const GridCell & gc, double ox, double oy) const

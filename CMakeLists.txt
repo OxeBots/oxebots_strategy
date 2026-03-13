@@ -84,10 +84,22 @@ target_include_directories(d_star_planner_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+add_executable(
+  role_assigner_node
+  src/role_assigner_node.cpp
+)
+
+ament_target_dependencies(
+  role_assigner_node
+  rclcpp
+  oxebots_interfaces
+)
+
 install(TARGETS
   strategy_node
   movement_calculation_node
   d_star_planner_node
+  role_assigner_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
