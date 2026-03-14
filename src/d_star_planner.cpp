@@ -54,6 +54,7 @@ void DStarPlanner::setOccupancyGrid(const nav_msgs::msg::OccupancyGrid::SharedPt
     {
         grid_nodes_.clear();
         grid_nodes_.reserve(grid_width_ * grid_height_);
+        dynamic_obstacle_map_.assign(grid_width_ * grid_height_, false);
         for (int y = 0; y < grid_height_; ++y)
         {
             for (int x = 0; x < grid_width_; ++x)
@@ -74,20 +75,48 @@ void DStarPlanner::setAllyPositions(const std::vector<std::pair<float, float>> &
     if (!current_grid_)
         return;
 
+    // Identificar células que eram obstáculos para limpá-las no D*
+    std::vector<GridCell> old_obstacles = dynamic_obstacles_;
+    for (const auto & obs : old_obstacles) {
+        int idx = obs.y * grid_width_ + obs.x;
+        if (idx >= 0 && idx < (int)dynamic_obstacle_map_.size()) dynamic_obstacle_map_[idx] = false;
+    }
     dynamic_obstacles_.clear();
+
     double ox = current_grid_->info.origin.position.x;
     double oy = current_grid_->info.origin.position.y;
     int radius_cells = std::ceil(config_.robot_safety_radius / resolution_);
 
-    // Convert ally positions to grid cells and mark them as dynamic obstacles
-    // We add padding (radius_cells) around them to create a safety buffer.
+    // Converter posições dos aliados para células da grade e marcar como obstáculos
     for (const auto & ally : allies)
     {
         GridCell center = worldToGrid(ally.first, ally.second, ox, oy);
 
         for (int dx = -radius_cells; dx <= radius_cells; ++dx)
+        {
             for (int dy = -radius_cells; dy <= radius_cells; ++dy)
-                dynamic_obstacles_.push_back({center.x + dx, center.y + dy});
+            {
+                GridCell cell = {center.x + dx, center.y + dy};
+                // Apenas adiciona se estiver dentro dos limites do mapa
+                if (cell.x >= 0 && cell.x < grid_width_ && cell.y >= 0 && cell.y < grid_height_) {
+                    dynamic_obstacles_.push_back(cell);
+                    dynamic_obstacle_map_[cell.y * grid_width_ + cell.x] = true;
+                }
+            }
+        }
+    }
+
+    // Notificar o D* sobre as mudanças de custo (tanto as antigas quanto as novas)
+    // Isso garante que o caminho seja recalculado se um robô aliado se mover.
+    for (const auto & obs : old_obstacles)
+    {
+        if (auto node = getNode(obs.x, obs.y))
+            modifyCost(node);
+    }
+    for (const auto & obs : dynamic_obstacles_)
+    {
+        if (auto node = getNode(obs.x, obs.y))
+            modifyCost(node);
     }
 }
 
@@ -124,10 +153,10 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     // Isso evita que o robô trave se o alvo (bola) for marcado como obstáculo 
     // ou se o robô estiver ligeiramente dentro de uma zona de inflação.
     if (start_cell_.has_value()) {
-        if (std::abs(u.x - start_cell_->x) <= 1 && std::abs(u.y - start_cell_->y) <= 1) return 1.0;
+        if (std::abs(u.x - start_cell_->x) <= 4 && std::abs(u.y - start_cell_->y) <= 4) return 1.0;
     }
     if (goal_cell_.has_value()) {
-        if (std::abs(u.x - goal_cell_->x) <= 1 && std::abs(u.y - goal_cell_->y) <= 1) return 1.0;
+        if (std::abs(u.x - goal_cell_->x) <= 4 && std::abs(u.y - goal_cell_->y) <= 4) return 1.0;
     }
 
     if (!current_grid_)
@@ -142,11 +171,9 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     if (current_grid_->data[idx] >= config_.occupancy_threshold)
         return std::numeric_limits<double>::infinity();
 
-    // Check Dynamic Obstacles (Simple Linear search)
-    // Note: For a very large number of obstacles, a std::set or hash map would be faster.
-    for (const auto & obs : dynamic_obstacles_)
-        if (obs == u)
-            return std::numeric_limits<double>::infinity();
+    // Check Dynamic Obstacles (O(1) lookup)
+    if (dynamic_obstacle_map_[idx])
+        return std::numeric_limits<double>::infinity();
 
     return 1.0;  // Traversable
 }
@@ -462,10 +489,8 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     std::string path_topic = "/robot_" + std::to_string(robot_id_) + "/path";
     path_pub_ = create_publisher<nav_msgs::msg::Path>(path_topic, 10);
     
-    // Para compatibilidade com o RViz atual (robô 0)
-    if (robot_id_ == 0) {
-        rviz_path_pub_ = create_publisher<nav_msgs::msg::Path>("/dstar_path", 10);
-    }
+    // Tópico para visualização no RViz (acessível para todos os robôs)
+    rviz_path_pub_ = create_publisher<nav_msgs::msg::Path>("/robot_" + std::to_string(robot_id_) + "/path_viz", 10);
 
     // Subscribers with Transient Local QoS for map/goals (latched topics)
     auto qos = rclcpp::QoS(1).transient_local().reliable();

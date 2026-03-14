@@ -271,6 +271,7 @@ class DStarPlanner
     // Map & Graph (Flat vector for performance)
     nav_msgs::msg::OccupancyGrid::SharedPtr current_grid_;
     std::vector<DStarNode> grid_nodes_;  ///< Flat storage for all graph nodes.
+    std::vector<bool> dynamic_obstacle_map_; ///< Fast lookup for dynamic obstacles.
     int grid_width_ = 0;
     int grid_height_ = 0;
 

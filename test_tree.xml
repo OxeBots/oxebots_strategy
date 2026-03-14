@@ -12,7 +12,7 @@
           <Fallback>
              <Sequence>
                 <!-- Verifica se o robô 1 está perto da bola -->
-                <IsBallClose robot_id="1" distance_threshold="350.0" />
+                <IsBallClose robot_id="1" distance_threshold="450.0" />
                 <Sequence>
                    <!-- Robô 1 vai para a bola e chuta -->
                    <GoToPoint robot_id="0" x="{ball_x}" y="{ball_y}" />
