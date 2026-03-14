@@ -56,8 +56,8 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
     double dist = std::hypot(dx, dy);
 
     if (dist > 10.0) {
-      // Ponto a 300mm da bola, na mesma linha do gol
-      double pre_kick_dist = 300.0; 
+      // Ponto a 400mm da bola, na mesma linha do gol
+      double pre_kick_dist = 400.0; 
       double pk_x = ball_x + (dx / dist) * pre_kick_dist;
       double pk_y = ball_y + (dy / dist) * pre_kick_dist;
       

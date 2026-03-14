@@ -81,11 +81,10 @@ BT::NodeStatus GoToPointNode::onRunning() {
     // Verificar se o alvo mudou no Blackboard
     double tx, ty;
     if (getInput<double>("x", tx) && getInput<double>("y", ty)) {
-        if (std::abs(tx - target_pos_.x) > 10.0 || std::abs(ty - target_pos_.y) > 10.0) {
+        if (std::abs(tx - target_pos_.x) > 2.0 || std::abs(ty - target_pos_.y) > 2.0) {
             target_pos_.x = tx;
             target_pos_.y = ty;
             publishGoal();
-            RCLCPP_INFO(node_->get_logger(), "Alvo do robô %d atualizado para (%.1f, %.1f)", robot_id_, tx, ty);
         }
     }
 
@@ -94,12 +93,12 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
     double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);
     
-    // 50mm de tolerância para garantir o chute
-    bool pos_ok = (dist < 50.0);
-    bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.15);
+    // Tolerâncias mais rígidas para garantir alinhamento (30mm e ~3 graus)
+    bool pos_ok = (dist < 30.0);
+    bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.05);
 
     if (pos_ok && ori_ok) {
-        RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo.", robot_id_);
+        RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo com precisão.", robot_id_);
         return BT::NodeStatus::SUCCESS;
     }
     return BT::NodeStatus::RUNNING;

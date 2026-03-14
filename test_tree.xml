@@ -1,30 +1,32 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
   <BehaviorTree ID="MainTree">
     <Repeat num_cycles="-1">
-      <ReactiveSequence>
-        <!-- 1. Atualiza as informações globais da bola -->
+      <Sequence>
+        <!-- 1. Atualiza as informações da bola e calcula o ponto de Pre-Kick -->
         <UpdateBallPosition ball_x="{ball_x}" ball_y="{ball_y}" 
                             pre_kick_x="{pkx}" pre_kick_y="{pky}" 
                             goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
         
-        <!-- 2. Lógica simplificada para o Robô ID 1 -->
-        <Sequence name="Robot1Logic">
-          <Fallback>
-             <Sequence>
-                <!-- Verifica se o robô 1 está perto da bola -->
-                <IsBallClose robot_id="1" distance_threshold="450.0" />
-                <Sequence>
-                   <!-- Robô 1 vai para a bola e chuta -->
-                   <GoToPoint robot_id="0" x="{ball_x}" y="{ball_y}" />
-                   <KickBall robot_id="0" kick_speed="3.0" />
-                </Sequence>
-             </Sequence>
-             <!-- Caso contrário, robô 1 vai para o ponto de pre-kick -->
-             <GoToPoint robot_id="0" x="{pkx}" y="{pky}" />
-          </Fallback>
-        </Sequence>
+        <Parallel success_count="1" failure_count="1">
+           <!-- Robo 0: Lateral -->
+           <GoToPoint robot_id="0" x="0.0" y="1500.0" />
+           
+           <!-- Robo 1: Gol Amigo -->
+           <GoToPoint robot_id="1" x="{my_goal_x}" y="0.0" />
 
-      </ReactiveSequence>
+           <!-- Robo 2: Ataque Disciplinado (Alinhar ANTES de atacar) -->
+           <Sequence name="Robot2AttackLogic">
+              <!-- PASSO 1: Vai para o ponto de PREPARAÇÃO e alinha com o gol -->
+              <GoToPoint robot_id="2" x="{pkx}" y="{pky}" />
+              
+              <!-- PASSO 2: Quando estiver perfeitamente alinhado, avança para a bola -->
+              <GoToPoint robot_id="2" x="{ball_x}" y="{ball_y}" />
+              
+              <!-- PASSO 3: CHUTA -->
+              <KickBall robot_id="2" kick_speed="3.0" />
+           </Sequence>
+        </Parallel>
+      </Sequence>
     </Repeat>
   </BehaviorTree>
 </root>

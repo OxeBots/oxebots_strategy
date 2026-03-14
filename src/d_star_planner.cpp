@@ -541,6 +541,10 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
         else
             allies.push_back({r.x / 1000.0f, r.y / 1000.0f});
     }
+
+    // Adiciona a BOLA como um obstáculo dinâmico para evitar colidir com ela "sem querer"
+    allies.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f});
+
     if (planner_)
         planner_->setAllyPositions(allies);
 }
