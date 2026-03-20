@@ -1,0 +1,50 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <!-- Parallel no topo que nunca termina (aguarda 3 sucessos, mas GoToPoint sem tolerância nunca termina) -->
+    <Parallel success_count="3" failure_count="1">
+
+      <!-- Robô 0: Posicionamento fixo (Defesa lateral) -->
+      <GoToPoint robot_id="0" x="0.0" y="1500.0" />
+
+      <!-- Robô 1: Posicionamento fixo (Goleiro/Zagueiro) -->
+      <GoToPoint robot_id="1" x="{my_goal_x}" y="0.0" />
+
+      <!-- Lógica do Atacante (Robô 2) em Loop Infinito -->
+      <Repeat num_cycles="-1">
+        <Sequence name="AttackerLoop">
+          <!-- Atualiza dados da bola e verifica se está pronto para o chute -->
+          <UpdateBallPosition robot_id="2"
+                              ball_x="{ball_x}" ball_y="{ball_y}" 
+                              pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                              is_ready_to_kick="{is_ready}"
+                              goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+          <Sequence name="Robot2AttackLogic">
+             <!-- Fase de Preparação (Pre-Kick): Pula se já estiver alinhado ou perto -->
+             <Fallback>
+                <Condition ID="IsValueTrue" value="{is_ready}" />
+                <IsBallClose robot_id="2" distance_threshold="400.0" />
+                <GoToPoint robot_id="2" x="{pkx}" y="{pky}" tolerance="150.0" />
+             </Fallback>
+
+             <!-- Fase de Rush e Chute -->
+             <Parallel success_count="1" failure_count="1">
+                <!-- Empurra o robô contra a bola -->
+                <GoToPoint robot_id="2" x="{ball_x}" y="{ball_y}" />
+
+                <Sequence>
+                   <RetryUntilSuccessful num_attempts="-1">
+                      <IsBallClose robot_id="2" distance_threshold="140.0" />
+                   </RetryUntilSuccessful>
+                   <!-- Chuta enquanto avança (x_velocity 0.5 configurado no nó) -->
+                   <KickBall robot_id="2" kick_speed="6.5" />
+                   <Sleep msec="1000" />
+                </Sequence>
+             </Parallel>
+          </Sequence>
+        </Sequence>
+      </Repeat>
+
+    </Parallel>
+  </BehaviorTree>
+</root>

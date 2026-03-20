@@ -109,7 +109,7 @@ install(
 )
 
 install(
-  FILES test_tree.xml
+  DIRECTORY behavior_trees
   DESTINATION share/${PROJECT_NAME}
 )
 

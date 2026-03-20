@@ -1,0 +1,16 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="MainLogic">
+
+      <!-- Robô 0: Chega a 100mm do alvo antes de liberar o 1 -->
+      <GoToPoint robot_id="0" x="0.0" y="1500.0" tolerance="100.0" />
+
+      <!-- Robô 1: Chega a 100mm do alvo antes de liberar o 2 -->
+      <GoToPoint robot_id="1" x="{my_goal_x}" y="0.0" tolerance="100.0" />
+
+      <!-- Robô 2: Chega ao alvo final -->
+      <GoToPoint robot_id="2" x="1500.0" y="0.0" tolerance="100.0" />
+    
+    </Sequence>
+  </BehaviorTree>
+</root>

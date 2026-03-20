@@ -9,14 +9,21 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
-    behavior_tree_path = os.path.join(strategy_pkg_share, "test_tree.xml")
 
     declare_is_yellow_arg = DeclareLaunchArgument(
         "is_yellow",
         default_value="false",
         description="Whether the team is yellow (true) or blue (false)",
     )
+
+    declare_bt_xml_arg = DeclareLaunchArgument(
+        "bt_xml",
+        default_value="test_tree.xml",
+        description="Behavior Tree XML file name (e.g., test_tree.xml or simple_attack.xml)",
+    )
+
     is_yellow = LaunchConfiguration("is_yellow")
+    bt_xml = LaunchConfiguration("bt_xml")
 
     common_movement_params = [
         {"max_linear_speed": 1.0},
@@ -78,7 +85,7 @@ def generate_launch_description():
         name="strategy_node",
         output="screen",
         parameters=[
-            {"bt_xml_path": behavior_tree_path},
+            {"bt_xml_path": bt_xml},
             {"is_yellow": is_yellow},
         ],
         cwd=strategy_pkg_share,
@@ -87,6 +94,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             declare_is_yellow_arg,
+            declare_bt_xml_arg,
             path_planner_node_0,
             path_planner_node_1,
             path_planner_node_2,

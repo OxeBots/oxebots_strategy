@@ -26,7 +26,8 @@ GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& conf
 BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
-             BT::InputPort<double>("y") };
+             BT::InputPort<double>("y"),
+             BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)") };
 }
 
 void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
@@ -93,14 +94,19 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
     double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);
     
-    // Tolerâncias mais rígidas para garantir alinhamento (30mm e ~3 graus)
-    bool pos_ok = (dist < 30.0);
-    bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.05);
+    double tolerance = -1.0;
+    getInput<double>("tolerance", tolerance);
 
-    if (pos_ok && ori_ok) {
-        RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo com precisão.", robot_id_);
-        return BT::NodeStatus::SUCCESS;
+    // SÓ retorna SUCCESS se a tolerância for positiva e atingida
+    if (tolerance > 0.0) {
+        bool pos_ok = (dist < tolerance);
+        bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.15);
+        if (pos_ok && ori_ok) {
+            RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo (dist: %.1f, tol: %.1f).", robot_id_, dist, tolerance);
+            return BT::NodeStatus::SUCCESS;
+        }
     }
+
     return BT::NodeStatus::RUNNING;
 }
 

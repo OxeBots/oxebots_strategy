@@ -24,33 +24,24 @@ BT::NodeStatus KickBallNode::onStart()
   unsigned int robot_id;
   double kick_speed;
 
-  if (!getInput<unsigned int>("robot_id", robot_id)) {
-    RCLCPP_ERROR(node_->get_logger(), "Missing required input [robot_id]");
-    return BT::NodeStatus::FAILURE;
-  }
+  if (!getInput<unsigned int>("robot_id", robot_id)) return BT::NodeStatus::FAILURE;
+  if (!getInput<double>("kick_speed", kick_speed)) return BT::NodeStatus::FAILURE;
 
-  if (!getInput<double>("kick_speed", kick_speed)) {
-    RCLCPP_ERROR(node_->get_logger(), "Missing required input [kick_speed]");
-    return BT::NodeStatus::FAILURE;
-  }
-
-  // Envia o comando de chute UMA VEZ
   auto msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
   oxebots_interfaces::msg::RobotCmdData robot_cmd_data;
   robot_cmd_data.id = robot_id;
   robot_cmd_data.kick_speed = kick_speed;
-  robot_cmd_data.x_velocity = 0.0;
+  
+  // AVANÇAR enquanto chuta para garantir contato
+  robot_cmd_data.x_velocity = 0.5; 
   robot_cmd_data.y_velocity = 0.0;
   robot_cmd_data.angular_velocity = 0.0;
 
   msg->robots.push_back(robot_cmd_data);
   cmd_pub_->publish(std::move(msg));
 
-  RCLCPP_INFO(node_->get_logger(), "Robot %d: Comando de chute enviado (velocidade: %.1f)", robot_id, kick_speed);
-
-  // Guarda o tempo de início para a pausa
+  RCLCPP_INFO(node_->get_logger(), "Robot %d: CHUTANDO! (vel: %.1f)", robot_id, kick_speed);
   start_time_ = std::chrono::steady_clock::now();
-
   return BT::NodeStatus::RUNNING;
 }
 

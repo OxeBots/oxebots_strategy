@@ -37,26 +37,40 @@ public:
   {
     try {
       std::string package_share_directory = ament_index_cpp::get_package_share_directory("oxebots_strategy");
-      std::string default_tree_path = package_share_directory + "/test_tree.xml";
       
+      // Agora o padrão é test_tree dentro da pasta behavior_trees
       std::string tree_path = this->get_parameter("bt_xml_path").as_string();
-      if (tree_path.empty()) tree_path = default_tree_path;
+      if (tree_path.empty()) {
+        tree_path = package_share_directory + "/behavior_trees/test_tree.xml";
+      } else if (tree_path.find("/") == std::string::npos) {
+        // Se o usuário passar apenas "simple_attack.xml", completamos o caminho
+        tree_path = package_share_directory + "/behavior_trees/" + tree_path;
+      }
 
       // Verificar se o arquivo existe
       std::ifstream file(tree_path);
       if (!file.good()) {
-        RCLCPP_ERROR(this->get_logger(), "Arquivo da árvore NÃO ENCONTRADO: %s", tree_path.c_str());
+        RCLCPP_ERROR(this->get_logger(), "ARQUIVO NÃO ENCONTRADO: %s", tree_path.c_str());
         return false;
       }
       file.close();
 
-      RCLCPP_INFO(this->get_logger(), "Registrando nós e carregando árvore: %s", tree_path.c_str());
+      RCLCPP_INFO(this->get_logger(), "Carregando árvore: %s", tree_path.c_str());
 
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
+
+      // Registrar condição para verificar booleanos do blackboard
+      factory_.registerSimpleCondition("IsValueTrue", [&](BT::TreeNode& node) {
+          bool val;
+          if (node.getInput("value", val)) {
+              return val ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+          }
+          return BT::NodeStatus::FAILURE;
+      }, { BT::InputPort<bool>("value") });
 
       tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
       return true;
