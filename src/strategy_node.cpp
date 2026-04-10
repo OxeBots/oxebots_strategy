@@ -20,9 +20,11 @@ public:
   {
     this->declare_parameter<std::string>("bt_xml_path", "");
     this->declare_parameter<bool>("is_yellow", false);
+    this->declare_parameter<int>("robot_id", 1);
     this->declare_parameter<double>("execution_rate", 60.0);
 
     is_yellow_ = this->get_parameter("is_yellow").as_bool();
+    robot_id_ = this->get_parameter("robot_id").as_int();
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
 
@@ -72,6 +74,25 @@ public:
           return BT::NodeStatus::FAILURE;
       }, { BT::InputPort<bool>("value") });
 
+      // Nova condição: IsMyRole(role="attacker" ou "defender")
+      factory_.registerSimpleCondition("IsMyRole", [&](BT::TreeNode& node) {
+          std::string role;
+          uint32_t my_id, target_id;
+          if (!node.getInput("role", role)) return BT::NodeStatus::FAILURE;
+          if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
+
+          if (role == "attacker") {
+              if (blackboard_->get("attacker_id", target_id)) {
+                  return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+              }
+          } else if (role == "defender") {
+              if (blackboard_->get("defender_id", target_id)) {
+                  return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+              }
+          }
+          return BT::NodeStatus::FAILURE;
+      }, { BT::InputPort<std::string>("role") });
+
       tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
       return true;
     } catch (const std::exception& e) {
@@ -109,9 +130,10 @@ private:
     blackboard_->set("opponent_goal_x", opponent_goal_x);
     blackboard_->set("opponent_goal_y", 0.0);
     blackboard_->set("is_yellow", is_yellow_);
-    blackboard_->set("attacker_id", static_cast<uint32_t>(0)); 
-    blackboard_->set("defender_id", static_cast<uint32_t>(1));
-    blackboard_->set("robot_id", static_cast<uint32_t>(0));
+    blackboard_->set("attacker_id", static_cast<uint32_t>(1)); 
+    blackboard_->set("defender_id", static_cast<uint32_t>(2));
+    blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
+    blackboard_->set("is_goalkeeper", (robot_id_ == 0));
   }
 
   void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg)
@@ -122,11 +144,13 @@ private:
 
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
   {
-    (void)msg;
+    blackboard_->set("ball_x", static_cast<double>(msg->ball.x));
+    blackboard_->set("ball_y", static_cast<double>(msg->ball.y));
     has_data_ = true;
   }
 
   bool is_yellow_;
+  int robot_id_;
   bool has_data_ = false;
   BT::BehaviorTreeFactory factory_;
   BT::Tree tree_;

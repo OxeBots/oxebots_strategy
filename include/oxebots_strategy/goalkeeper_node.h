@@ -30,7 +30,7 @@ private:
   rclcpp::Subscription<oxebots_interfaces::msg::BallPosition>::SharedPtr ball_subscription_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_subscription_;
   
-  int robot_id_;
+  uint32_t robot_id_;
   double my_goal_x_;
   bool is_yellow_team_; // Para saber a cor do time
   

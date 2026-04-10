@@ -576,14 +576,27 @@ void DStarPlannerNode::plan_and_publish()
         planner_->initialize(s, g);
         if (planner_->plan() != planning::PlannerStatus::SUCCESS)
         {
-            if (++consecutive_failures_ > 5)
-                consecutive_failures_ = 0;
+            // Publish empty path on failure to stop the robot
+            nav_msgs::msg::Path empty_path;
+            empty_path.header.stamp = now();
+            empty_path.header.frame_id = "map";
+            path_pub_->publish(empty_path);
             return;
         }
-        consecutive_failures_ = 0;
     }
     else
     {
+        // Check if we are already close enough to the goal (within 5cm)
+        double dx = current_x_ - target.x;
+        double dy = current_y_ - target.y;
+        if (std::sqrt(dx*dx + dy*dy) < 0.05) {
+            nav_msgs::msg::Path empty_path;
+            empty_path.header.stamp = now();
+            empty_path.header.frame_id = "map";
+            path_pub_->publish(empty_path);
+            target_goal_msg_ = std::nullopt; // Clear goal after reaching it
+            return;
+        }
         // Same goal: incremental replanning based on map updates
         planner_->updateMapAndReplan(s);
     }

@@ -18,7 +18,7 @@ GoalkeeperNode::GoalkeeperNode(const std::string & name, const BT::NodeConfig & 
   : BT::StatefulActionNode(name, config), node_(node_ptr), ball_pos_updated_(false), robot_data_updated_(false)
 {
   // Obter robot_id do InputPort
-  if (!getInput<int>("robot_id", robot_id_)) {
+  if (!getInput<uint32_t>("robot_id", robot_id_)) {
       RCLCPP_ERROR(node_->get_logger(), "Missing required input [robot_id] for GoalkeeperNode");
       return; // Ou lançar exceção, dependendo da política de erro
   }
@@ -51,7 +51,7 @@ GoalkeeperNode::GoalkeeperNode(const std::string & name, const BT::NodeConfig & 
 
 BT::PortsList GoalkeeperNode::providedPorts()
 {
-  return { BT::InputPort<int>("robot_id") };
+  return { BT::InputPort<uint32_t>("robot_id") };
 }
 
 void GoalkeeperNode::ball_callback(const oxebots_interfaces::msg::BallPosition::SharedPtr msg)
@@ -64,7 +64,7 @@ void GoalkeeperNode::game_data_callback(const oxebots_interfaces::msg::GameData:
 {
   // Encontrar os dados do próprio robô (goleiro)
   for (const auto& ally : msg->robots.allies) {
-    if (ally.id == static_cast<unsigned int>(robot_id_)) {
+    if (ally.id == robot_id_) {
       current_robot_data_ = ally;
       robot_data_updated_ = true;
       return;
@@ -77,7 +77,7 @@ BT::NodeStatus GoalkeeperNode::onStart()
 {
   // O goleiro é sempre o robô 0
   if (robot_id_ != 0) {
-    RCLCPP_ERROR(node_->get_logger(), "GoalkeeperNode deve ser atribuído apenas ao robô 0. ID atual: %d", robot_id_);
+    RCLCPP_ERROR(node_->get_logger(), "GoalkeeperNode deve ser atribuído apenas ao robô 0. ID atual: %u", robot_id_);
     return BT::NodeStatus::FAILURE;
   }
 

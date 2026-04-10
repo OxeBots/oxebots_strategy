@@ -94,26 +94,39 @@ void PathFollowerNode::calculate_and_move() {
     }
 
     // --- Seguir Rota do D* (Caso não esteja perto o suficiente para o ataque direto) ---
-    if (!target_found && last_path_ && !last_path_->poses.empty()) {
-        double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
-        for (const auto& pose_stamped : last_path_->poses) {
-            float px = pose_stamped.pose.position.x * 1000.0f;
-            float py = pose_stamped.pose.position.y * 1000.0f;
-            double d = std::hypot(px - current_pos.x, py - current_pos.y);
-            
-            if (d > lookahead_dist) {
-                target_pt = {px, py, 0.0f};
-                target_found = true;
-                break;
+    if (!target_found) {
+        if (last_path_ && !last_path_->poses.empty()) {
+            double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
+            for (const auto& pose_stamped : last_path_->poses) {
+                float px = pose_stamped.pose.position.x * 1000.0f;
+                float py = pose_stamped.pose.position.y * 1000.0f;
+                double d = std::hypot(px - current_pos.x, py - current_pos.y);
+                
+                if (d > lookahead_dist) {
+                    target_pt = {px, py, 0.0f};
+                    target_found = true;
+                    break;
+                }
             }
-        }
-        if (!target_found) {
-            target_pt = {
-                (float)last_path_->poses.back().pose.position.x * 1000.0f,
-                (float)last_path_->poses.back().pose.position.y * 1000.0f,
-                0.0f
-            };
-            target_found = true;
+            if (!target_found) {
+                target_pt = {
+                    (float)last_path_->poses.back().pose.position.x * 1000.0f,
+                    (float)last_path_->poses.back().pose.position.y * 1000.0f,
+                    0.0f
+                };
+                target_found = true;
+            }
+        } else if (last_path_ && last_path_->poses.empty()) {
+            // Rota vazia recebida: parar o robô
+            auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
+            oxebots_interfaces::msg::RobotCmdData cmd_data;
+            cmd_data.id = robot_id_;
+            cmd_data.x_velocity = 0.0;
+            cmd_data.y_velocity = 0.0;
+            cmd_data.angular_velocity = 0.0;
+            cmd_msg->robots.push_back(cmd_data);
+            cmd_vel_pub_->publish(std::move(cmd_msg));
+            return;
         }
     }
 

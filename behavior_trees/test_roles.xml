@@ -1,0 +1,27 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="MainTree">
+        <Fallback>
+            <!-- Lógica para o Goleiro (fixo ID 0) -->
+            <Sequence>
+                <IsValueTrue value="{is_goalkeeper}"/>
+                <Goalkeeper robot_id="{robot_id}"/>
+            </Sequence>
+
+            <!-- Lógica Dinâmica baseada no Role Assignent -->
+            <Sequence>
+                <IsMyRole role="attacker"/>
+                <!-- Atacante: Segue a bola reativamente -->
+                <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="50"/>
+            </Sequence>
+
+            <Sequence>
+                <IsMyRole role="defender"/>
+                <!-- Defensor: Fica recuado mas ainda pronto para trocar de papel -->
+                <GoToPoint robot_id="{robot_id}" x="-1000" y="0" tolerance="100"/>
+            </Sequence>
+
+            <!-- Fallback caso não tenha papel ou algo falhe -->
+            <GoToPoint robot_id="{robot_id}" x="0" y="0" tolerance="500"/>
+        </Fallback>
+    </BehaviorTree>
+</root>
