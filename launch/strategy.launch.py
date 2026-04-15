@@ -2,8 +2,6 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -15,85 +13,38 @@ def generate_launch_description():
         bringup_pkg_share, "config", "ssl_config.yaml"
     )
 
-    declare_bt_xml_arg = DeclareLaunchArgument(
-        "bt_xml",
-        default_value="test_roles.xml",
-        description="Behavior Tree XML file name",
-    )
-    bt_xml = LaunchConfiguration("bt_xml")
+    # Helper to create nodes for each robot
+    def create_robot_nodes(robot_id):
+        planner = Node(
+            package="oxebots_strategy",
+            executable="d_star_planner_node",
+            name=f"d_star_planner_node_{robot_id}",
+            output="screen",
+            parameters=[bringup_config_file, {"robot_id": robot_id}],
+        )
+        follower = Node(
+            package="oxebots_strategy",
+            executable="movement_calculation_node",
+            name=f"path_follower_node_{robot_id}",
+            output="screen",
+            parameters=[bringup_config_file, {"robot_id": robot_id}],
+        )
+        strategy = Node(
+            package="oxebots_strategy",
+            executable="strategy_node",
+            name=f"strategy_node_{robot_id}",
+            output="screen",
+            parameters=[
+                bringup_config_file,
+                {"robot_id": robot_id}
+            ],
+            cwd=strategy_pkg_share,
+        )
+        return [planner, follower, strategy]
 
-    # Path Planner Nodes
-    path_planner_node_0 = Node(
-        package="oxebots_strategy",
-        executable="d_star_planner_node",
-        name="d_star_planner_node_0",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 0}],
-    )
+    # Create nodes for robots 0, 1, and 2
+    all_nodes = []
+    for i in range(3):
+        all_nodes.extend(create_robot_nodes(i))
 
-    path_planner_node_1 = Node(
-        package="oxebots_strategy",
-        executable="d_star_planner_node",
-        name="d_star_planner_node_1",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 1}],
-    )
-
-    path_planner_node_2 = Node(
-        package="oxebots_strategy",
-        executable="d_star_planner_node",
-        name="d_star_planner_node_2",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 2}],
-    )
-
-    # Path Follower Nodes
-    path_follower_node_0 = Node(
-        package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="path_follower_node_0",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 0}],
-    )
-
-    path_follower_node_1 = Node(
-        package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="path_follower_node_1",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 1}],
-    )
-
-    path_follower_node_2 = Node(
-        package="oxebots_strategy",
-        executable="movement_calculation_node",
-        name="path_follower_node_2",
-        output="screen",
-        parameters=[bringup_config_file, {"robot_id": 2}],
-    )
-
-    # Strategy Node
-    strategy_node = Node(
-        package="oxebots_strategy",
-        executable="strategy_node",
-        name="strategy_node",
-        output="screen",
-        parameters=[
-            bringup_config_file,
-            {"bt_xml_path": bt_xml},
-        ],
-        cwd=strategy_pkg_share,
-    )
-
-    return LaunchDescription(
-        [
-            declare_bt_xml_arg,
-            path_planner_node_0,
-            path_planner_node_1,
-            path_planner_node_2,
-            path_follower_node_0,
-            path_follower_node_1,
-            path_follower_node_2,
-            strategy_node,
-        ]
-    )
+    return LaunchDescription(all_nodes)
