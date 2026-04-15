@@ -9,73 +9,91 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
-
-    declare_is_yellow_arg = DeclareLaunchArgument(
-        "is_yellow",
-        default_value="false",
-        description="Whether the team is yellow (true) or blue (false)",
+    bringup_pkg_share = get_package_share_directory("oxebots_bringup")
+    
+    bringup_config_file = os.path.join(
+        bringup_pkg_share, "config", "ssl_config.yaml"
     )
 
     declare_bt_xml_arg = DeclareLaunchArgument(
         "bt_xml",
         default_value="test_roles.xml",
-        description="Behavior Tree XML file name (e.g., test_roles.xml or simple_attack.xml)",
+        description="Behavior Tree XML file name",
     )
-
-    is_yellow = LaunchConfiguration("is_yellow")
     bt_xml = LaunchConfiguration("bt_xml")
 
-    common_movement_params = [
-        {"max_linear_speed": 1.0},
-        {"p_gain_linear": 1.5},
-        {"is_yellow": is_yellow},
-    ]
-
-    # Planners e Followers para os 3 robôs
-    nodes = []
-    for i in range(3):
-        nodes.append(Node(
-            package="oxebots_strategy",
-            executable="d_star_planner_node",
-            name=f"d_star_planner_node_{i}",
-            output="screen",
-            parameters=common_movement_params + [{"robot_id": i}],
-        ))
-        nodes.append(Node(
-            package="oxebots_strategy",
-            executable="movement_calculation_node",
-            name=f"path_follower_node_{i}",
-            output="screen",
-            parameters=common_movement_params + [{"robot_id": i}],
-        ))
-        # Nó de Estratégia individual para cada robô
-        nodes.append(Node(
-            package="oxebots_strategy",
-            executable="strategy_node",
-            name=f"strategy_node_{i}",
-            output="screen",
-            parameters=[
-                {"bt_xml_path": bt_xml},
-                {"is_yellow": is_yellow},
-                {"robot_id": i},
-            ],
-            cwd=strategy_pkg_share,
-        ))
-
-    # Nó de Alocação de Papéis (Centralizado)
-    role_assigner_node = Node(
+    # Path Planner Nodes
+    path_planner_node_0 = Node(
         package="oxebots_strategy",
-        executable="role_assigner_node",
-        name="role_assigner_node",
+        executable="d_star_planner_node",
+        name="d_star_planner_node_0",
         output="screen",
-        parameters=[{"goalkeeper_id": 0}],
+        parameters=[bringup_config_file, {"robot_id": 0}],
+    )
+
+    path_planner_node_1 = Node(
+        package="oxebots_strategy",
+        executable="d_star_planner_node",
+        name="d_star_planner_node_1",
+        output="screen",
+        parameters=[bringup_config_file, {"robot_id": 1}],
+    )
+
+    path_planner_node_2 = Node(
+        package="oxebots_strategy",
+        executable="d_star_planner_node",
+        name="d_star_planner_node_2",
+        output="screen",
+        parameters=[bringup_config_file, {"robot_id": 2}],
+    )
+
+    # Path Follower Nodes
+    path_follower_node_0 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_0",
+        output="screen",
+        parameters=[bringup_config_file, {"robot_id": 0}],
+    )
+
+    path_follower_node_1 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_1",
+        output="screen",
+        parameters=[bringup_config_file, {"robot_id": 1}],
+    )
+
+    path_follower_node_2 = Node(
+        package="oxebots_strategy",
+        executable="movement_calculation_node",
+        name="path_follower_node_2",
+        output="screen",
+        parameters=[bringup_config_file, {"robot_id": 2}],
+    )
+
+    # Strategy Node
+    strategy_node = Node(
+        package="oxebots_strategy",
+        executable="strategy_node",
+        name="strategy_node",
+        output="screen",
+        parameters=[
+            bringup_config_file,
+            {"bt_xml_path": bt_xml},
+        ],
+        cwd=strategy_pkg_share,
     )
 
     return LaunchDescription(
         [
-            declare_is_yellow_arg,
             declare_bt_xml_arg,
-            role_assigner_node,
-            *nodes
+            path_planner_node_0,
+            path_planner_node_1,
+            path_planner_node_2,
+            path_follower_node_0,
+            path_follower_node_1,
+            path_follower_node_2,
+            strategy_node,
         ]
     )

@@ -19,11 +19,11 @@ public:
   StrategyNode() : Node("strategy_node")
   {
     this->declare_parameter<std::string>("bt_xml_path", "");
-    this->declare_parameter<bool>("is_yellow", false);
+    this->declare_parameter<bool>("is_yellow_team", false);
     this->declare_parameter<int>("robot_id", 1);
     this->declare_parameter<double>("execution_rate", 60.0);
 
-    is_yellow_ = this->get_parameter("is_yellow").as_bool();
+    is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     robot_id_ = this->get_parameter("robot_id").as_int();
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
