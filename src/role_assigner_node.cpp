@@ -40,12 +40,12 @@ private:
   {
     auto now = this->now();
     double dt = 0.0;
-    if (!last_time_.nanoseconds() == 0) {
+    if (last_time_.nanoseconds() != 0) {
       dt = (now - last_time_).seconds();
     }
     last_time_ = now;
 
-    if (dt <= 0.0) dt = 0.016; // Fallback para ~60Hz
+    if (dt <= 0.0001) dt = 0.016; // Fallback para ~60Hz e proteção contra dt zero
 
     // 1. Estimar velocidades (opcional, mas melhora o alinhamento cinético)
     Vector2D ball_pos = {msg->ball.x, msg->ball.y};

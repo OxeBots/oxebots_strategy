@@ -143,7 +143,7 @@ void PathFollowerNode::calculate_and_move() {
     double check_dist = target_goal_.has_value() ? 
         std::hypot(target_goal_->x - current_pos.x, target_goal_->y - current_pos.y) : dist_to_target;
 
-    if (check_dist < 40.0) {
+    if (check_dist < 40.0 || dist_to_target < 0.001) {
         cmd_data.x_velocity = 0.0;
         cmd_data.y_velocity = 0.0;
     } else {

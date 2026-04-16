@@ -103,8 +103,14 @@ public:
 
   void run()
   {
-    double rate_hz = this->get_parameter("execution_rate").as_double();
-    if (rate_hz <= 0.0) rate_hz = 60.0;
+    double rate_hz;
+    try {
+        rate_hz = this->get_parameter("execution_rate").as_double();
+    } catch (...) {
+        rate_hz = 60.0;
+    }
+    
+    if (rate_hz <= 0.1) rate_hz = 60.0;
     rclcpp::Rate rate(rate_hz);
 
     while (rclcpp::ok()) {
@@ -117,7 +123,13 @@ public:
       } else {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Aguardando dados...");
       }
-      rate.sleep();
+      
+      try {
+          rate.sleep();
+      } catch (...) {
+          // Fallback if clock jumps or rate fails
+          std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(1000.0/rate_hz)));
+      }
     }
   }
 
@@ -146,12 +158,12 @@ private:
   {
     blackboard_->set("ball_x", static_cast<double>(msg->ball.x));
     blackboard_->set("ball_y", static_cast<double>(msg->ball.y));
-    has_data_ = true;
+    has_data_.store(true);
   }
 
   bool is_yellow_;
   int robot_id_;
-  bool has_data_ = false;
+  std::atomic<bool> has_data_{false};
   BT::BehaviorTreeFactory factory_;
   BT::Tree tree_;
   BT::Blackboard::Ptr blackboard_;
