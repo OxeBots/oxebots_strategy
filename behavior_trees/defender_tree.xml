@@ -1,0 +1,63 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+  <BehaviorTree ID="MainTree">
+
+    <Sequence name="SelectedDefenderOnly">
+      <IsRobotId robot_id="1"/>
+
+      <Fallback name="Root">
+
+      <!-- Segurança -->
+      <Sequence>
+        <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
+        <GoToSafe my_goal_x="{my_goal_x}" ball="{ball}"/>
+      </Sequence>
+
+      <!-- Defesa -->
+      <Sequence>
+        <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
+
+        <Fallback>
+
+          <!-- Perigo -->
+          <Sequence>
+            <IsBallNearGoal
+              ball_x="{ball_x}"
+              ball_y="{ball_y}"
+              my_goal_x="{my_goal_x}"
+              goal_x_threshold="{goal_x_threshold}"
+              goal_band_half_width="{goal_band_half_width}"/>
+            <BlockShot ball="{ball}" my_goal_x="{my_goal_x}"/>
+          </Sequence>
+
+          <!-- Pressão -->
+          <Sequence>
+            <IsDefenderCloserThanAttacker
+              defender_ball_dist="{defender_ball_dist}"
+              attacker_ball_dist="{attacker_ball_dist}"/>
+            <PressureBall ball="{ball}" my_goal_x="{my_goal_x}"/>
+          </Sequence>
+
+          <!-- Default -->
+          <BlockAngle ball="{ball}" my_goal_x="{my_goal_x}"/>
+
+        </Fallback>
+      </Sequence>
+
+      <!-- Interceptação -->
+      <Sequence>
+        <IsBallMovingTowardsGoal
+          ball_vx="{ball_vx}"
+          my_goal_x="{my_goal_x}"
+          velocity_threshold="{moving_towards_goal_velocity_threshold}"/>
+        <InterceptBall ball="{ball}" ball_vel="{ball_vel}"/>
+      </Sequence>
+
+      <!-- Posição padrão -->
+      <DefensivePosition ball="{ball}" my_goal_x="{my_goal_x}"/>
+
+      </Fallback>
+
+    </Sequence>
+
+  </BehaviorTree>
+</root>

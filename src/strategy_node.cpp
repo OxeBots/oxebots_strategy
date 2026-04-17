@@ -6,13 +6,18 @@
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/is_ball_close_condition.h"
 #include "oxebots_strategy/goalkeeper_node.h"
+#include "oxebots_strategy/defender_nodes.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/referee.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
 #include <thread>
-#include <mutex>
 #include <fstream>
+#include <limits>
 
 class StrategyNode : public rclcpp::Node
 {
@@ -23,9 +28,19 @@ public:
     this->declare_parameter<bool>("is_yellow_team", false);
     this->declare_parameter<int>("robot_id", 1);
     this->declare_parameter<double>("execution_rate", 60.0);
+    this->declare_parameter<double>("possession_distance", 220.0);
+    this->declare_parameter<double>("goal_x_threshold", 700.0);
+    this->declare_parameter<double>("goal_band_half_width", 900.0);
+    this->declare_parameter<double>("moving_towards_goal_velocity_threshold", 120.0);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     robot_id_ = this->get_parameter("robot_id").as_int();
+    possession_distance_mm_ = this->get_parameter("possession_distance").as_double();
+    goal_x_threshold_mm_ = this->get_parameter("goal_x_threshold").as_double();
+    goal_band_half_width_mm_ = this->get_parameter("goal_band_half_width").as_double();
+    moving_towards_goal_velocity_threshold_mm_s_ =
+      this->get_parameter("moving_towards_goal_velocity_threshold").as_double();
+
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
 
@@ -62,11 +77,27 @@ public:
 
       RCLCPP_INFO(this->get_logger(), "Carregando árvore: %s", tree_path.c_str());
 
+      // Configura o contexto de controle utilizado pelos nós da defender_tree.
+      configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
+
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
+
+      // Registro dos nós específicos da árvore do defensor.
+      factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
+      factory_.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
+      factory_.registerNodeType<IsBallNearGoal>("IsBallNearGoal");
+      factory_.registerNodeType<IsDefenderCloserThanAttacker>("IsDefenderCloserThanAttacker");
+      factory_.registerNodeType<IsBallMovingTowardsGoal>("IsBallMovingTowardsGoal");
+      factory_.registerNodeType<GoToSafe>("GoToSafe");
+      factory_.registerNodeType<BlockShot>("BlockShot");
+      factory_.registerNodeType<PressureBall>("PressureBall");
+      factory_.registerNodeType<BlockAngle>("BlockAngle");
+      factory_.registerNodeType<InterceptBall>("InterceptBall");
+      factory_.registerNodeType<DefensivePosition>("DefensivePosition");
 
       // Registrar condição para verificar booleanos do blackboard
       factory_.registerSimpleCondition("IsValueTrue", [&](BT::TreeNode& node) {
@@ -95,6 +126,14 @@ public:
           }
           return BT::NodeStatus::FAILURE;
       }, { BT::InputPort<std::string>("role") });
+
+          // Condição para seleção manual do robô no XML da BT.
+          factory_.registerSimpleCondition("IsRobotId", [&](BT::TreeNode& node) {
+            uint32_t target_id, my_id;
+            if (!node.getInput("robot_id", target_id)) return BT::NodeStatus::FAILURE;
+            if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
+            return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+          }, { BT::InputPort<uint32_t>("robot_id") });
 
       tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
       return true;
@@ -156,10 +195,24 @@ private:
     blackboard_->set("opponent_goal_x", opponent_goal_x);
     blackboard_->set("opponent_goal_y", 0.0);
     blackboard_->set("is_yellow", is_yellow_);
-    blackboard_->set("attacker_id", static_cast<uint32_t>(1)); 
-    blackboard_->set("defender_id", static_cast<uint32_t>(2));
+    blackboard_->set("attacker_id", attacker_id_);
+    blackboard_->set("defender_id", defender_id_);
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
     blackboard_->set("is_goalkeeper", (robot_id_ == 0));
+
+    // Chaves necessárias para a defender_tree.
+    blackboard_->set("goal_x_threshold", goal_x_threshold_mm_);
+    blackboard_->set("goal_band_half_width", goal_band_half_width_mm_);
+    blackboard_->set("moving_towards_goal_velocity_threshold", moving_towards_goal_velocity_threshold_mm_s_);
+    blackboard_->set("ball_x", 0.0);
+    blackboard_->set("ball_y", 0.0);
+    blackboard_->set("ball_vx", 0.0);
+    blackboard_->set("ball_vy", 0.0);
+    blackboard_->set("ball", Pose2D{0.0, 0.0, 0.0});
+    blackboard_->set("ball_vel", Vector2D{0.0, 0.0});
+    blackboard_->set("opponent_controlling", false);
+    blackboard_->set("attacker_ball_dist", std::numeric_limits<double>::infinity());
+    blackboard_->set("defender_ball_dist", std::numeric_limits<double>::infinity());
   }
 
   void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg)
@@ -174,13 +227,81 @@ private:
 
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
   {
-    blackboard_->set("ball_x", static_cast<double>(msg->ball.x));
-    blackboard_->set("ball_y", static_cast<double>(msg->ball.y));
+    const double ball_x = static_cast<double>(msg->ball.x);
+    const double ball_y = static_cast<double>(msg->ball.y);
+    const uint32_t self_id = static_cast<uint32_t>(robot_id_);
+
+    double ball_vx = 0.0;
+    double ball_vy = 0.0;
+
+    const auto now_time = this->now();
+    if (has_last_ball_) {
+      const double dt = (now_time - last_ball_time_).seconds();
+      if (dt > 1e-4) {
+        ball_vx = (ball_x - last_ball_.x) / dt;
+        ball_vy = (ball_y - last_ball_.y) / dt;
+      }
+    }
+
+    last_ball_ = Pose2D{ball_x, ball_y, 0.0};
+    last_ball_time_ = now_time;
+    has_last_ball_ = true;
+
+    double min_ally_dist = std::numeric_limits<double>::infinity();
+    double min_enemy_dist = std::numeric_limits<double>::infinity();
+    double attacker_ball_dist = std::numeric_limits<double>::infinity();
+    double defender_ball_dist = std::numeric_limits<double>::infinity();
+
+    for (const auto& ally : msg->robots.allies) {
+      const double dist = std::hypot(ally.x - ball_x, ally.y - ball_y);
+      min_ally_dist = std::min(min_ally_dist, dist);
+
+      if (ally.id == attacker_id_) {
+        attacker_ball_dist = dist;
+      }
+      // Para a defender_tree, defensor = este nó (robô atual).
+      if (ally.id == self_id) {
+        defender_ball_dist = dist;
+      }
+    }
+
+    for (const auto& enemy : msg->robots.enemies) {
+      const double dist = std::hypot(enemy.x - ball_x, enemy.y - ball_y);
+      min_enemy_dist = std::min(min_enemy_dist, dist);
+    }
+
+    const bool opponent_controlling =
+      std::isfinite(min_enemy_dist) &&
+      (min_enemy_dist <= possession_distance_mm_) &&
+      (!std::isfinite(min_ally_dist) || (min_enemy_dist + 30.0 < min_ally_dist));
+
+    blackboard_->set("ball_x", ball_x);
+    blackboard_->set("ball_y", ball_y);
+    blackboard_->set("ball_vx", ball_vx);
+    blackboard_->set("ball_vy", ball_vy);
+    blackboard_->set("ball", Pose2D{ball_x, ball_y, 0.0});
+    blackboard_->set("ball_vel", Vector2D{ball_vx, ball_vy});
+    blackboard_->set("opponent_controlling", opponent_controlling);
+    blackboard_->set("attacker_ball_dist", attacker_ball_dist);
+    blackboard_->set("defender_ball_dist", defender_ball_dist);
+
     has_data_.store(true);
   }
 
   bool is_yellow_;
   int robot_id_;
+  uint32_t attacker_id_{1};
+  uint32_t defender_id_{2};
+
+  double possession_distance_mm_{220.0};
+  double goal_x_threshold_mm_{700.0};
+  double goal_band_half_width_mm_{900.0};
+  double moving_towards_goal_velocity_threshold_mm_s_{120.0};
+
+  bool has_last_ball_{false};
+  Pose2D last_ball_{0.0, 0.0, 0.0};
+  rclcpp::Time last_ball_time_;
+
   std::atomic<bool> has_data_{false};
   BT::BehaviorTreeFactory factory_;
   BT::Tree tree_;
