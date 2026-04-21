@@ -1,0 +1,13 @@
+<root BTCPP_format="4">
+<BehaviorTree ID="CornerTree">
+    <Fallback>
+        <Sequence name= "kicker">
+            <IsValueTrue value="{is_attacker}"/>
+            <UpdateBallPosition/>
+            <GoToPoint x="{ball_x}" y="{ball_y}"/>
+            <KickBall robot_id="{robot_id}" kick_speed="3.5"/>
+        </Sequence>
+        <GoToPoint x="{opponent_goal_x * 0.8}" y="0"/>
+    </Fallback>
+</BehaviorTree>
+</root>

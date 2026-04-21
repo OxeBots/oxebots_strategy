@@ -8,6 +8,7 @@
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_interfaces/msg/referee.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <thread>
 #include <mutex>
@@ -33,6 +34,8 @@ public:
     
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
       "game_data", 10, std::bind(&StrategyNode::game_callback, this, std::placeholders::_1));
+    referee_sub_ = this->create_subscription<oxebots_interfaces::msg::Referee>(
+  "/referee", 10, std::bind(&StrategyNode::referee_callback, this, std::placeholders::_1));
   }
 
   bool init()
@@ -114,7 +117,7 @@ public:
     rclcpp::Rate rate(rate_hz);
 
     while (rclcpp::ok()) {
-      if (has_data_) {
+     if (has_data_ || true) {
         try {
           tree_.tickOnce();
         } catch (const std::exception& e) {
@@ -134,6 +137,17 @@ public:
   }
 
 private:
+  void referee_callback(const oxebots_interfaces::msg::Referee::SharedPtr msg)
+  {
+    // Lógica para Falta (Ex: 8: Yellow, 9: Blue)
+    bool our_foul = (is_yellow_ && msg->command == 8) || (!is_yellow_ && msg->command == 9);
+    
+    // Seta no blackboard para a árvore ler
+    blackboard_->set("is_free_kick", our_foul);
+    
+  }
+  rclcpp::Subscription<oxebots_interfaces::msg::Referee>::SharedPtr referee_sub_;
+
   void setup_blackboard()
   {
     double my_goal_x = is_yellow_ ? 2200.0 : -2200.0;
@@ -152,6 +166,10 @@ private:
   {
     blackboard_->set("attacker_id", msg->attacker_id);
     blackboard_->set("defender_id", msg->defender_id);
+    uint32_t my_id = blackboard_->get<uint32_t>("robot_id");
+
+    // Define se este robô específico é o atacante (o batedor da falta)
+    blackboard_->set("is_attacker", (my_id == msg->attacker_id));
   }
 
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
