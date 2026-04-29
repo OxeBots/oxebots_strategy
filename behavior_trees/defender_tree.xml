@@ -35,6 +35,7 @@
               defender_ball_dist="{defender_ball_dist}"
               attacker_ball_dist="{attacker_ball_dist}"/>
             <PressureBall ball="{ball}" my_goal_x="{my_goal_x}"/>
+            <KickBall robot_id="1" kick_speed="6.5" />
           </Sequence>
 
           <!-- Default -->
