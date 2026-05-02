@@ -1,0 +1,13 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="NormalPlaySubTree">
+    <ReactiveFallback name="RoleSelector">
+      
+      <!-- Se for o Robô 2, ele ataca usando a lógica do test_attack -->
+      <SubTree ID="AttackSubTree" />
+
+      <!-- Outros robôs apenas param para não atrapalhar, marcados como IDLE -->
+      <Halt reason="idle"/>
+
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

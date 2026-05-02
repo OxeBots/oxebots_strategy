@@ -1,0 +1,24 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+
+  <TreeNodesModel>
+    <Action ID="GoToPoint">
+      <input_port name="robot_id"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="tolerance"/>
+    </Action>
+  </TreeNodesModel>
+
+  <BehaviorTree ID="MainTree">
+    <Parallel success_count="1" failure_count="1">
+        <!-- Goleiro (Robô 0) -->
+        <GoToPoint robot_id="0" x="{my_goal_x}" y="0.0" tolerance="100.0" />
+
+        <!-- Atacante (Robô 1) -->
+        <GoToPoint robot_id="1" x="-800.0" y="400.0" tolerance="100.0" />
+
+        <!-- Defensor (Robô 2) -->
+        <GoToPoint robot_id="2" x="-1500.0" y="-400.0" tolerance="100.0" />
+    </Parallel>
+  </BehaviorTree>
+</root>

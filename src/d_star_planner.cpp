@@ -156,7 +156,7 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
         if (std::abs(u.x - start_cell_->x) <= 4 && std::abs(u.y - start_cell_->y) <= 4) return 1.0;
     }
     if (goal_cell_.has_value()) {
-        if (std::abs(u.x - goal_cell_->x) <= 4 && std::abs(u.y - goal_cell_->y) <= 4) return 1.0;
+        if (std::abs(u.x - goal_cell_->x) <= 8 && std::abs(u.y - goal_cell_->y) <= 8) return 1.0;
     }
 
     if (!current_grid_)
@@ -480,7 +480,7 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     double hz = safe_param("planning_rate_hz", 10.0).as_double();
 
     planning::PlannerConfig config;
-    config.robot_safety_radius = safe_param("robot_safety_radius", 0.15).as_double();
+    config.robot_safety_radius = safe_param("robot_safety_radius", 0.20).as_double();
     config.occupancy_threshold = safe_param("occupancy_threshold", 80).as_int();
     config.max_expansions = safe_param("max_expansions", 100000).as_int();
 

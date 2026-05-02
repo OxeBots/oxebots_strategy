@@ -1,0 +1,29 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="AttackSubTree">
+    <Sequence name="AttackSequence">
+      <!-- 1. TRAVA CRÍTICA: Só a instância correta do nó gerencia esse robô -->
+      <IsThisNodeID id="2" />
+
+      <!-- 2. Atualiza posições -->
+      <UpdateBallPosition robot_id="2"
+                          ball_x="{ball_x}" ball_y="{ball_y}" 
+                          pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                          is_ready_to_kick="{is_ready}"
+                          goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+      <ReactiveFallback name="AttackLogic">
+        <!-- 3. Chute de precisão -->
+        <ReactiveSequence name="FinalApproach">
+          <IsValueTrue value="{is_ready}" />
+          <PrecisionKick robot_id="2" 
+                         target_x="{opponent_goal_x}" 
+                         target_y="{opponent_goal_y}" 
+                         kick_speed="4.5" />
+        </ReactiveSequence>
+
+        <!-- 4. Ponto de preparação -->
+        <GoToPoint robot_id="2" x="{pkx}" y="{pky}" tolerance="50.0" />
+      </ReactiveFallback>
+    </Sequence>
+  </BehaviorTree>
+</root>

@@ -1,27 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <root BTCPP_format="4">
-    <BehaviorTree ID="MainTree">
-        <Fallback>
-            <!-- Lógica para o Goleiro (fixo ID 0) -->
-            <Sequence>
-                <IsValueTrue value="{is_goalkeeper}"/>
-                <Goalkeeper robot_id="{robot_id}"/>
-            </Sequence>
+  <BehaviorTree ID="MainTree">
+    <Fallback>
+      <Sequence>
+        <IsValueTrue value="{is_goalkeeper}"/>
+        <Goalkeeper robot_id="{robot_id}"/>
+      </Sequence>
+      <Sequence>
+        <IsMyRole role="attacker"/>
+        <GoToPoint robot_id="{robot_id}"
+                   x="{ball_x}"
+                   y="{ball_y}"
+                   tolerance="50"/>
+      </Sequence>
+      <Sequence>
+        <IsMyRole role="defender"/>
+        <GoToPoint robot_id="{robot_id}"
+                   x="-1000"
+                   y="0"
+                   tolerance="100"/>
+      </Sequence>
+      <GoToPoint robot_id="{robot_id}"
+                 x="0"
+                 y="0"
+                 tolerance="500"/>
+    </Fallback>
+  </BehaviorTree>
 
-            <!-- Lógica Dinâmica baseada no Role Assignent -->
-            <Sequence>
-                <IsMyRole role="attacker"/>
-                <!-- Atacante: Segue a bola reativamente -->
-                <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="50"/>
-            </Sequence>
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Action ID="GoToPoint">
+      <input_port name="robot_id"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="tolerance"/>
+    </Action>
+    <Action ID="Goalkeeper"
+            editable="true">
+      <input_port name="robot_id"/>
+    </Action>
+    <Condition ID="IsMyRole">
+      <input_port name="role"/>
+    </Condition>
+    <Condition ID="IsValueTrue"
+               editable="true">
+      <input_port name="value"/>
+    </Condition>
+  </TreeNodesModel>
 
-            <Sequence>
-                <IsMyRole role="defender"/>
-                <!-- Defensor: Fica recuado mas ainda pronto para trocar de papel -->
-                <GoToPoint robot_id="{robot_id}" x="-1000" y="0" tolerance="100"/>
-            </Sequence>
-
-            <!-- Fallback caso não tenha papel ou algo falhe -->
-            <GoToPoint robot_id="{robot_id}" x="0" y="0" tolerance="500"/>
-        </Fallback>
-    </BehaviorTree>
 </root>

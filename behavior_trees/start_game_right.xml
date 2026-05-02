@@ -1,0 +1,41 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+
+  <TreeNodesModel>
+    <Action ID="GoToPoint">
+      <input_port name="robot_id"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="tolerance"/>
+    </Action>
+    <Condition ID="IsValueTrue">
+      <input_port name="value"/>
+    </Condition>
+    <Condition ID="IsMyRole">
+      <input_port name="role"/>
+    </Condition>
+  </TreeNodesModel>
+
+  <BehaviorTree ID="MainTree">
+    <Repeat num_cycles="-1">
+      <Fallback name="RoleSelector">
+        
+        <!-- Cada robô executa apenas o seu galho -->
+        <Sequence name="GoalkeeperPos">
+          <IsValueTrue value="{is_goalkeeper}" />
+          <GoToPoint robot_id="0" x="{my_goal_x}" y="0.0" tolerance="100.0" />
+        </Sequence>
+
+        <Sequence name="AttackerPos">
+          <IsMyRole role="attacker" />
+          <GoToPoint robot_id="1" x="800.0" y="400.0" tolerance="100.0" />
+        </Sequence>
+
+        <Sequence name="DefenderPos">
+          <IsMyRole role="defender" />
+          <GoToPoint robot_id="2" x="1500.0" y="-400.0" tolerance="100.0" />
+        </Sequence>
+
+      </Fallback>
+    </Repeat>
+  </BehaviorTree>
+</root>

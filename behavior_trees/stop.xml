@@ -1,0 +1,9 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="StopSubTree">
+    <Sequence name="StopLogic">
+      <!-- Por enquanto, o STOP apenas para o robô. -->
+      <!-- No futuro, aqui entra a lógica de manter 500mm da bola. -->
+      <Halt/>
+    </Sequence>
+  </BehaviorTree>
+</root>

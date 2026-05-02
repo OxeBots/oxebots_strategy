@@ -1,50 +1,140 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
-  <BehaviorTree ID="MainTree">
-    <!-- Parallel no topo que nunca termina (aguarda 3 sucessos, mas GoToPoint sem tolerância nunca termina) -->
-    <Parallel success_count="3" failure_count="1">
 
-      <!-- Robô 0: Posicionamento fixo (Defesa lateral) -->
-      <GoToPoint robot_id="0" x="0.0" y="1500.0" />
 
-      <!-- Robô 1: Posicionamento fixo (Goleiro/Zagueiro) -->
-      <GoToPoint robot_id="1" x="{my_goal_x}" y="0.0" />
 
-      <!-- Lógica do Atacante (Robô 2) em Loop Infinito -->
-      <Repeat num_cycles="-1">
-        <Sequence name="AttackerLoop">
-          <!-- Atualiza dados da bola e verifica se está pronto para o chute -->
-          <UpdateBallPosition robot_id="2"
-                              ball_x="{ball_x}" ball_y="{ball_y}" 
-                              pre_kick_x="{pkx}" pre_kick_y="{pky}" 
-                              is_ready_to_kick="{is_ready}"
-                              goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-
-          <Sequence name="Robot2AttackLogic">
-             <!-- Fase de Preparação (Pre-Kick): Pula se já estiver alinhado ou perto -->
-             <Fallback>
-                <Condition ID="IsValueTrue" value="{is_ready}" />
-                <IsBallClose robot_id="2" distance_threshold="400.0" />
-                <GoToPoint robot_id="2" x="{pkx}" y="{pky}" tolerance="150.0" />
-             </Fallback>
-
-             <!-- Fase de Rush e Chute -->
-             <Parallel success_count="1" failure_count="1">
-                <!-- Empurra o robô contra a bola -->
-                <GoToPoint robot_id="2" x="{ball_x}" y="{ball_y}" />
-
-                <Sequence>
-                   <RetryUntilSuccessful num_attempts="-1">
-                      <IsBallClose robot_id="2" distance_threshold="140.0" />
-                   </RetryUntilSuccessful>
-                   <!-- Chuta enquanto avança (x_velocity 0.5 configurado no nó) -->
-                   <KickBall robot_id="2" kick_speed="6.5" />
-                   <Sleep msec="1000" />
-                </Sequence>
-             </Parallel>
-          </Sequence>
-        </Sequence>
-      </Repeat>
-
-    </Parallel>
+  <BehaviorTree ID="GoalkeeperBehavior">
+    <Goalkeeper robot_id="0" />
   </BehaviorTree>
+
+  <BehaviorTree ID="AttackerBehavior">
+    <ReactiveFallback name="AttackLogic">
+      <!-- Se o robô estiver no ponto de pré-chute (alinhado), executa o chute de precisão -->
+      <ReactiveSequence name="FinalApproach">
+        <IsValueTrue value="{is_ready}" />
+        <PrecisionKick robot_id="{robot_id}" 
+                       target_x="{opponent_goal_x}" 
+                       target_y="{opponent_goal_y}" 
+                       kick_speed="4.5" />
+      </ReactiveSequence>
+      
+      <!-- Se não estiver pronto, usa o GoToPoint para se posicionar no ponto de pré-chute -->
+      <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="50.0" />
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="DefenderBehavior">
+    <ReactiveFallback name="DefendLogic">
+      <ReactiveSequence name="SupportAttack">
+        <IsValueTrue value="{is_adv}" />
+        <GoToPoint robot_id="{robot_id}" x="0.0" y="{ball_y}" tolerance="150.0" />
+      </ReactiveSequence>
+      <GoToPoint robot_id="{robot_id}" x="-1500.0" y="{ball_y}" tolerance="150.0" />
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <BehaviorTree ID="MainTree">
+    <ReactiveFallback name="MainRoot">
+      
+      <!-- 1. BLOCO DO GOLEIRO (Execução Imediata e Exclusiva) -->
+      <ReactiveSequence name="GoalkeeperBranch">
+         <IsValueTrue value="{is_goalkeeper}" />
+         <SubTree ID="GoalkeeperBehavior" />
+      </ReactiveSequence>
+
+      <!-- 2. BLOCO DOS JOGADORES DE LINHA (ID 1 e 2) -->
+      <Sequence name="FieldPlayersBranch">
+         
+         <!-- FASE A: POSICIONAMENTO INICIAL (Só roda uma vez) -->
+         <ForceSuccess>
+            <Timeout msec="5000">
+               <ReactiveFallback name="InitialPlacement">
+                  <ReactiveSequence name="PosicionaAtacante">
+                     <IsMyRole role="attacker" />
+                     <GoToPoint robot_id="{robot_id}" x="-800.0" y="400.0" tolerance="100.0" />
+                  </ReactiveSequence>
+                  <ReactiveSequence name="PosicionaDefensor">
+                     <IsMyRole role="defender" />
+                     <GoToPoint robot_id="{robot_id}" x="-1500.0" y="-400.0" tolerance="100.0" />
+                  </ReactiveSequence>
+               </ReactiveFallback>
+            </Timeout>
+         </ForceSuccess>
+
+         
+         <Repeat num_cycles="-1">
+            <ReactiveSequence name="GameLoop">
+               <UpdateBallPosition robot_id="{robot_id}"
+                                   ball_x="{ball_x}" ball_y="{ball_y}" 
+                                   pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                   is_ready_to_kick="{is_ready}"
+                                   ball_in_enemy_half="{is_adv}"
+                                   goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+               <ReactiveFallback name="DynamicRoleSelector">
+                  <ReactiveSequence name="ExecuteAttacker">
+                    <IsMyRole role="attacker" />
+                    <SubTree ID="AttackerBehavior" 
+                             robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" 
+                             pkx="{pkx}" pky="{pky}" is_ready="{is_ready}" />
+                  </ReactiveSequence>
+
+                  <ReactiveSequence name="ExecuteDefender">
+                    <IsMyRole role="defender" />
+                    <SubTree ID="DefenderBehavior" 
+                             robot_id="{robot_id}" ball_y="{ball_y}" is_adv="{is_adv}" />
+                  </ReactiveSequence>
+               </ReactiveFallback>
+            </ReactiveSequence>
+         </Repeat>
+      </Sequence>
+
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- Definições de Nós para o Groot2 -->
+  <TreeNodesModel>
+    <Action ID="GoToPoint">
+      <input_port name="robot_id">ID do robô</input_port>
+      <input_port name="x">Coordenada X de destino</input_port>
+      <input_port name="y">Coordenada Y de destino</input_port>
+      <input_port name="tolerance" default="100.0">Tolerância de chegada</input_port>
+    </Action>
+
+    <Action ID="PrecisionKick">
+      <input_port name="robot_id">ID do robô</input_port>
+      <input_port name="target_x">X do alvo (gol)</input_port>
+      <input_port name="target_y">Y do alvo (gol)</input_port>
+      <input_port name="kick_speed" default="3.5">Velocidade do chute (m/s)</input_port>
+    </Action>
+
+    <Action ID="UpdateBallPosition">
+      <input_port name="robot_id">ID do robô</input_port>
+      <input_port name="ball_x">X da bola</input_port>
+      <input_port name="ball_y">Y da bola</input_port>
+      <input_port name="goal_x">X do gol alvo</input_port>
+      <input_port name="goal_y">Y do gol alvo</input_port>
+      <output_port name="pre_kick_x">X do ponto de alinhamento</output_port>
+      <output_port name="pre_kick_y">Y do ponto de alinhamento</output_port>
+      <output_port name="is_ready_to_kick">Booleano: pronto para chutar?</output_port>
+      <output_port name="ball_in_enemy_half">Booleano: bola no campo inimigo?</output_port> 
+    </Action>
+
+    <Action ID="Goalkeeper">
+      <input_port name="robot_id">ID do robô</input_port>
+    </Action>
+
+    <Condition ID="IsValueTrue">
+      <input_port name="value">Valor booleano a checar</input_port>
+    </Condition>
+
+    <Condition ID="IsMyRole">
+      <input_port name="role">Papel (attacker/defender)</input_port>
+    </Condition>
+    
+    <Action ID="KickBall">
+      <input_port name="robot_id">ID do robô</input_port>
+      <input_port name="kick_speed" default="3.0">Velocidade</input_port>
+    </Action>
+  </TreeNodesModel>
+
 </root>

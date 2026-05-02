@@ -3,6 +3,7 @@
 #include "behaviortree_cpp/action_node.h"
 #include "rclcpp/rclcpp.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 
 namespace oxebots_strategy
 {
@@ -24,6 +25,7 @@ private:
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
   std::mutex data_mutex_;
 };

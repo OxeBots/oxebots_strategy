@@ -9,10 +9,12 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(oxebots_interfaces REQUIRED)
+find_package(ssl_league_msgs REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
@@ -31,14 +33,19 @@ add_executable(
   src/update_ball_position_node.cpp
   src/is_ball_close_condition.cpp
   src/goalkeeper_node.cpp
+  src/precision_kick_node.cpp
 )
 
 ament_target_dependencies(
   strategy_node
   rclcpp
   oxebots_interfaces
+  ssl_league_msgs
   behaviortree_cpp
   ament_index_cpp
+  geometry_msgs
+  nav_msgs
+  visualization_msgs
 )
 
 target_include_directories(strategy_node PUBLIC
@@ -57,6 +64,7 @@ ament_target_dependencies(
   oxebots_interfaces
   geometry_msgs
   nav_msgs
+  visualization_msgs
   sensor_msgs
   tf2_ros
 )

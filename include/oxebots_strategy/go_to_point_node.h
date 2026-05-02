@@ -4,6 +4,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 #include <optional>
 
 namespace oxebots_strategy
@@ -23,10 +24,12 @@ public:
 private:
   void publishGoal();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
+  void publishMarkers();
   std::optional<oxebots_interfaces::msg::RobotGameData> getRobotData(unsigned int robot_id);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
 
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;

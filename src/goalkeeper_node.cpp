@@ -86,12 +86,12 @@ BT::NodeStatus GoalkeeperNode::onStart()
   goal_msg->robot_id = robot_id_;
   
   goal_msg->pose.header.stamp = node_->now();
-  goal_msg->pose.header.frame_id = "odom"; 
-  goal_msg->pose.pose.position.x = my_goal_x_;
+  goal_msg->pose.header.frame_id = "map"; 
+  goal_msg->pose.pose.position.x = my_goal_x_ / 1000.0;
   goal_msg->pose.pose.position.y = 0.0; // Centro do gol
   
   // Orientação: olhar para o centro do campo (oposto ao gol)
-  double target_w = normalizeAngle(std::atan2(0.0 - 0.0, (is_yellow_team_ ? -1.0 : 1.0) * 0.0 - my_goal_x_)); // Olhar para o centro do campo
+  double target_w = normalizeAngle(std::atan2(0.0 - 0.0, (is_yellow_team_ ? -1.0 : 1.0) * 0.0 - (my_goal_x_ / 1000.0))); 
   goal_msg->pose.pose.orientation.x = 0.0;
   goal_msg->pose.pose.orientation.y = 0.0;
   goal_msg->pose.pose.orientation.z = std::sin(target_w * 0.5);
@@ -122,12 +122,12 @@ BT::NodeStatus GoalkeeperNode::onRunning()
   goal_msg->robot_id = robot_id_;
   
   goal_msg->pose.header.stamp = node_->now();
-  goal_msg->pose.header.frame_id = "odom"; 
-  goal_msg->pose.pose.position.x = my_goal_x_; // X fixo na linha do gol
-  goal_msg->pose.pose.position.y = target_y;
+  goal_msg->pose.header.frame_id = "map"; 
+  goal_msg->pose.pose.position.x = my_goal_x_ / 1000.0; // X fixo na linha do gol
+  goal_msg->pose.pose.position.y = target_y / 1000.0;
   
   // Orientação: olhar para o centro do campo (oposto ao gol)
-  double target_w = normalizeAngle(std::atan2(0.0 - target_y, (is_yellow_team_ ? -1.0 : 1.0) * 0.0 - my_goal_x_)); // Olhar para o centro do campo
+  double target_w = normalizeAngle(std::atan2(0.0 - (target_y / 1000.0), (is_yellow_team_ ? -1.0 : 1.0) * 0.0 - (my_goal_x_ / 1000.0))); 
   goal_msg->pose.pose.orientation.x = 0.0;
   goal_msg->pose.pose.orientation.y = 0.0;
   goal_msg->pose.pose.orientation.z = std::sin(target_w * 0.5);

@@ -83,19 +83,8 @@ void PathFollowerNode::calculate_and_move() {
     movement::Coordinate target_pt;
     bool target_found = false;
 
-    // --- Lógica de Ataque Direto (Short-circuit) ---
-    // Se estiver a menos de 400mm do alvo (bola ou pre_kick), vai direto para ignorar o obstáculo no mapa
-    if (target_goal_.has_value()) {
-        double dist_to_final = std::hypot(target_goal_->x - current_pos.x, target_goal_->y - current_pos.y);
-        if (dist_to_final < 400.0) {
-            target_pt = *target_goal_;
-            target_found = true;
-        }
-    }
-
-    // --- Seguir Rota do D* (Caso não esteja perto o suficiente para o ataque direto) ---
-    if (!target_found) {
-        if (last_path_ && !last_path_->poses.empty()) {
+    // --- Seguir Rota do D* ---
+    if (last_path_ && !last_path_->poses.empty()) {
             double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
             for (const auto& pose_stamped : last_path_->poses) {
                 float px = pose_stamped.pose.position.x * 1000.0f;
@@ -128,7 +117,6 @@ void PathFollowerNode::calculate_and_move() {
             cmd_vel_pub_->publish(std::move(cmd_msg));
             return;
         }
-    }
 
     if (!target_found) return;
 
