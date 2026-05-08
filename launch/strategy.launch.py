@@ -8,13 +8,19 @@ from launch_ros.actions import Node
 def generate_launch_description():
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
     bringup_pkg_share = get_package_share_directory("oxebots_bringup")
-    
+
     bringup_config_file = os.path.join(
         bringup_pkg_share, "config", "ssl_config.yaml"
     )
 
     # Helper to create nodes for each robot
+    # Helper to create nodes for each robot
     def create_robot_nodes(robot_id):
+
+        # Mapeia qual ID roda qual árvore de comportamento
+        trees = ["goalkeeper_tree.xml", "simple_attack.xml", "test_tree.xml"]
+        tree_to_use = trees[robot_id]
+
         planner = Node(
             package="oxebots_strategy",
             executable="d_star_planner_node",
@@ -36,7 +42,8 @@ def generate_launch_description():
             output="screen",
             parameters=[
                 bringup_config_file,
-                {"robot_id": robot_id}
+                {"robot_id": robot_id},
+                {"bt_xml_path": tree_to_use}
             ],
             cwd=strategy_pkg_share,
         )

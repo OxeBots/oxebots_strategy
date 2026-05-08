@@ -14,7 +14,6 @@ SmotherSaveNode::SmotherSaveNode(const std::string & name, const BT::NodeConfig 
      RCLCPP_ERROR(node_->get_logger(), "Erro: porta [robot_id] ausente");
  }
 
-
  goal_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotGoal>("/robot_goal", 10);
  cmd_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
 }

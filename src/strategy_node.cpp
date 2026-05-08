@@ -30,7 +30,7 @@ public:
 
     role_sub_ = this->create_subscription<oxebots_interfaces::msg::RoleAssignment>(
       "/role_assignment", 10, std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
-    
+
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
       "game_data", 10, std::bind(&StrategyNode::game_callback, this, std::placeholders::_1));
   }
@@ -39,7 +39,7 @@ public:
   {
     try {
       std::string package_share_directory = ament_index_cpp::get_package_share_directory("oxebots_strategy");
-      
+
       // Agora o padrão é test_tree dentro da pasta behavior_trees
       std::string tree_path = this->get_parameter("bt_xml_path").as_string();
       if (tree_path.empty()) {
@@ -109,7 +109,7 @@ public:
     } catch (...) {
         rate_hz = 60.0;
     }
-    
+
     if (rate_hz <= 0.1) rate_hz = 60.0;
     rclcpp::Rate rate(rate_hz);
 
@@ -123,7 +123,7 @@ public:
       } else {
         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Aguardando dados...");
       }
-      
+
       try {
           rate.sleep();
       } catch (...) {
@@ -142,7 +142,7 @@ private:
     blackboard_->set("opponent_goal_x", opponent_goal_x);
     blackboard_->set("opponent_goal_y", 0.0);
     blackboard_->set("is_yellow", is_yellow_);
-    blackboard_->set("attacker_id", static_cast<uint32_t>(1)); 
+    blackboard_->set("attacker_id", static_cast<uint32_t>(1));
     blackboard_->set("defender_id", static_cast<uint32_t>(2));
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
     blackboard_->set("is_goalkeeper", (robot_id_ == 0));
@@ -156,9 +156,10 @@ private:
 
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
   {
-    blackboard_->set("ball_x", static_cast<double>(msg->ball.x));
-    blackboard_->set("ball_y", static_cast<double>(msg->ball.y));
-    has_data_.store(true);
+    blackboard_->set("ball_x", msg->ball.x);
+    blackboard_->set("ball_y", msg->ball.y);
+
+    has_data_ = true;
   }
 
   bool is_yellow_;
@@ -175,7 +176,7 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<StrategyNode>();
-  
+
   if (node->init()) {
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(node);
