@@ -4,59 +4,55 @@
     <Sequence name="SelectedDefenderOnly">
       <IsRobotId robot_id="1"/>
 
-      <Fallback name="Root">
+      <ReactiveFallback name="Root">
 
-      <!-- Segurança -->
-      <Sequence>
-        <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
-        <GoToSafe my_goal_x="{my_goal_x}" ball="{ball}"/>
-      </Sequence>
+        <!-- ============================================================ -->
+        <!-- Estágio 1: Bola no campo adversário                          -->
+        <!-- Zagueiro acompanha bola prevista a distância fixa,           -->
+        <!-- nunca cruza o meio-campo e nunca entra na pequena área       -->
+        <!-- ============================================================ -->
+        <Sequence name="BallInOpponentField">
+          <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
+          <ShadowBall
+            ball="{ball}"
+            ball_vel="{ball_vel}"
+            my_goal_x="{my_goal_x}"/>
+        </Sequence>
 
-      <!-- Defesa -->
-      <Sequence>
-        <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
+        <!-- ============================================================ -->
+        <!-- Estágio 2: Bola no nosso campo                               -->
+        <!-- ============================================================ -->
+        <ReactiveFallback name="BallInOurField">
 
-        <Fallback>
-
-          <!-- Perigo -->
-          <Sequence>
-            <IsBallNearGoal
-              ball_x="{ball_x}"
-              ball_y="{ball_y}"
-              my_goal_x="{my_goal_x}"
-              goal_x_threshold="{goal_x_threshold}"
-              goal_band_half_width="{goal_band_half_width}"/>
-            <BlockShot ball="{ball}" my_goal_x="{my_goal_x}"/>
+          <!-- 2.1: Oponente com posse de bola                            -->
+          <!-- Marca o oponente: posiciona entre bola e gol a dist. fixa  -->
+          <!-- Nunca avança sobre o oponente, nunca entra na pequena área  -->
+          <Sequence name="OpponentHasPossession">
+            <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
+            <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}"/>
           </Sequence>
 
-          <!-- Pressão -->
-          <Sequence>
-            <IsDefenderCloserThanAttacker
-              defender_ball_dist="{defender_ball_dist}"
-              attacker_ball_dist="{attacker_ball_dist}"/>
-            <PressureBall ball="{ball}" my_goal_x="{my_goal_x}"/>
-            <KickBall robot_id="1" kick_speed="6.5" />
-          </Sequence>
+          <!-- 2.2: Oponente sem posse de bola                            -->
+          <!-- Ir até a bola e chutar em direção ao gol adversário        -->
+          <!-- Padrão: GoToPoint em paralelo com espera IsBallClose+Kick  -->
+          <Parallel success_count="1" failure_count="1" name="ClearBall">
 
-          <!-- Default -->
-          <BlockAngle ball="{ball}" my_goal_x="{my_goal_x}"/>
+            <!-- Empurra o robô continuamente em direção à bola (com clamp da pequena área) -->
+            <GoToClamped x="{ball_x}" y="{ball_y}" my_goal_x="{my_goal_x}"/>
 
-        </Fallback>
-      </Sequence>
+            <!-- Quando chegar perto o suficiente, chuta                  -->
+            <Sequence>
+              <RetryUntilSuccessful num_attempts="-1">
+                <IsBallClose robot_id="1" distance_threshold="140.0"/>
+              </RetryUntilSuccessful>
+              <KickBall robot_id="1" kick_speed="6.5"/>
+            </Sequence>
 
-      <!-- Interceptação -->
-      <Sequence>
-        <IsBallMovingTowardsGoal
-          ball_vx="{ball_vx}"
-          my_goal_x="{my_goal_x}"
-          velocity_threshold="{moving_towards_goal_velocity_threshold}"/>
-        <InterceptBall ball="{ball}" ball_vel="{ball_vel}"/>
-      </Sequence>
+          </Parallel>
 
-      <!-- Posição padrão -->
-      <DefensivePosition ball="{ball}" my_goal_x="{my_goal_x}"/>
+        </ReactiveFallback>
 
-      </Fallback>
+      </ReactiveFallback>
 
     </Sequence>
 

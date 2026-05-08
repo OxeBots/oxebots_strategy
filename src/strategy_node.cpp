@@ -29,17 +29,10 @@ public:
     this->declare_parameter<int>("robot_id", 1);
     this->declare_parameter<double>("execution_rate", 60.0);
     this->declare_parameter<double>("possession_distance", 220.0);
-    this->declare_parameter<double>("goal_x_threshold", 700.0);
-    this->declare_parameter<double>("goal_band_half_width", 900.0);
-    this->declare_parameter<double>("moving_towards_goal_velocity_threshold", 120.0);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     robot_id_ = this->get_parameter("robot_id").as_int();
     possession_distance_mm_ = this->get_parameter("possession_distance").as_double();
-    goal_x_threshold_mm_ = this->get_parameter("goal_x_threshold").as_double();
-    goal_band_half_width_mm_ = this->get_parameter("goal_band_half_width").as_double();
-    moving_towards_goal_velocity_threshold_mm_s_ =
-      this->get_parameter("moving_towards_goal_velocity_threshold").as_double();
 
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
@@ -86,18 +79,12 @@ public:
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
 
-      // Registro dos nós específicos da árvore do defensor.
+      // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
       factory_.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
-      factory_.registerNodeType<IsBallNearGoal>("IsBallNearGoal");
-      factory_.registerNodeType<IsDefenderCloserThanAttacker>("IsDefenderCloserThanAttacker");
-      factory_.registerNodeType<IsBallMovingTowardsGoal>("IsBallMovingTowardsGoal");
-      factory_.registerNodeType<GoToSafe>("GoToSafe");
-      factory_.registerNodeType<BlockShot>("BlockShot");
-      factory_.registerNodeType<PressureBall>("PressureBall");
-      factory_.registerNodeType<BlockAngle>("BlockAngle");
-      factory_.registerNodeType<InterceptBall>("InterceptBall");
-      factory_.registerNodeType<DefensivePosition>("DefensivePosition");
+      factory_.registerNodeType<ShadowBall>("ShadowBall");
+      factory_.registerNodeType<MarkOpponent>("MarkOpponent");
+      factory_.registerNodeType<GoToClamped>("GoToClamped");
 
       // Registrar condição para verificar booleanos do blackboard
       factory_.registerSimpleCondition("IsValueTrue", [&](BT::TreeNode& node) {
@@ -156,7 +143,7 @@ public:
     rclcpp::Rate rate(rate_hz);
 
     while (rclcpp::ok()) {
-     if (has_data_ || true) {
+     if (has_data_) {
         try {
           tree_.tickOnce();
         } catch (const std::exception& e) {
@@ -200,10 +187,6 @@ private:
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
     blackboard_->set("is_goalkeeper", (robot_id_ == 0));
 
-    // Chaves necessárias para a defender_tree.
-    blackboard_->set("goal_x_threshold", goal_x_threshold_mm_);
-    blackboard_->set("goal_band_half_width", goal_band_half_width_mm_);
-    blackboard_->set("moving_towards_goal_velocity_threshold", moving_towards_goal_velocity_threshold_mm_s_);
     blackboard_->set("ball_x", 0.0);
     blackboard_->set("ball_y", 0.0);
     blackboard_->set("ball_vx", 0.0);
@@ -294,9 +277,6 @@ private:
   uint32_t defender_id_{2};
 
   double possession_distance_mm_{220.0};
-  double goal_x_threshold_mm_{700.0};
-  double goal_band_half_width_mm_{900.0};
-  double moving_towards_goal_velocity_threshold_mm_s_{120.0};
 
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};

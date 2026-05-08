@@ -18,7 +18,7 @@ def generate_launch_description():
     # Argumento para escolher a árvore
     declare_bt_xml_arg = DeclareLaunchArgument(
         "bt_xml",
-        default_value="corner_kick.xml",
+        default_value="defender_tree.xml",
         description="Behavior Tree XML file name",
     )
 

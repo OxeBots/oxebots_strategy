@@ -47,24 +47,6 @@ target_include_directories(strategy_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-add_executable(
-  defender_strategy_node
-  src/main_defender.cpp
-  src/defender_nodes.cpp
-)
-
-ament_target_dependencies(
-  defender_strategy_node
-  rclcpp
-  oxebots_interfaces
-  behaviortree_cpp
-  ament_index_cpp
-)
-
-target_include_directories(defender_strategy_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
 
 add_executable(
   movement_calculation_node
@@ -117,7 +99,6 @@ ament_target_dependencies(
 
 install(TARGETS
   strategy_node
-  defender_strategy_node
   movement_calculation_node
   d_star_planner_node
   role_assigner_node
