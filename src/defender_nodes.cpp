@@ -293,10 +293,13 @@ BT::NodeStatus GoToClamped::publishClamped()
     x = penaltyClamp(x, my_goal_x, penalty_depth);
 
     // Orientacao: apontar para o gol adversario (opponent_goal_x no blackboard)
-    double op_x = 0.0;
-    double op_y = 0.0;
-    config().blackboard->get("opponent_goal_x", op_x);
-    config().blackboard->get("opponent_goal_y", op_y);
+    double op_x = 2200.0, op_y = 0.0;
+    if (!config().blackboard->get("opponent_goal_x", op_x)) {
+        // Fallback
+    }
+    if (!config().blackboard->get("opponent_goal_y", op_y)) {
+        // Fallback
+    }
     const double theta = std::atan2(op_y - y, op_x - x);
 
     sendToController(Pose2D{x, y, theta});

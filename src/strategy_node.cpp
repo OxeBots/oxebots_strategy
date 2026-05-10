@@ -83,14 +83,7 @@ public:
         tree_path = package_share_directory + "/behavior_trees/" + tree_path;
       }
 
-      std::ifstream file(tree_path);
-      if (!file.good()) {
-        RCLCPP_ERROR(this->get_logger(), "ARQUIVO NÃO ENCONTRADO: %s", tree_path.c_str());
-        return false;
-      }
-      file.close();
-
-      RCLCPP_INFO(this->get_logger(), "Carregando árvore: %s", tree_path.c_str());
+      RCLCPP_INFO(this->get_logger(), "Robô %d iniciando com árvore: %s", robot_id_, tree_path.c_str());
 
       // Configura o contexto de controle utilizado pelos nós da defender_tree.
       configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
@@ -171,8 +164,13 @@ public:
       if (fs::exists(bt_dir) && fs::is_directory(bt_dir)) {
           for (const auto & entry : fs::directory_iterator(bt_dir)) {
               if (entry.path().extension() == ".xml" && entry.path().string() != tree_path) {
-                  RCLCPP_INFO(this->get_logger(), "Registrando subárvore: %s", entry.path().filename().string().c_str());
-                  factory_.registerBehaviorTreeFromFile(entry.path().string());
+                  try {
+                      RCLCPP_INFO(this->get_logger(), "Registrando subárvore: %s", entry.path().filename().string().c_str());
+                      factory_.registerBehaviorTreeFromFile(entry.path().string());
+                  } catch (const std::exception& e) {
+                      RCLCPP_WARN(this->get_logger(), "Falha ao registrar subárvore %s: %s", 
+                                  entry.path().filename().string().c_str(), e.what());
+                  }
               }
           }
       }
@@ -226,17 +224,6 @@ public:
   }
 
 private:
-  void referee_callback(const oxebots_interfaces::msg::Referee::SharedPtr msg)
-  {
-    // Lógica para Falta (Ex: 8: Yellow, 9: Blue)
-    bool our_foul = (is_yellow_ && msg->command == 8) || (!is_yellow_ && msg->command == 9);
-    
-    // Seta no blackboard para a árvore ler
-    blackboard_->set("is_free_kick", our_foul);
-    
-  }
-  rclcpp::Subscription<oxebots_interfaces::msg::Referee>::SharedPtr referee_sub_;
-
   void setup_blackboard()
   {
     double my_goal_x = is_yellow_ ? 2200.0 : -2200.0;
@@ -358,6 +345,11 @@ private:
     blackboard_->set("gc_command", static_cast<int>(msg->command));
     blackboard_->set("gc_stage", static_cast<int>(msg->stage));
 
+    // Lógica para Falta trazida da branch defender (adaptada para o comando do GC padrão da liga)
+    // 8: DIRECT_FREE_YELLOW, 9: DIRECT_FREE_BLUE
+    bool our_foul = (is_yellow_ && msg->command == 8) || (!is_yellow_ && msg->command == 9);
+    blackboard_->set("is_free_kick", our_foul);
+
     // O bridge da A-TEAM envia designated_position como um array opcional
     if (!msg->designated_position.empty()) {
         blackboard_->set("designated_x", static_cast<double>(msg->designated_position[0].x * 1000.0));
@@ -370,8 +362,8 @@ private:
 
   bool is_yellow_;
   int robot_id_;
-  uint32_t attacker_id_{1};
-  uint32_t defender_id_{2};
+  uint32_t attacker_id_{2};
+  uint32_t defender_id_{1};
 
   double possession_distance_mm_{220.0};
 

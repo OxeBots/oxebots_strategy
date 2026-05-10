@@ -9,35 +9,41 @@
         <Halt reason="gc"/>
       </Sequence>
 
-      <!-- 2. JOGO / ATAQUE (Igual ao test_attack) -->
-      <Repeat num_cycles="-1">
-        <ReactiveSequence name="AttackerRole">
-          <!-- Só o robô 2 entra aqui -->
-          <IsThisNodeID id="2" />
-          
-          <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
-          <UpdateBallPosition robot_id="2"
-                              ball_x="{ball_x}" ball_y="{ball_y}" 
-                              pre_kick_x="{pkx}" pre_kick_y="{pky}" 
-                              is_ready_to_kick="{is_ready}"
-                              goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-          
-          <ReactiveFallback name="AttackLogic">
-            <!-- Tenta Chutar -->
-            <ReactiveSequence name="FinalApproach">
-              <IsValueTrue value="{is_ready}" />
-              <PrecisionKick robot_id="2" 
-                             target_x="{opponent_goal_x}" 
-                             target_y="{opponent_goal_y}" 
-                             kick_speed="4.5" />
-            </ReactiveSequence>
-            <!-- Anda para o ponto de preparação (Alvo dinâmico) -->
-            <GoToPoint robot_id="2" x="{pkx}" y="{pky}" tolerance="50.0" />
-          </ReactiveFallback>
-        </ReactiveSequence>
-      </Repeat>
+      <!-- 2. JOGO / ATAQUE (Baseado no papel de atacante) -->
+      <ReactiveSequence name="AttackerRole">
+        <IsMyRole role="attacker" />
+        <Repeat num_cycles="-1">
+          <ReactiveSequence name="AttackerLogicLoop">
+            <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
+            <UpdateBallPosition robot_id="{robot_id}"
+                                ball_x="{ball_x}" ball_y="{ball_y}" 
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                is_ready_to_kick="{is_ready}"
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+            
+            <ReactiveFallback name="AttackLogicActions">
+              <!-- Lógica de Chute Idêntica ao Zagueiro (Suave e Agressiva) -->
+              <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                <!-- Alvo é a BOLA diretamente -->
+                <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="50.0" />
+                
+                <Sequence>
+                  <!-- Mantém a sequência ativa até a bola estar perto -->
+                  <RetryUntilSuccessful num_attempts="-1">
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="180.0"/>
+                  </RetryUntilSuccessful>
+                  <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+                </Sequence>
+              </Parallel>
+            </ReactiveFallback>
+          </ReactiveSequence>
+        </Repeat>
+      </ReactiveSequence>
 
-      <!-- 3. RESERVAS (Robôs 0 e 1 ficam parados) -->
+      <!-- 3. DEFESA (Robô 1 - Lógica vinda da branch defender) -->
+      <SubTree ID="DefenderTree" _autoremap="true" />
+
+      <!-- 4. RESERVAS (Outros robôs ficam parados) -->
       <Halt reason="idle"/>
 
     </ReactiveFallback>

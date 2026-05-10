@@ -1,8 +1,8 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
-  <BehaviorTree ID="MainTree">
+<root main_tree_to_execute="DefenderTree" BTCPP_format="4">
+  <BehaviorTree ID="DefenderTree">
 
     <Sequence name="SelectedDefenderOnly">
-      <IsRobotId robot_id="1"/>
+      <IsMyRole role="defender"/>
 
       <ReactiveFallback name="Root">
 
@@ -43,9 +43,9 @@
             <!-- Quando chegar perto o suficiente, chuta                  -->
             <Sequence>
               <RetryUntilSuccessful num_attempts="-1">
-                <IsBallClose robot_id="1" distance_threshold="140.0"/>
+                <IsBallClose robot_id="{robot_id}" distance_threshold="140.0"/>
               </RetryUntilSuccessful>
-              <KickBall robot_id="1" kick_speed="6.5"/>
+              <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
             </Sequence>
 
           </Parallel>

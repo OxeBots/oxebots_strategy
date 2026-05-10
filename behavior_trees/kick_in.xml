@@ -1,3 +1,4 @@
+<root BTCPP_format="4">
 <BehaviorTree ID="KickInTree">
     <Fallback>
         <Sequence name="Kicker">
@@ -8,3 +9,4 @@
         <GoToPoint x="{ball_x -500}" y="{ball_y * 0.5}"/>
     </Fallback>
 </BehaviorTree>
+</root>

@@ -1,3 +1,4 @@
+<root BTCPP_format="4">
 <BehaviorTree ID="FreeKickTree">
     <Fallback>
         <Sequence name="Kicker">
@@ -8,3 +9,4 @@
         <GoToPoint x="-500" y="0"/>
     </Fallback>
 </BehaviorTree>
+</root>
