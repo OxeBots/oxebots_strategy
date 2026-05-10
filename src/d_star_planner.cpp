@@ -503,6 +503,9 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     goal_sub_ = create_subscription<oxebots_interfaces::msg::RobotGoal>(
       "/robot_goal", qos, std::bind(&DStarPlannerNode::goal_callback, this, std::placeholders::_1));
 
+    geometry_sub_ = create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
+    "/field_geometry", qos, std::bind(&DStarPlannerNode::geometry_callback, this, std::placeholders::_1));
+
     planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / hz)),
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
@@ -510,10 +513,65 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
 void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(node_mutex_);
-    last_map_data_ = msg;
+    
+    // 1. Criamos uma cópia mutável do mapa para podermos "desenhar" nele 
+    // sem afetar os mapas dos robôs atacantes
+    auto custom_map = std::make_shared<nav_msgs::msg::OccupancyGrid>(*msg);
 
-    if (planner_)
-        planner_->setOccupancyGrid(msg);
+    // 2. Se for o zagueiro (robô 2) e já tivermos a geometria, criamos a Parede de Vidro!
+    if (robot_id_ == 2 && last_geometry_) {
+        double res = custom_map->info.resolution;
+        double origin_x = custom_map->info.origin.position.x;
+        double origin_y = custom_map->info.origin.position.y;
+        int width = custom_map->info.width;
+        int height = custom_map->info.height;
+
+        // A geometria da SSL vem em milímetros, mas o D* e o mapa usam METROS
+        double field_length = last_geometry_->field.field_length / 1000.0;
+        double penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
+        double penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+
+        // Calcula a linha exata da área
+        double penalty_x = (field_length / 2.0) - penalty_depth;
+        double penalty_y_min = -penalty_width / 2.0;
+        double penalty_y_max = penalty_width / 2.0;
+
+        // Adiciona a margem de segurança do robô (ex: 9cm = 0.09m) para as rodas não pisarem na linha
+        double margin = 0.09;
+        double safe_penalty_x = penalty_x - margin;
+        double safe_y_min = penalty_y_min - margin;
+        double safe_y_max = penalty_y_max + margin;
+
+        // Varre absolutamente TODAS as células do mapa
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                // Converte de "índice da grade" para "metros reais no campo"
+                double world_x = origin_x + (x * res);
+                double world_y = origin_y + (y * res);
+
+                // Bloqueia as áreas de pênalti de AMBOS os lados (o zagueiro não deve entrar em nenhuma área)
+                bool in_positive_area = (world_x > safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+                bool in_negative_area = (world_x < -safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+
+                if (in_positive_area || in_negative_area) {
+                    // O peso 100 transforma o espaço vazio em um bloco de concreto impenetrável para o D*
+                    custom_map->data[y * width + x] = 100; 
+                }
+            }
+        }
+    }
+
+    // 3. Salva e envia o mapa "grafitado" com as barreiras para o cérebro do D* Planner
+    last_map_data_ = custom_map;
+    if (planner_) {
+        planner_->setOccupancyGrid(last_map_data_);
+    }
+}
+
+void DStarPlannerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(node_mutex_);
+    last_geometry_ = msg;
 }
 
 void DStarPlannerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg)
@@ -564,6 +622,26 @@ void DStarPlannerNode::plan_and_publish()
 
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
+
+    if (robot_id_ == 2 && last_geometry_) {
+        // A geometria da SSL vem em milímetros, mas o D* usa METROS.
+        // Dividimos por 1000.0 para alinhar a matemática.
+        double field_length = last_geometry_->field.field_length / 1000.0;
+        double penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
+        double penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+
+        double penalty_x = (field_length / 2.0) - penalty_depth;
+        double penalty_y_min = -penalty_width / 2.0;
+        double penalty_y_max = penalty_width / 2.0;
+
+        // Margem de segurança para o raio do robô (ex: 9cm = 0.09m)
+        // Evita que as rodas belisquem a linha da área
+        double margin = 0.09;
+
+        if (target.x > (penalty_x - margin) && (target.y > penalty_y_min && target.y < penalty_y_max)) {
+            target.x = penalty_x - margin; // Trava o alvo exatamente na linha da área!
+        }
+    }
 
     // Convert world coordinates to grid coordinates
     auto s = planner_->worldToGrid(current_x_, current_y_, origin.x, origin.y);

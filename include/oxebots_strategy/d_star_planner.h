@@ -30,6 +30,7 @@
 #include "nav_msgs/msg/path.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
+#include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace planning
@@ -299,6 +300,10 @@ class DStarPlannerNode : public rclcpp::Node
     void game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
     void goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg);
     void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+    void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
+
+    rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
+    oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_; 
 
     /**
      * @brief Timer callback to trigger planning iteration.
