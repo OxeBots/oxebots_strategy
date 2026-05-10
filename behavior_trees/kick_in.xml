@@ -1,0 +1,10 @@
+<BehaviorTree ID="KickInTree">
+    <Fallback>
+        <Sequence name="Kicker">
+            <IsValueTrue value="{is_attacker}"/>
+            <GoToPoint x="{ball_x}" y="{ball_y}" tolerance="80"/>
+            <KickBall target_x="{opponent_goal_x}" target_y="500"/>
+        </Sequence>
+        <GoToPoint x="{ball_x -500}" y="{ball_y * 0.5}"/>
+    </Fallback>
+</BehaviorTree>

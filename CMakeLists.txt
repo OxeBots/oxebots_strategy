@@ -34,6 +34,7 @@ add_executable(
   src/is_ball_close_condition.cpp
   src/goalkeeper_node.cpp
   src/precision_kick_node.cpp
+  src/defender_nodes.cpp
 )
 
 ament_target_dependencies(
@@ -52,6 +53,7 @@ target_include_directories(strategy_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
+
 
 add_executable(
   movement_calculation_node
