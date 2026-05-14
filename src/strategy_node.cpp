@@ -47,12 +47,14 @@ public:
   {
     this->declare_parameter<std::string>("bt_xml_path", "");
     this->declare_parameter<bool>("is_yellow_team", false);
+    this->declare_parameter<bool>("invert_sides", false);
     this->declare_parameter<int>("robot_id", 1);
     this->declare_parameter<double>("execution_rate", 60.0);
     this->declare_parameter<std::string>("gc_topic", "/gc_multicast_bridge/referee_messages");
     this->declare_parameter<double>("possession_distance", 220.0);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
+    invert_sides_ = this->get_parameter("invert_sides").as_bool();
     robot_id_ = this->get_parameter("robot_id").as_int();
     possession_distance_mm_ = this->get_parameter("possession_distance").as_double();
 
@@ -226,8 +228,13 @@ public:
 private:
   void setup_blackboard()
   {
-    double my_goal_x = is_yellow_ ? 2200.0 : -2200.0;
-    double opponent_goal_x = is_yellow_ ? -2200.0 : 2200.0;
+    bool effective_is_yellow = is_yellow_;
+    if (invert_sides_) {
+        effective_is_yellow = !is_yellow_;
+    }
+
+    double my_goal_x = effective_is_yellow ? 2200.0 : -2200.0;
+    double opponent_goal_x = effective_is_yellow ? -2200.0 : 2200.0;
     blackboard_->set("my_goal_x", my_goal_x);
     blackboard_->set("opponent_goal_x", opponent_goal_x);
     blackboard_->set("opponent_goal_y", 0.0);
@@ -361,6 +368,7 @@ private:
   }
 
   bool is_yellow_;
+  bool invert_sides_;
   int robot_id_;
   uint32_t attacker_id_{2};
   uint32_t defender_id_{1};

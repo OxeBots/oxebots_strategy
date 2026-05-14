@@ -15,6 +15,13 @@ def generate_launch_description():
         bringup_pkg_share, "config", "ssl_config.yaml"
     )
 
+    # Argumento para inverter os lados do campo (Simulador RA)
+    declare_invert_sides_arg = DeclareLaunchArgument(
+        "invert_sides",
+        default_value="False",
+        description="Invert field sides (for RA simulator)",
+    )
+
     # Argumento para escolher a árvore
     declare_bt_xml_arg = DeclareLaunchArgument(
         "bt_xml",
@@ -46,7 +53,8 @@ def generate_launch_description():
             parameters=[
                 bringup_config_file,
                 {"robot_id": robot_id},
-                {"bt_xml_path": LaunchConfiguration("bt_xml")}
+                {"bt_xml_path": LaunchConfiguration("bt_xml")},
+                {"invert_sides": LaunchConfiguration("invert_sides")}
             ],
             cwd=strategy_pkg_share,
         )
@@ -57,4 +65,4 @@ def generate_launch_description():
     for i in range(3):
         all_nodes.extend(create_robot_nodes(i))
 
-    return LaunchDescription([declare_bt_xml_arg] + all_nodes)
+    return LaunchDescription([declare_invert_sides_arg, declare_bt_xml_arg] + all_nodes)
