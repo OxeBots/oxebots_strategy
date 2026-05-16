@@ -35,6 +35,12 @@ add_executable(
   src/goalkeeper_node.cpp
   src/precision_kick_node.cpp
   src/defender_nodes.cpp
+  src/goal_line_defend_node.cpp
+  src/is_ball_in_area_condition.cpp
+  src/is_ball_in_our_half_condition.cpp
+  src/lateral_clear_node.cpp
+  src/position_bisector_node.cpp
+  src/smother_save_node.cpp
 )
 
 ament_target_dependencies(

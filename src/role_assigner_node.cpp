@@ -16,6 +16,7 @@ public:
     this->declare_parameter<double>("w1", 1.0);           // Peso para distância
     this->declare_parameter<double>("w2", 1.5);           // Peso para alinhamento cinético
     this->declare_parameter<double>("hysteresis", 0.5);   // Histerese aumentada para evitar trocas excessivas
+    this->declare_parameter<bool>("is_yellow_team", false);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     w1_ = this->get_parameter("w1").as_double();
@@ -27,7 +28,8 @@ public:
       "game_data", 10, std::bind(&RoleAssignerNode::game_callback, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Role Assigner ZJUNlict iniciado.");
-    RCLCPP_INFO(this->get_logger(), "Goleiro ID: %d, w1: %.2f, w2: %.2f", goalkeeper_id_, w1_, w2_);
+    RCLCPP_INFO(this->get_logger(), "Goleiro ID: %d, w1: %.2f, w2: %.2f, Amarelo: %s", 
+                goalkeeper_id_, w1_, w2_, this->get_parameter("is_yellow_team").as_bool() ? "Sim" : "Não");
   }
 
 private:
@@ -117,8 +119,20 @@ private:
         return costs[a] < costs[b];
       });
 
-      uint32_t best_candidate = eligible_ids[0];
-      uint32_t second_best = eligible_ids[1];
+      // Lógica de Prioridade na Defesa:
+      // Se a bola estiver na nossa defesa, o robô mais próximo vira o DEFENSOR
+      // e o outro vira o ATACANTE (que deve recuar para apoio).
+      bool is_yellow_team = this->get_parameter("is_yellow_team").as_bool();
+      bool ball_in_defense = is_yellow_team ? (ball_pos.x > 0) : (ball_pos.x < 0);
+
+      uint32_t best_candidate, second_best;
+      if (ball_in_defense) {
+        best_candidate = eligible_ids[1]; // Atacante (o que está mais longe)
+        second_best = eligible_ids[0];    // Defensor (o que está mais perto)
+      } else {
+        best_candidate = eligible_ids[0]; // Atacante (o que está mais perto)
+        second_best = eligible_ids[1];    // Defensor (o que está mais longe)
+      }
 
       // Aplicação de Histerese para estabilidade
       if (last_attacker_id_ != 999 && costs.count(last_attacker_id_)) {

@@ -1,0 +1,19 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+   <BehaviorTree ID="GoalkeeperTree">
+       <ReactiveFallback name="ReactiveGoalkeeper">
+
+           <ReactiveSequence name="State3_BallInArea">
+               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
+               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
+           </ReactiveSequence>
+
+           <ReactiveSequence name="State2_BallInOurHalf">
+               <IsBallInOurHalf ball_x="{ball_x}" />
+               <GoalLineDefend robot_id="{robot_id}" ball_y="{ball_y}" />
+           </ReactiveSequence>
+           
+           <PositionBisector robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" goal_width="{goal_width}" />
+
+       </ReactiveFallback>
+   </BehaviorTree>
+</root>

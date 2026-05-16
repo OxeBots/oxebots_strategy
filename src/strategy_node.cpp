@@ -24,6 +24,12 @@
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/defender_nodes.hpp"
+#include "oxebots_strategy/goal_line_defend_node.h"
+#include "oxebots_strategy/is_ball_in_area_condition.h"
+#include "oxebots_strategy/is_ball_in_our_half_condition.h"
+#include "oxebots_strategy/lateral_clear_node.h"
+#include "oxebots_strategy/position_bisector_node.h"
+#include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
@@ -95,6 +101,12 @@ public:
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::GoalLineDefendNode>("GoalLineDefend", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::IsBallInAreaCondition>("IsBallInArea", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::IsBallInOurHalfCondition>("IsBallInOurHalf", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::SmotherSaveNode>("SmotherSave", shared_from_this());
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
