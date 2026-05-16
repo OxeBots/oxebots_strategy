@@ -4,6 +4,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <optional>
 
@@ -24,6 +25,7 @@ public:
 private:
   void publishGoal();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
+  void geometryDataCallback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
   void publishMarkers();
   std::optional<oxebots_interfaces::msg::RobotGameData> getRobotData(unsigned int robot_id);
 
@@ -31,8 +33,10 @@ private:
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
 
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
+  std::optional<oxebots_interfaces::msg::SSLFieldSize> field_size_;
   unsigned int robot_id_;
   geometry_msgs::msg::Point target_pos_;
   double target_w_;
