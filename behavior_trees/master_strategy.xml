@@ -15,7 +15,7 @@
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- 3. JOGO / ATAQUE (Baseado no papel de atacante) -->
+      <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
         <Repeat num_cycles="-1">
@@ -28,17 +28,7 @@
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
             
             <ReactiveFallback name="AttackLogicActions">
-              
-              <!-- 1. SUPORTE DEFENSIVO (Bola na nossa zaga) -->
-              <Sequence name="DefensiveSupport">
-                <Inverter>
-                  <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
-                </Inverter>
-                <!-- Recua para trás do meio-campo (15% do caminho pro gol) e alinha com a bola -->
-                <GoToPoint robot_id="{robot_id}" x="0.15 * {my_goal_x}" y="{ball_y}" tolerance="80.0" />
-              </Sequence>
-
-              <!-- 2. ATAQUE AGRESSIVO (Bola no campo adversário) -->
+              <!-- ATAQUE AGRESSIVO (Foca na bola) -->
               <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
                 <!-- Alvo é a BOLA diretamente -->
                 <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="50.0" />

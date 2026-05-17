@@ -33,22 +33,13 @@
           </Sequence>
 
           <!-- 2.2: Oponente sem posse de bola                            -->
-          <!-- Ir até a bola e chutar em direção ao gol adversário        -->
-          <!-- Padrão: GoToPoint em paralelo com espera IsBallClose+Kick  -->
-          <Parallel success_count="1" failure_count="1" name="ClearBall">
-
-            <!-- Empurra o robô continuamente em direção à bola (com clamp da pequena área) -->
-            <GoToClamped x="{ball_x}" y="{ball_y}" my_goal_x="{my_goal_x}"/>
-
-            <!-- Quando chegar perto o suficiente, chuta                  -->
-            <Sequence>
-              <RetryUntilSuccessful num_attempts="-1">
-                <IsBallClose robot_id="{robot_id}" distance_threshold="140.0"/>
-              </RetryUntilSuccessful>
-              <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
-            </Sequence>
-
-          </Parallel>
+          <!-- Em vez de brigar pela bola, o zagueiro faz ShadowBall      -->
+          <!-- na nossa zaga para cobrir o goleiro                        -->
+          <ShadowBall
+            ball="{ball}"
+            ball_vel="{ball_vel}"
+            my_goal_x="{my_goal_x}"
+            follow_distance="1000.0"/>
 
         </ReactiveFallback>
 

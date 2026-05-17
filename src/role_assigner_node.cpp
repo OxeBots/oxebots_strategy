@@ -13,15 +13,19 @@ public:
   {
     // Parâmetros configuráveis
     this->declare_parameter<int>("goalkeeper_id", 0);
-    this->declare_parameter<double>("w1", 1.0);           // Peso para distância
-    this->declare_parameter<double>("w2", 1.5);           // Peso para alinhamento cinético
-    this->declare_parameter<double>("hysteresis", 0.5);   // Histerese aumentada para evitar trocas excessivas
+    this->declare_parameter<double>("w1", 2.0);           // Peso para distância (Aumentado para priorizar quem está perto)
+    this->declare_parameter<double>("w2", 1.0);           // Peso para alinhamento cinético
+    this->declare_parameter<double>("hysteresis", 1.0);   // Vantagem de custo necessária para roubar o papel
+    this->declare_parameter<double>("time_hysteresis", 0.8); // Tempo mínimo (s) entre trocas
     this->declare_parameter<bool>("is_yellow_team", false);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     w1_ = this->get_parameter("w1").as_double();
     w2_ = this->get_parameter("w2").as_double();
     hysteresis_ = this->get_parameter("hysteresis").as_double();
+    time_hysteresis_ = this->get_parameter("time_hysteresis").as_double();
+    
+    last_role_change_time_ = this->now();
 
     role_pub_ = this->create_publisher<oxebots_interfaces::msg::RoleAssignment>("/role_assignment", 10);
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
@@ -96,11 +100,14 @@ private:
         cos_theta = 1.0; // Já está na bola
       }
 
-      // Função de custo ZJUNlict adaptada:
-      // C = w1 * (1 - e^-r) + w2 * (1 - cos_theta)
-      // Isso garante que quando r -> 0 e theta -> 0, C -> 0 (Decaimento Profundo)
-      double cost = w1_ * (1.0 - std::exp(-r)) + w2_ * (1.0 - cos_theta);
+      // Custo simplificado: Distância linear (mais punitiva) e alinhamento cinético
+      double cost = w1_ * r + w2_ * (1.0 - cos_theta);
       
+      // Bônus de Adesão (Stickiness): Quem já é o atacante tem um "desconto" no custo
+      if (id == last_attacker_id_) {
+          cost -= hysteresis_;
+      }
+
       costs[id] = cost;
       eligible_ids.push_back(id);
     }
@@ -114,42 +121,33 @@ private:
       attacker_id = eligible_ids[0];
       defender_id = goalkeeper_id_; // Fallback
     } else {
-      // Ordenação inicial por custo
+      // Ordenação pura por custo (sem swaps baseados em lado do campo)
       std::sort(eligible_ids.begin(), eligible_ids.end(), [&](uint32_t a, uint32_t b) {
         return costs[a] < costs[b];
       });
 
-      // Lógica de Prioridade na Defesa:
-      // Se a bola estiver na nossa defesa, o robô mais próximo vira o DEFENSOR
-      // e o outro vira o ATACANTE (que deve recuar para apoio).
-      bool is_yellow_team = this->get_parameter("is_yellow_team").as_bool();
-      bool ball_in_defense = is_yellow_team ? (ball_pos.x > 0) : (ball_pos.x < 0);
+      uint32_t best_candidate = eligible_ids[0];
+      uint32_t second_best = eligible_ids[1];
 
-      uint32_t best_candidate, second_best;
-      if (ball_in_defense) {
-        best_candidate = eligible_ids[1]; // Atacante (o que está mais longe)
-        second_best = eligible_ids[0];    // Defensor (o que está mais perto)
-      } else {
-        best_candidate = eligible_ids[0]; // Atacante (o que está mais perto)
-        second_best = eligible_ids[1];    // Defensor (o que está mais longe)
-      }
+      // Aplicação de Histerese Temporal (Cooldown de trocas)
+      double time_since_change = (now - last_role_change_time_).seconds();
 
-      // Aplicação de Histerese para estabilidade
-      if (last_attacker_id_ != 999 && costs.count(last_attacker_id_)) {
-        double cost_current_attacker = costs[last_attacker_id_];
-        double cost_best_new = costs[best_candidate];
-
-        // Só troca se o novo candidato for significativamente melhor
-        if (best_candidate != last_attacker_id_ && cost_best_new > (cost_current_attacker - hysteresis_)) {
-          attacker_id = last_attacker_id_;
-          defender_id = (attacker_id == eligible_ids[0]) ? eligible_ids[1] : eligible_ids[0];
+      if (last_attacker_id_ != 999 && best_candidate != last_attacker_id_) {
+        if (time_since_change < time_hysteresis_) {
+            // Tempo de cooldown não passou, manter papel anterior
+            attacker_id = last_attacker_id_;
+            defender_id = (attacker_id == eligible_ids[0]) ? eligible_ids[1] : eligible_ids[0];
         } else {
-          attacker_id = best_candidate;
-          defender_id = second_best;
+            // Cooldown passou e o custo do novo candidato é menor (já contando a histerese de custo)
+            attacker_id = best_candidate;
+            defender_id = second_best;
+            last_role_change_time_ = now;
+            RCLCPP_INFO(this->get_logger(), "TROCA DE PAPEL: Novo Atacante = %u", attacker_id);
         }
       } else {
         attacker_id = best_candidate;
         defender_id = second_best;
+        if (last_attacker_id_ == 999) last_role_change_time_ = now; // Inicialização
       }
     }
 
@@ -167,10 +165,10 @@ private:
   }
 
   int goalkeeper_id_;
-  double w1_, w2_, hysteresis_;
+  double w1_, w2_, hysteresis_, time_hysteresis_;
   uint32_t last_attacker_id_ = 999;
   
-  rclcpp::Time last_time_;
+  rclcpp::Time last_time_, last_role_change_time_;
   Vector2D last_ball_pos_;
   std::map<uint32_t, Vector2D> last_robot_pos_;
 
