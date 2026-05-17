@@ -27,6 +27,10 @@ BT::NodeStatus KickBallNode::onStart()
   if (!getInput<unsigned int>("robot_id", robot_id)) return BT::NodeStatus::FAILURE;
   if (!getInput<double>("kick_speed", kick_speed)) return BT::NodeStatus::FAILURE;
 
+  if (kick_speed > 3.0) {
+      kick_speed = 3.0;
+  }
+
   auto msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
   oxebots_interfaces::msg::RobotCmdData robot_cmd_data;
   robot_cmd_data.id = robot_id;

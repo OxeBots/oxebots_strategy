@@ -250,11 +250,17 @@ private:
     blackboard_->set("my_goal_x", my_goal_x);
     blackboard_->set("opponent_goal_x", opponent_goal_x);
     blackboard_->set("opponent_goal_y", 0.0);
-    blackboard_->set("is_yellow", is_yellow_);
+    blackboard_->set("is_yellow", effective_is_yellow);
     blackboard_->set("attacker_id", attacker_id_);
     blackboard_->set("defender_id", defender_id_);
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
     blackboard_->set("is_goalkeeper", (robot_id_ == 0));
+    
+    // Dimensões padrão da área para evitar falhas nos nós
+    blackboard_->set("penalty_area_depth", 500.0);
+    blackboard_->set("penalty_area_width", 1350.0);
+    blackboard_->set("goal_width", 800.0);
+
     blackboard_->set("gc_command", -1);
     blackboard_->set("gc_stage", -1);
     blackboard_->set("is_free_kick", false);

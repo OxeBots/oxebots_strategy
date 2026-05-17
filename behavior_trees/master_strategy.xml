@@ -9,9 +9,9 @@
         <Halt reason="gc"/>
       </Sequence>
 
-      <!-- 2. GOLEIRO (Baseado na variável is_goalkeeper) -->
+      <!-- 2. GOLEIRO (Apenas Robô 0) -->
       <ReactiveSequence name="GoalkeeperRole">
-        <IsValueTrue value="{is_goalkeeper}" />
+        <IsRobotId robot_id="0" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 

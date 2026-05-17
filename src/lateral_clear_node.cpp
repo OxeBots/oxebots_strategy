@@ -46,6 +46,13 @@ BT::NodeStatus LateralClearNode::onRunning()
         return BT::NodeStatus::FAILURE;
     }
 
+    double rx, ry, ryaw;
+    if (!config().blackboard->get("robot_x", rx) || 
+        !config().blackboard->get("robot_y", ry) || 
+        !config().blackboard->get("robot_yaw", ryaw)) {
+        return BT::NodeStatus::RUNNING; // Wait for data
+    }
+
     double target_x = ball_x;
     double target_y = ball_y;
     double target_side_y = (ball_y > 0) ? LATERAL_TARGET_Y : -LATERAL_TARGET_Y;
@@ -70,6 +77,20 @@ BT::NodeStatus LateralClearNode::onRunning()
         last_target_x_ = target_x;
         last_target_y_ = target_y;
         last_target_w_ = target_w;
+    }
+
+    // Check if we arrived at the ball to trigger SUCCESS
+    double dx = target_x - rx;
+    double dy = target_y - ry;
+    double dist = std::sqrt(dx*dx + dy*dy);
+    
+    // Normalize angle difference
+    double angle_diff = target_w - ryaw;
+    while (angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
+    while (angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
+
+    if (dist < 150.0 && std::abs(angle_diff) < 0.2) {
+        return BT::NodeStatus::SUCCESS;
     }
 
     return BT::NodeStatus::RUNNING;

@@ -1,19 +1,43 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
+<root main_tree_to_execute="GoalkeeperTree" BTCPP_format="4">
    <BehaviorTree ID="GoalkeeperTree">
-       <ReactiveFallback name="ReactiveGoalkeeper">
-
-           <ReactiveSequence name="State3_BallInArea">
-               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
-               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
-           </ReactiveSequence>
-
-           <ReactiveSequence name="State2_BallInOurHalf">
-               <IsBallInOurHalf ball_x="{ball_x}" />
-               <GoalLineDefend robot_id="{robot_id}" ball_y="{ball_y}" />
-           </ReactiveSequence>
+       <Sequence>
+           <!-- Atualização contínua dos dados da bola -->
+           <UpdateBallPosition robot_id="{robot_id}" 
+                               goal_x="{my_goal_x}" 
+                               goal_y="0.0" 
+                               ball_x="{ball_x}" 
+                               ball_y="{ball_y}" />
            
-           <PositionBisector robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" goal_width="{goal_width}" />
+           <Fallback name="RobotRoleGuard">
+               <!-- APENAS o Robô 0 executa a lógica de goleiro -->
+               <Sequence name="GoalkeeperLogic">
+                   <IsRobotId robot_id="0" />
+                   <ReactiveFallback name="ReactiveGoalkeeper">
 
-       </ReactiveFallback>
+                       <!-- 1. Bola dentro da área: Sair e chutar -->
+                       <ReactiveSequence name="State3_BallInArea">
+                           <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
+                           <Sequence name="ApproachAndKick">
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
+                               <KickBall robot_id="{robot_id}" kick_speed="3.0" />
+                           </Sequence>
+                       </ReactiveSequence>
+
+                       <!-- 2. Bola no nosso campo: Defender linha do gol -->
+                       <ReactiveSequence name="State2_BallInOurHalf">
+                           <IsBallInOurHalf ball_x="{ball_x}" />
+                           <GoalLineDefend robot_id="{robot_id}" ball_y="{ball_y}" />
+                       </ReactiveSequence>
+                       
+                       <!-- 3. Comportamento Padrão: Bissetriz -->
+                       <PositionBisector robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" goal_width="800.0" />
+
+                   </ReactiveFallback>
+               </Sequence>
+
+               <!-- Outros robôs (1 e 2) ficam parados quando esta árvore é a principal -->
+               <Halt reason="not_the_goalkeeper" />
+           </Fallback>
+       </Sequence>
    </BehaviorTree>
 </root>

@@ -125,7 +125,6 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
             // Isso garante que ele não tente chutar "atravessando" a bola pelo lado errado
             double r_dx = ball_x - rx;
             double r_dy = ball_y - ry;
-            double dist_robot_ball = std::hypot(r_dx, r_dy);
             double dot = (dx * r_dx + dy * r_dy);
 
             bool is_ready;
