@@ -1,0 +1,50 @@
+<root main_tree_to_execute="MainTree" BTCPP_format="4">
+
+  <BehaviorTree ID="MainTree">
+    <ReactiveFallback name="TestRoot">
+      <!-- Apenas o nó do robô ID 1 roda a lógica de teste -->
+      <ReactiveSequence name="Robot1Logic">
+        <IsThisNodeID id="1" />
+        <Repeat num_cycles="-1">
+          <ReactiveSequence name="TestPredictionLoop">
+            
+            <!-- 1. Atualiza a posição real da bola no blackboard -->
+            <UpdateBallPosition robot_id="1"
+                                ball_x="{ball_x}" ball_y="{ball_y}" 
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                is_ready_to_kick="{is_ready}"
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+            <!-- 2. Calcula a interceptação no ponto futuro para o robô ID 1 -->
+            <CalculateInterception robot_id="1"
+                                   goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
+                                   intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
+                                   intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                                   is_ready_to_kick="{is_ready_pred}" />
+
+            <!-- 3. Persegue a bola indo direto no ponto futuro e chuta quando estiver perto -->
+            <ReactiveFallback name="TestActions">
+              <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                <!-- Vai direto no ponto previsto para a bola -->
+                <GoToPoint robot_id="1" x="{int_ball_x}" y="{int_ball_y}" tolerance="50.0" />
+                
+                <Sequence>
+                  <!-- Espera a bola estar fisicamente perto -->
+                  <RetryUntilSuccessful num_attempts="-1">
+                    <IsBallClose robot_id="1" distance_threshold="180.0"/>
+                  </RetryUntilSuccessful>
+                  <!-- Chuta -->
+                  <KickBall robot_id="1" kick_speed="6.5"/>
+                </Sequence>
+              </Parallel>
+            </ReactiveFallback>
+          </ReactiveSequence>
+        </Repeat>
+      </ReactiveSequence>
+
+      <!-- Outros robôs (0 e 2) ficam parados -->
+      <Halt reason="idle"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+</root>

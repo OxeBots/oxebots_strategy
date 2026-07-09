@@ -7,19 +7,26 @@
   </BehaviorTree>
 
   <BehaviorTree ID="AttackerBehavior">
-    <ReactiveFallback name="AttackLogic">
-      <!-- Se o robô estiver no ponto de pré-chute (alinhado), executa o chute de precisão -->
-      <ReactiveSequence name="FinalApproach">
-        <IsValueTrue value="{is_ready}" />
-        <PrecisionKick robot_id="{robot_id}" 
-                       target_x="{opponent_goal_x}" 
-                       target_y="{opponent_goal_y}" 
-                       kick_speed="4.5" />
-      </ReactiveSequence>
-      
-      <!-- Se não estiver pronto, usa o GoToPoint para se posicionar no ponto de pré-chute -->
-      <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="50.0" />
-    </ReactiveFallback>
+    <Sequence name="AttackerSequence">
+      <CalculateInterception robot_id="{robot_id}"
+                             goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
+                             intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
+                             intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                             is_ready_to_kick="{is_ready_pred}" />
+      <ReactiveFallback name="AttackLogic">
+        <!-- Se o robô estiver no ponto de pré-chute (alinhado), executa o chute de precisão -->
+        <ReactiveSequence name="FinalApproach">
+          <IsValueTrue value="{is_ready_pred}" />
+          <PrecisionKick robot_id="{robot_id}" 
+                         target_x="{opponent_goal_x}" 
+                         target_y="{opponent_goal_y}" 
+                         kick_speed="4.5" />
+        </ReactiveSequence>
+        
+        <!-- Se não estiver pronto, usa o GoToPoint para ir direto na bola no ponto futuro -->
+        <GoToPoint robot_id="{robot_id}" x="{int_ball_x}" y="{int_ball_y}" tolerance="50.0" />
+      </ReactiveFallback>
+    </Sequence>
   </BehaviorTree>
 
   <BehaviorTree ID="DefenderBehavior">
@@ -73,7 +80,7 @@
                <ReactiveFallback name="DynamicRoleSelector">
                   <ReactiveSequence name="ExecuteAttacker">
                     <IsMyRole role="attacker" />
-                    <SubTree ID="AttackerBehavior" 
+                    <SubTree ID="AttackerBehavior" _autoremap="true"
                              robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" 
                              pkx="{pkx}" pky="{pky}" is_ready="{is_ready}" />
                   </ReactiveSequence>
@@ -98,6 +105,17 @@
       <input_port name="x">Coordenada X de destino</input_port>
       <input_port name="y">Coordenada Y de destino</input_port>
       <input_port name="tolerance" default="100.0">Tolerância de chegada</input_port>
+    </Action>
+
+    <Action ID="CalculateInterception">
+      <input_port name="robot_id">ID do robô</input_port>
+      <input_port name="goal_x">X do gol alvo</input_port>
+      <input_port name="goal_y">Y do gol alvo</input_port>
+      <output_port name="intercept_x">X da interceptação</output_port>
+      <output_port name="intercept_y">Y da interceptação</output_port>
+      <output_port name="intercept_pk_x">X do pré-chute futuro</output_port>
+      <output_port name="intercept_pk_y">Y do pré-chute futuro</output_port>
+      <output_port name="is_ready_to_kick">Pronto para chutar?</output_port>
     </Action>
 
     <Action ID="PrecisionKick">

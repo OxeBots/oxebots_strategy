@@ -20,6 +20,7 @@
 #include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/kick_ball_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/is_ball_close_condition.h"
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
@@ -98,6 +99,7 @@ public:
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::CalculateInterceptionNode>("CalculateInterception", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", shared_from_this());

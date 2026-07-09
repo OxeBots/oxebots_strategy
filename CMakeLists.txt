@@ -31,6 +31,7 @@ add_executable(
   src/go_to_point_node.cpp
   src/kick_ball_node.cpp
   src/update_ball_position_node.cpp
+  src/calculate_interception_node.cpp
   src/is_ball_close_condition.cpp
   src/goalkeeper_node.cpp
   src/precision_kick_node.cpp
