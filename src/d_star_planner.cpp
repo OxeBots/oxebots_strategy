@@ -477,6 +477,8 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     };
 
     robot_id_ = safe_param("robot_id", 0).as_int();
+    is_yellow_ = safe_param("is_yellow_team", false).as_bool();
+    invert_sides_ = safe_param("invert_sides", false).as_bool();
     double hz = safe_param("planning_rate_hz", 10.0).as_double();
 
     planning::PlannerConfig config;
@@ -518,45 +520,70 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
     // sem afetar os mapas dos robôs atacantes
     auto custom_map = std::make_shared<nav_msgs::msg::OccupancyGrid>(*msg);
 
-    // 2. Se for o zagueiro (robô 2) e já tivermos a geometria, criamos a Parede de Vidro!
-    if (robot_id_ == 2 && last_geometry_) {
-        double res = custom_map->info.resolution;
-        double origin_x = custom_map->info.origin.position.x;
-        double origin_y = custom_map->info.origin.position.y;
-        int width = custom_map->info.width;
-        int height = custom_map->info.height;
+    // 2. Criamos a Parede de Vidro!
+    // Usamos a geometria recebida ou valores padrão (fallback) de 1.35m x 0.5m
+    double field_length = 4.4;
+    double penalty_depth = 0.5;
+    double penalty_width = 1.35;
 
-        // A geometria da SSL vem em milímetros, mas o D* e o mapa usam METROS
-        double field_length = last_geometry_->field.field_length / 1000.0;
-        double penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
-        double penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+    if (last_geometry_) {
+        field_length = last_geometry_->field.field_length / 1000.0;
+        penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
+        penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+    } else {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, 
+            "D* [Robô %d] Sem dados de geometria. Usando fallback da área: %.2fm x %.2fm", 
+            robot_id_, penalty_width, penalty_depth);
+    }
 
-        // Calcula a linha exata da área
-        double penalty_x = (field_length / 2.0) - penalty_depth;
-        double penalty_y_min = -penalty_width / 2.0;
-        double penalty_y_max = penalty_width / 2.0;
+    bool effective_is_yellow = is_yellow_;
+    if (invert_sides_) {
+        effective_is_yellow = !is_yellow_;
+    }
 
-        // Adiciona a margem de segurança do robô (ex: 9cm = 0.09m) para as rodas não pisarem na linha
-        double margin = 0.09;
-        double safe_penalty_x = penalty_x - margin;
-        double safe_y_min = penalty_y_min - margin;
-        double safe_y_max = penalty_y_max + margin;
+    bool block_positive = true;
+    bool block_negative = true;
 
-        // Varre absolutamente TODAS as células do mapa
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                // Converte de "índice da grade" para "metros reais no campo"
-                double world_x = origin_x + (x * res);
-                double world_y = origin_y + (y * res);
+    if (robot_id_ == 0) {
+        // O goleiro pode entrar na própria área, mas não na adversária
+        if (effective_is_yellow) {
+            block_positive = false;
+        } else {
+            block_negative = false;
+        }
+    }
 
-                // Bloqueia as áreas de pênalti de AMBOS os lados (o zagueiro não deve entrar em nenhuma área)
-                bool in_positive_area = (world_x > safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
-                bool in_negative_area = (world_x < -safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+    double res = custom_map->info.resolution;
+    double origin_x = custom_map->info.origin.position.x;
+    double origin_y = custom_map->info.origin.position.y;
+    int width = custom_map->info.width;
+    int height = custom_map->info.height;
 
-                if (in_positive_area || in_negative_area) {
-                    // O peso 100 transforma o espaço vazio em um bloco de concreto impenetrável para o D*
-                    custom_map->data[y * width + x] = 100; 
-                }
+    // Calcula a linha exata da área
+    double penalty_x = (field_length / 2.0) - penalty_depth;
+    double penalty_y_min = -penalty_width / 2.0;
+    double penalty_y_max = penalty_width / 2.0;
+
+    // Adiciona a margem de segurança do robô (ex: 9cm = 0.09m) para as rodas não pisarem na linha
+    double margin = 0.09;
+    double safe_penalty_x = penalty_x - margin;
+    double safe_y_min = penalty_y_min - margin;
+    double safe_y_max = penalty_y_max + margin;
+
+    // Varre absolutamente TODAS as células do mapa
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            // Converte de "índice da grade" para "metros reais no campo"
+            double world_x = origin_x + (x * res);
+            double world_y = origin_y + (y * res);
+
+            // Bloqueia as áreas de pênalti aplicáveis a este robô
+            bool in_positive_area = block_positive && (world_x > safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+            bool in_negative_area = block_negative && (world_x < -safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+
+            if (in_positive_area || in_negative_area) {
+                // O peso 100 transforma o espaço vazio em um bloco de concreto impenetrável para o D*
+                custom_map->data[y * width + x] = 100; 
             }
         }
     }
@@ -623,24 +650,49 @@ void DStarPlannerNode::plan_and_publish()
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
 
-    if (robot_id_ == 2 && last_geometry_) {
-        // A geometria da SSL vem em milímetros, mas o D* usa METROS.
-        // Dividimos por 1000.0 para alinhar a matemática.
-        double field_length = last_geometry_->field.field_length / 1000.0;
-        double penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
-        double penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+    // A geometria da SSL vem em milímetros, mas o D* usa METROS.
+    double field_length = 4.4;
+    double penalty_depth = 0.5;
+    double penalty_width = 1.35;
 
-        double penalty_x = (field_length / 2.0) - penalty_depth;
-        double penalty_y_min = -penalty_width / 2.0;
-        double penalty_y_max = penalty_width / 2.0;
+    if (last_geometry_) {
+        field_length = last_geometry_->field.field_length / 1000.0;
+        penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
+        penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
+    }
 
-        // Margem de segurança para o raio do robô (ex: 9cm = 0.09m)
-        // Evita que as rodas belisquem a linha da área
-        double margin = 0.09;
+    bool effective_is_yellow = is_yellow_;
+    if (invert_sides_) {
+        effective_is_yellow = !is_yellow_;
+    }
 
-        if (target.x > (penalty_x - margin) && (target.y > penalty_y_min && target.y < penalty_y_max)) {
-            target.x = penalty_x - margin; // Trava o alvo exatamente na linha da área!
+    bool block_positive = true;
+    bool block_negative = true;
+
+    if (robot_id_ == 0) {
+        // O goleiro pode entrar na própria área, mas não na adversária
+        if (effective_is_yellow) {
+            block_positive = false;
+        } else {
+            block_negative = false;
         }
+    }
+
+    double penalty_x = (field_length / 2.0) - penalty_depth;
+    double penalty_y_min = -penalty_width / 2.0;
+    double penalty_y_max = penalty_width / 2.0;
+
+    // Margem de segurança para o raio do robô (ex: 9cm = 0.09m)
+    double margin = 0.09;
+
+    // Clampar o alvo fora da área positiva se bloqueada
+    if (block_positive && target.x > (penalty_x - margin) && (target.y > (penalty_y_min - margin) && target.y < (penalty_y_max + margin))) {
+        target.x = penalty_x - margin;
+    }
+
+    // Clampar o alvo fora da área negativa se bloqueada
+    if (block_negative && target.x < (-penalty_x + margin) && (target.y > (penalty_y_min - margin) && target.y < (penalty_y_max + margin))) {
+        target.x = -penalty_x + margin;
     }
 
     // Convert world coordinates to grid coordinates

@@ -35,7 +35,11 @@ def launch_setup(context, *args, **kwargs):
             executable="d_star_planner_node",
             name=f"d_star_planner_node_{robot_id}",
             output="screen",
-            parameters=[config_file, {"robot_id": robot_id}],
+            parameters=[
+                config_file,
+                {"robot_id": robot_id},
+                {"invert_sides": invert_sides == "True"}
+            ],
         )
         follower = Node(
             package="oxebots_strategy",

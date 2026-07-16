@@ -34,7 +34,7 @@
                     <IsBallClose robot_id="1" distance_threshold="180.0"/>
                   </RetryUntilSuccessful>
                   <!-- Chuta -->
-                  <KickBall robot_id="1" kick_speed="6.5"/>
+                  <KickBall robot_id="1" kick_speed="3.0"/>
                 </Sequence>
               </Parallel>
             </ReactiveFallback>

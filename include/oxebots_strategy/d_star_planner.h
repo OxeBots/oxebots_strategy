@@ -330,5 +330,7 @@ class DStarPlannerNode : public rclcpp::Node
     float current_y_ = 0.0f;
     int robot_id_ = 0;
     int consecutive_failures_ = 0;
+    bool is_yellow_ = false;
+    bool invert_sides_ = false;
 };
 }  // namespace planning

@@ -8,6 +8,21 @@ double normalizeAngle(double angle) {
     while (angle < -M_PI) angle += 2.0 * M_PI;
     return angle;
 }
+
+void clampFromPenaltyArea(double& tx, double& ty, double goal_x, double depth, double width, double margin) {
+    double half_width = width / 2.0;
+    if (goal_x > 0) {
+        double area_left = goal_x - depth;
+        if (tx > (area_left - margin) && std::abs(ty) < (half_width + margin)) {
+            tx = area_left - margin;
+        }
+    } else {
+        double area_right = goal_x + depth;
+        if (tx < (area_right + margin) && std::abs(ty) < (half_width + margin)) {
+            tx = area_right + margin;
+        }
+    }
+}
 }
 
 namespace oxebots_strategy {
@@ -26,8 +41,9 @@ GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& conf
     game_data_sub_ = node_->create_subscription<oxebots_interfaces::msg::GameData>(
         "/game_data", 10, std::bind(&GoToPointNode::gameDataCallback, this, std::placeholders::_1));
 
+    auto geom_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
     geometry_sub_ = node_->create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
-        "/vision_geometry", 10, std::bind(&GoToPointNode::geometryDataCallback, this, std::placeholders::_1));
+        "/field_geometry", geom_qos, std::bind(&GoToPointNode::geometryDataCallback, this, std::placeholders::_1));
     
     RCLCPP_INFO(node_->get_logger(), "GoToPointNode pronto. Convertendo MM para Metros.");
 }
@@ -181,19 +197,35 @@ BT::NodeStatus GoToPointNode::onStart() {
     target_pos_.x = tx; 
     target_pos_.y = ty;
 
-    bool is_yellow = node_->get_parameter("is_yellow_team").as_bool();
+    // Limite de segurança dinâmico para o robô não entrar dentro da área do gol
+    double my_goal_x = 2200.0;
+    double opponent_goal_x = -2200.0;
+    bool is_gk = false;
+    double p_depth = 500.0;
+    double p_width = 1350.0;
+    double margin = 100.0; // mm
 
-    // Limite de segurança para o robô não entrar dentro da área do gol
-    if(is_yellow){
-        if (target_pos_.x > 1740.0 && (target_pos_.y > -686 && target_pos_.y < 677) && robot_id_ == 2) {
-            target_pos_.x = 1740.0;
-        }
+    auto blackboard = config().blackboard;
+    if (blackboard) {
+        (void)blackboard->get("my_goal_x", my_goal_x);
+        (void)blackboard->get("opponent_goal_x", opponent_goal_x);
+        (void)blackboard->get("is_goalkeeper", is_gk);
     }
-    else {
-        // Lógica para time Azul (inverte o sinal do X)
-        if (target_pos_.x < -1740.0 && (target_pos_.y > -686 && target_pos_.y < 677) && robot_id_ == 2) {
-            target_pos_.x = -1740.0;
-        }
+
+    if (field_size_.has_value()) {
+        p_depth = field_size_->penalty_area_depth;
+        p_width = field_size_->penalty_area_width;
+        double half_len = field_size_->field_length / 2.0;
+        my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
+        opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
+    }
+
+    // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
+    clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+
+    // 2. Bloquear a própria área apenas se NÃO for o goleiro
+    if (!is_gk) {
+        clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
     }
 
     publishGoal();
@@ -205,26 +237,43 @@ BT::NodeStatus GoToPointNode::onRunning() {
     // Verifica se as coordenadas do alvo mudaram no Blackboard durante a execução
     double tx, ty;
     if (getInput<double>("x", tx) && getInput<double>("y", ty)) {
-        double capped_x = tx;
-        bool is_yellow = node_->get_parameter("is_yellow_team").as_bool();
+        double my_goal_x = 2200.0;
+        double opponent_goal_x = -2200.0;
+        bool is_gk = false;
+        double p_depth = 500.0;
+        double p_width = 1350.0;
+        double margin = 100.0; // mm
 
-        // Limite de segurança para o robô não entrar dentro da área do gol
-        if(is_yellow){
-            if (tx > 1740.0 && (ty > -686 && ty < 677) && robot_id_ == 2) {
-                capped_x = 1740.0;
-            }
+        auto blackboard = config().blackboard;
+        if (blackboard) {
+            (void)blackboard->get("my_goal_x", my_goal_x);
+            (void)blackboard->get("opponent_goal_x", opponent_goal_x);
+            (void)blackboard->get("is_goalkeeper", is_gk);
         }
-        else {
-            // Lógica para time Azul (inverte o sinal do X)
-            if (tx < -1740.0 && (ty > -686 && ty < 677) && robot_id_ == 2) {
-                capped_x = -1740.0;
-            }
+
+        if (field_size_.has_value()) {
+            p_depth = field_size_->penalty_area_depth;
+            p_width = field_size_->penalty_area_width;
+            double half_len = field_size_->field_length / 2.0;
+            my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
+            opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
+        }
+
+        double clamped_x = tx;
+        double clamped_y = ty;
+
+        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
+        clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+
+        // 2. Bloquear a própria área apenas se NÃO for o goleiro
+        if (!is_gk) {
+            clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
         }
         
         // Se houver uma mudança significativa (> 2mm), publica um novo objetivo
-        if (std::abs(capped_x - target_pos_.x) > 2.0 || std::abs(ty - target_pos_.y) > 2.0) {
-            target_pos_.x = capped_x;
-            target_pos_.y = ty;
+        if (std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0) {
+            target_pos_.x = clamped_x;
+            target_pos_.y = clamped_y;
             publishGoal();
         }
     }
