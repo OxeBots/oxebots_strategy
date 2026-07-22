@@ -1,4 +1,5 @@
 #include "oxebots_strategy/calculate_interception_node.h"
+#include "oxebots_strategy/kick_readiness.hpp"
 #include <cmath>
 
 namespace oxebots_strategy
@@ -27,6 +28,8 @@ BT::PortsList CalculateInterceptionNode::providedPorts()
            BT::OutputPort<double>("intercept_y"),
            BT::OutputPort<double>("intercept_pk_x"),
            BT::OutputPort<double>("intercept_pk_y"),
+           BT::OutputPort<double>("intercept_capture_x"),
+           BT::OutputPort<double>("intercept_capture_y"),
            BT::OutputPort<bool>("is_ready_to_kick") };
 }
 
@@ -221,6 +224,18 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   setOutput("intercept_pk_x", pk_x);
   setOutput("intercept_pk_y", pk_y);
 
+  // --- Ponto de Captura: mesma linha gol->bola, mas bem perto da bola ---
+  // Usado como alvo do GoToPoint em vez do centro exato da bola (intercept_x/y), para que o
+  // robô termine a aproximação já alinhado, em vez de bater na bola de frente.
+  double cap_x = intercept_x;
+  double cap_y = intercept_y;
+  if (dist_ball_goal > 10.0) {
+    cap_x = intercept_x + (dx_g / dist_ball_goal) * kCaptureDistanceMm;
+    cap_y = intercept_y + (dy_g / dist_ball_goal) * kCaptureDistanceMm;
+  }
+  setOutput("intercept_capture_x", cap_x);
+  setOutput("intercept_capture_y", cap_y);
+
   // --- Checar se o robô já está no pré-chute pronto para o PrecisionKick ---
   double r_dx = intercept_x - rx;
   double r_dy = intercept_y - ry;
@@ -231,12 +246,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   bool current_ready = false;
   (void)config().blackboard->get("is_ready_to_kick", current_ready);
 
-  bool is_ready = false;
-  if (!current_ready) {
-    is_ready = (dist_to_pk < 150.0 && dot > 0.0);
-  } else {
-    is_ready = (dist_to_pk < 600.0 && dot > 0.0);
-  }
+  bool is_ready = computeKickReadiness(current_ready, dist_to_pk, dot);
 
   setOutput("is_ready_to_kick", is_ready);
 

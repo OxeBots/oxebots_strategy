@@ -18,6 +18,10 @@ public:
 
   static BT::PortsList providedPorts();
 
+  // Distância (mm) do ponto de captura até a bola prevista: perto o bastante para o dribbler
+  // encostar já alinhado, sem mirar no centro exato da bola (evita colisão de frente).
+  static constexpr double kCaptureDistanceMm = 90.0;
+
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
   void onHalted() override;

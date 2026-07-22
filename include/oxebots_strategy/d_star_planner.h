@@ -302,8 +302,25 @@ class DStarPlannerNode : public rclcpp::Node
     void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
 
+    /**
+     * @brief Limites (em metros) da pequena área que este robô não pode invadir.
+     * @details Calculado a partir da geometria de campo recebida (ou de um fallback), levando em
+     * conta se este robô é o goleiro (que pode entrar na própria área) e o lado do campo.
+     * Usado tanto para "desenhar" a parede no grid (map_callback) quanto para clampar o alvo
+     * (plan_and_publish), evitando ter a mesma fórmula duplicada em dois lugares.
+     */
+    struct PenaltyAreaBounds
+    {
+        double penalty_x = 0.0;      ///< Distância (m) do centro do campo até a borda da área.
+        double penalty_y_min = 0.0;  ///< Limite Y inferior (m) da área.
+        double penalty_y_max = 0.0;  ///< Limite Y superior (m) da área.
+        bool block_positive = true;  ///< Bloquear a área do lado X positivo.
+        bool block_negative = true;  ///< Bloquear a área do lado X negativo.
+    };
+    PenaltyAreaBounds computePenaltyAreaBounds() const;
+
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
-    oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_; 
+    oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
 
     /**
      * @brief Timer callback to trigger planning iteration.

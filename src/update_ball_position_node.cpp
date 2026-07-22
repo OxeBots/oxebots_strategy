@@ -1,4 +1,5 @@
 #include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/kick_readiness.hpp"
 
 namespace oxebots_strategy
 {
@@ -115,9 +116,8 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
             double d_pk_y = pk_y - ry;
             double dist_to_pk = std::hypot(d_pk_x, d_pk_y);
 
-            // HISTERESE: 
-            // Se não estava pronto, precisa chegar a 150mm.
-            // Se já estava pronto, pode ficar até 600mm (permitindo o avanço do chute).
+            // Histerese compartilhada (ver kick_readiness.hpp): se não estava pronto, precisa
+            // chegar a 150mm; se já estava pronto, pode ficar até 600mm (permite o avanço do chute).
             bool current_ready = false;
             (void)config().blackboard->get("is_ready_to_kick", current_ready);
 
@@ -127,19 +127,11 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
             double r_dy = ball_y - ry;
             double dot = (dx * r_dx + dy * r_dy);
 
-            bool is_ready;
-            if (!current_ready) {
-                // Cheque de distância ao PK e Produto Escalar para garantir alinhamento
-                is_ready = (dist_to_pk < 150.0 && dot > 0);
-            } else {
-                // Histerese permite ficar pronto até 600mm se já estava alinhado
-                is_ready = (dist_to_pk < 600.0 && dot > 0);
-            }
+            bool is_ready = computeKickReadiness(current_ready, dist_to_pk, dot);
 
             setOutput("is_ready_to_kick", is_ready);
-            // Log de depuração
-            RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 500, 
-                "DEBUG Robot %u: Dist to PK: %.1f mm | Ready: %s", 
+            RCLCPP_DEBUG_THROTTLE(node_->get_logger(), *node_->get_clock(), 500,
+                "Robot %u: Dist to PK: %.1f mm | Ready: %s",
                 robot_id, dist_to_pk, is_ready ? "SIM" : "NAO");
 
             // --- Visualização RViz (Status Ready) ---

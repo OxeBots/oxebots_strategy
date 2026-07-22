@@ -512,15 +512,8 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
 
-void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds() const
 {
-    std::lock_guard<std::mutex> lock(node_mutex_);
-    
-    // 1. Criamos uma cópia mutável do mapa para podermos "desenhar" nele 
-    // sem afetar os mapas dos robôs atacantes
-    auto custom_map = std::make_shared<nav_msgs::msg::OccupancyGrid>(*msg);
-
-    // 2. Criamos a Parede de Vidro!
     // Usamos a geometria recebida ou valores padrão (fallback) de 1.35m x 0.5m
     double field_length = 4.4;
     double penalty_depth = 0.5;
@@ -531,8 +524,8 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
         penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
         penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
     } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, 
-            "D* [Robô %d] Sem dados de geometria. Usando fallback da área: %.2fm x %.2fm", 
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+            "D* [Robô %d] Sem dados de geometria. Usando fallback da área: %.2fm x %.2fm",
             robot_id_, penalty_width, penalty_depth);
     }
 
@@ -541,17 +534,32 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
         effective_is_yellow = !is_yellow_;
     }
 
-    bool block_positive = true;
-    bool block_negative = true;
-
+    PenaltyAreaBounds bounds;
     if (robot_id_ == 0) {
         // O goleiro pode entrar na própria área, mas não na adversária
         if (effective_is_yellow) {
-            block_positive = false;
+            bounds.block_positive = false;
         } else {
-            block_negative = false;
+            bounds.block_negative = false;
         }
     }
+
+    bounds.penalty_x = (field_length / 2.0) - penalty_depth;
+    bounds.penalty_y_min = -penalty_width / 2.0;
+    bounds.penalty_y_max = penalty_width / 2.0;
+    return bounds;
+}
+
+void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(node_mutex_);
+
+    // 1. Criamos uma cópia mutável do mapa para podermos "desenhar" nele
+    // sem afetar os mapas dos robôs atacantes
+    auto custom_map = std::make_shared<nav_msgs::msg::OccupancyGrid>(*msg);
+
+    // 2. Criamos a Parede de Vidro, usando os mesmos limites de área usados em plan_and_publish.
+    const auto bounds = computePenaltyAreaBounds();
 
     double res = custom_map->info.resolution;
     double origin_x = custom_map->info.origin.position.x;
@@ -559,16 +567,14 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
     int width = custom_map->info.width;
     int height = custom_map->info.height;
 
-    // Calcula a linha exata da área
-    double penalty_x = (field_length / 2.0) - penalty_depth;
-    double penalty_y_min = -penalty_width / 2.0;
-    double penalty_y_max = penalty_width / 2.0;
+    bool block_positive = bounds.block_positive;
+    bool block_negative = bounds.block_negative;
 
     // Adiciona a margem de segurança do robô (ex: 9cm = 0.09m) para as rodas não pisarem na linha
     double margin = 0.09;
-    double safe_penalty_x = penalty_x - margin;
-    double safe_y_min = penalty_y_min - margin;
-    double safe_y_max = penalty_y_max + margin;
+    double safe_penalty_x = bounds.penalty_x - margin;
+    double safe_y_min = bounds.penalty_y_min - margin;
+    double safe_y_max = bounds.penalty_y_max + margin;
 
     // Varre absolutamente TODAS as células do mapa
     for (int y = 0; y < height; ++y) {
@@ -650,49 +656,22 @@ void DStarPlannerNode::plan_and_publish()
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
 
-    // A geometria da SSL vem em milímetros, mas o D* usa METROS.
-    double field_length = 4.4;
-    double penalty_depth = 0.5;
-    double penalty_width = 1.35;
-
-    if (last_geometry_) {
-        field_length = last_geometry_->field.field_length / 1000.0;
-        penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
-        penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
-    }
-
-    bool effective_is_yellow = is_yellow_;
-    if (invert_sides_) {
-        effective_is_yellow = !is_yellow_;
-    }
-
-    bool block_positive = true;
-    bool block_negative = true;
-
-    if (robot_id_ == 0) {
-        // O goleiro pode entrar na própria área, mas não na adversária
-        if (effective_is_yellow) {
-            block_positive = false;
-        } else {
-            block_negative = false;
-        }
-    }
-
-    double penalty_x = (field_length / 2.0) - penalty_depth;
-    double penalty_y_min = -penalty_width / 2.0;
-    double penalty_y_max = penalty_width / 2.0;
+    // Mesmos limites de área usados para desenhar a parede no grid em map_callback.
+    const auto bounds = computePenaltyAreaBounds();
 
     // Margem de segurança para o raio do robô (ex: 9cm = 0.09m)
     double margin = 0.09;
 
     // Clampar o alvo fora da área positiva se bloqueada
-    if (block_positive && target.x > (penalty_x - margin) && (target.y > (penalty_y_min - margin) && target.y < (penalty_y_max + margin))) {
-        target.x = penalty_x - margin;
+    if (bounds.block_positive && target.x > (bounds.penalty_x - margin) &&
+        (target.y > (bounds.penalty_y_min - margin) && target.y < (bounds.penalty_y_max + margin))) {
+        target.x = bounds.penalty_x - margin;
     }
 
     // Clampar o alvo fora da área negativa se bloqueada
-    if (block_negative && target.x < (-penalty_x + margin) && (target.y > (penalty_y_min - margin) && target.y < (penalty_y_max + margin))) {
-        target.x = -penalty_x + margin;
+    if (bounds.block_negative && target.x < (-bounds.penalty_x + margin) &&
+        (target.y > (bounds.penalty_y_min - margin) && target.y < (bounds.penalty_y_max + margin))) {
+        target.x = -bounds.penalty_x + margin;
     }
 
     // Convert world coordinates to grid coordinates

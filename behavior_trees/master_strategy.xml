@@ -31,13 +31,15 @@
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
                                    intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                                   intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
                                    is_ready_to_kick="{is_ready_pred}" />
-            
+
             <ReactiveFallback name="AttackLogicActions">
               <!-- ATAQUE AGRESSIVO (Foca na interceptação da bola no ponto futuro) -->
               <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
-                <!-- Alvo é a BOLA no ponto futuro de interceptação -->
-                <GoToPoint robot_id="{robot_id}" x="{int_ball_x}" y="{int_ball_y}" tolerance="50.0" />
+                <!-- Alvo é o ponto de captura (perto da bola prevista, já alinhado com o gol),
+                     não o centro exato da bola: evita bater nela de frente antes de girar. -->
+                <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}" tolerance="50.0" />
                 
                 <Sequence>
                   <!-- Mantém a sequência ativa até a bola estar perto -->

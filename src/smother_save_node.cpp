@@ -7,10 +7,6 @@ namespace oxebots_strategy
 SmotherSaveNode::SmotherSaveNode(const std::string & name, const BT::NodeConfig & config, rclcpp::Node::SharedPtr node_ptr)
 : BT::StatefulActionNode(name, config), node_(node_ptr)
 {
-  if (!getInput<unsigned int>("robot_id", robot_id_)) {
-    RCLCPP_ERROR(node_->get_logger(), "SmotherSaveNode: Erro: porta [robot_id] ausente");
-  }
-
   auto goal_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   goal_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotGoal>("/robot_goal", goal_qos);
 }
@@ -26,6 +22,13 @@ BT::PortsList SmotherSaveNode::providedPorts()
 
 BT::NodeStatus SmotherSaveNode::onStart()
 {
+  // Lido em onStart() (não no construtor): portas remapeadas por blackboard só têm valor
+  // garantido a partir daqui, já que o nó é construído durante a montagem da árvore.
+  if (!getInput<unsigned int>("robot_id", robot_id_)) {
+    RCLCPP_ERROR(node_->get_logger(), "SmotherSaveNode: Erro: porta [robot_id] ausente");
+    return BT::NodeStatus::FAILURE;
+  }
+
   RCLCPP_WARN(node_->get_logger(), "Goleiro %d: ABAFANDO A BOLA (Smother Save)!", robot_id_);
   return BT::NodeStatus::RUNNING;
 }

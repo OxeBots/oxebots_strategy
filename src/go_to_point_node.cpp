@@ -282,8 +282,10 @@ BT::NodeStatus GoToPointNode::onRunning() {
     auto robot = getRobotData(robot_id_);
     if (!robot) return BT::NodeStatus::RUNNING;
 
-    publishGoal();    // Publica o objetivo continuamente (Heartbeat)
-    publishMarkers(); // Atualizar visualização a cada tick
+    // O objetivo em si só é (re)publicado quando muda (bloco acima), respeitando o QoS
+    // transient_local do tópico /robot_goal. Os marcadores são só visualização e podem
+    // ser atualizados a cada tick para refletir a posição atual do robô.
+    publishMarkers();
 
     // Calcula a distância euclidiana até o alvo
     double dist = std::hypot(robot->x - target_pos_.x, robot->y - target_pos_.y);

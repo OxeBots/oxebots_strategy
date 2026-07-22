@@ -6,7 +6,6 @@ namespace oxebots_strategy
 {
 
 static constexpr double LATERAL_TARGET_Y = 2000.0;
-static constexpr double KICK_SPEED_DEFAULT = 3.0f;
 static constexpr double POS_UPDATE_THRESHOLD = 10.0;
 static constexpr double ANG_UPDATE_THRESHOLD = 0.05;
 
