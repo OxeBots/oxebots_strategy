@@ -15,8 +15,8 @@ public:
     this->declare_parameter<int>("goalkeeper_id", 0);
     this->declare_parameter<double>("w1", 2.0);           // Peso para distância (Aumentado para priorizar quem está perto)
     this->declare_parameter<double>("w2", 1.0);           // Peso para alinhamento cinético
-    this->declare_parameter<double>("hysteresis", 1.0);   // Vantagem de custo necessária para roubar o papel
-    this->declare_parameter<double>("time_hysteresis", 0.8); // Tempo mínimo (s) entre trocas
+    this->declare_parameter<double>("hysteresis", 2.5);   // Vantagem de custo necessária para roubar o papel
+    this->declare_parameter<double>("time_hysteresis", 2.0); // Tempo mínimo (s) entre trocas
     this->declare_parameter<bool>("is_yellow_team", false);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();

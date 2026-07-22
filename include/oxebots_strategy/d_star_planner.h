@@ -169,10 +169,23 @@ class DStarPlanner
     void setOccupancyGrid(const nav_msgs::msg::OccupancyGrid::SharedPtr & grid);
 
     /**
-     * @brief Updates positions of dynamic obstacles (allies).
-     * @param allies List of (x, y) coordinates of ally robots.
+     * @brief A dynamic obstacle (ally robot or ball) with its own inflation radius.
+     * @details A per-obstacle radius lets the ball be padded less than ally robots: big enough
+     * for the D* path to bend around it, small enough that a capture point right behind the ball
+     * (see CalculateInterceptionNode::kCaptureDistanceMm) doesn't fall inside its own obstacle.
      */
-    void setAllyPositions(const std::vector<std::pair<float, float>> & allies);
+    struct DynamicObstacle
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        double radius_m = 0.0;
+    };
+
+    /**
+     * @brief Updates positions of dynamic obstacles (allies and/or the ball).
+     * @param obstacles List of dynamic obstacles, each with its own inflation radius.
+     */
+    void setDynamicObstacles(const std::vector<DynamicObstacle> & obstacles);
 
     /**
      * @brief Initializes a new search from Start to Goal.
@@ -317,7 +330,7 @@ class DStarPlannerNode : public rclcpp::Node
         bool block_positive = true;  ///< Bloquear a área do lado X positivo.
         bool block_negative = true;  ///< Bloquear a área do lado X negativo.
     };
-    PenaltyAreaBounds computePenaltyAreaBounds() const;
+    PenaltyAreaBounds computePenaltyAreaBounds();
 
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
@@ -327,6 +340,15 @@ class DStarPlannerNode : public rclcpp::Node
      * @details Checks conditions, runs planner, and publishes path.
      */
     void plan_and_publish();
+
+    /**
+     * @brief Gera um caminho interpolado em linha reta até o alvo, ignorando a grade de
+     * obstáculos (bola/aliados incluídos). Usado quando planner_type == PLANNER_STRAIGHT_LINE,
+     * para a aproximação final do atacante até o ponto de captura logo atrás da bola — situação
+     * em que a bola, marcada como obstáculo dinâmico para o D*, ficaria "dentro" da própria
+     * margem de segurança do alvo e travaria o replanejamento incremental.
+     */
+    void plan_straight_line(const geometry_msgs::msg::Point& target);
 
     // ROS Handles
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
@@ -346,6 +368,8 @@ class DStarPlannerNode : public rclcpp::Node
     float current_x_ = 0.0f;
     float current_y_ = 0.0f;
     int robot_id_ = 0;
+    double ally_safety_radius_m_ = 0.20;
+    double ball_safety_radius_m_ = 0.08;
     int consecutive_failures_ = 0;
     bool is_yellow_ = false;
     bool invert_sides_ = false;

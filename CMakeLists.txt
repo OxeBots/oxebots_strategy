@@ -30,6 +30,7 @@ add_executable(
   src/strategy_node.cpp
   src/go_to_point_node.cpp
   src/kick_ball_node.cpp
+  src/align_to_ball_node.cpp
   src/update_ball_position_node.cpp
   src/calculate_interception_node.cpp
   src/is_ball_close_condition.cpp

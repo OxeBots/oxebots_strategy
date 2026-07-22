@@ -69,7 +69,7 @@ void DStarPlanner::setOccupancyGrid(const nav_msgs::msg::OccupancyGrid::SharedPt
     }
 }
 
-void DStarPlanner::setAllyPositions(const std::vector<std::pair<float, float>> & allies)
+void DStarPlanner::setDynamicObstacles(const std::vector<DynamicObstacle> & obstacles)
 {
     std::lock_guard<std::mutex> lock(data_mutex_);
     if (!current_grid_)
@@ -85,12 +85,14 @@ void DStarPlanner::setAllyPositions(const std::vector<std::pair<float, float>> &
 
     double ox = current_grid_->info.origin.position.x;
     double oy = current_grid_->info.origin.position.y;
-    int radius_cells = std::ceil(config_.robot_safety_radius / resolution_);
 
-    // Converter posições dos aliados para células da grade e marcar como obstáculos
-    for (const auto & ally : allies)
+    // Converter posições dos obstáculos para células da grade e marcar como obstáculos.
+    // Cada obstáculo tem seu próprio raio de inflação (ex: a bola usa um raio bem menor que os
+    // aliados, para que o caminho contorne a bola sem bloquear um alvo de captura logo atrás dela).
+    for (const auto & obstacle : obstacles)
     {
-        GridCell center = worldToGrid(ally.first, ally.second, ox, oy);
+        GridCell center = worldToGrid(obstacle.x, obstacle.y, ox, oy);
+        int radius_cells = std::ceil(obstacle.radius_m / resolution_);
 
         for (int dx = -radius_cells; dx <= radius_cells; ++dx)
         {
@@ -486,6 +488,14 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     config.occupancy_threshold = safe_param("occupancy_threshold", 80).as_int();
     config.max_expansions = safe_param("max_expansions", 100000).as_int();
 
+    ally_safety_radius_m_ = config.robot_safety_radius;
+    // Raio de inflação bem menor que o dos aliados: precisa ser menor que
+    // CalculateInterceptionNode::kCaptureDistanceMm (o ponto de captura do atacante fica logo
+    // atrás da bola), senão o próprio alvo do atacante cai dentro do obstáculo e o D* nunca
+    // encontra caminho até ele. Ainda assim, grande o suficiente para o D* desviar da bola em vez
+    // de atravessá-la ao se aproximar por outros ângulos.
+    ball_safety_radius_m_ = safe_param("ball_safety_radius", 0.08).as_double();
+
     planner_ = std::make_unique<planning::DStarPlanner>(0.05, config, this->get_logger());
 
     std::string path_topic = "/robot_" + std::to_string(robot_id_) + "/path";
@@ -512,7 +522,7 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
 
-DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds() const
+DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
 {
     // Usamos a geometria recebida ou valores padrão (fallback) de 1.35m x 0.5m
     double field_length = 4.4;
@@ -620,7 +630,7 @@ void DStarPlannerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
 void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(node_mutex_);
-    std::vector<std::pair<float, float>> allies;
+    std::vector<planning::DStarPlanner::DynamicObstacle> obstacles;
 
     for (const auto & r : msg->robots.allies)
     {
@@ -630,14 +640,45 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
             current_y_ = r.y / 1000.0f;
         }
         else
-            allies.push_back({r.x / 1000.0f, r.y / 1000.0f});
+            obstacles.push_back({r.x / 1000.0f, r.y / 1000.0f, ally_safety_radius_m_});
     }
 
-    // Adiciona a BOLA como um obstáculo dinâmico para evitar colidir com ela "sem querer"
-    allies.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f});
+    // Adiciona a BOLA como um obstáculo dinâmico (raio bem menor que o dos aliados, ver
+    // ball_safety_radius_m_) para que o caminho contorne a bola em vez de atravessá-la, sem
+    // bloquear o ponto de captura do atacante logo atrás dela.
+    obstacles.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f, ball_safety_radius_m_});
 
     if (planner_)
-        planner_->setAllyPositions(allies);
+        planner_->setDynamicObstacles(obstacles);
+}
+
+void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& target)
+{
+    // Interpola pontos a cada 10cm entre a posição atual e o alvo, sem consultar a grade de
+    // obstáculos: nem a bola nem os aliados bloqueiam este caminho.
+    nav_msgs::msg::Path path;
+    path.header = last_map_data_->header;
+
+    double dx = target.x - current_x_;
+    double dy = target.y - current_y_;
+    double dist = std::hypot(dx, dy);
+    constexpr double kStepMeters = 0.10;
+    int steps = std::max(1, static_cast<int>(dist / kStepMeters));
+
+    for (int i = 0; i <= steps; ++i) {
+        double t = static_cast<double>(i) / static_cast<double>(steps);
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header = path.header;
+        pose.pose.position.x = current_x_ + dx * t;
+        pose.pose.position.y = current_y_ + dy * t;
+        pose.pose.orientation.w = 1.0;
+        path.poses.push_back(pose);
+    }
+
+    path_pub_->publish(path);
+    if (rviz_path_pub_) {
+        rviz_path_pub_->publish(path);
+    }
 }
 
 void DStarPlannerNode::plan_and_publish()
@@ -655,6 +696,11 @@ void DStarPlannerNode::plan_and_publish()
 
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
+
+    if (target_goal_msg_.value()->planner_type == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE) {
+        plan_straight_line(target);
+        return;
+    }
 
     // Mesmos limites de área usados para desenhar a parede no grid em map_callback.
     const auto bounds = computePenaltyAreaBounds();

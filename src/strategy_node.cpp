@@ -19,6 +19,7 @@
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/align_to_ball_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/is_ball_close_condition.h"
@@ -33,7 +34,7 @@
 #include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
-#include "oxebots_interfaces/msg/robot_cmd.hpp"
+#include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "ssl_league_msgs/msg/referee.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <algorithm>
@@ -77,7 +78,7 @@ public:
     gc_sub_ = this->create_subscription<ssl_league_msgs::msg::Referee>(
       this->get_parameter("gc_topic").as_string(), 10, std::bind(&StrategyNode::gc_callback, this, std::placeholders::_1));
 
-    cmd_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
+    override_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>("/robot_motion_override", 10);
   }
 
   bool init()
@@ -98,6 +99,7 @@ public:
       configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::AlignToBallNode>("AlignToBall", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::CalculateInterceptionNode>("CalculateInterception", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
@@ -163,15 +165,15 @@ public:
               reason = "por estar ocioso (sem papel)";
           }
           RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Robô %d parado %s", robot_id_, reason.c_str());
-          
-          auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
-          oxebots_interfaces::msg::RobotCmdData cmd_data;
-          cmd_data.id = robot_id_;
-          cmd_data.x_velocity = 0.0;
-          cmd_data.y_velocity = 0.0;
-          cmd_data.angular_velocity = 0.0;
-          cmd_msg->robots.push_back(cmd_data);
-          cmd_pub_->publish(std::move(cmd_msg));
+
+          // Pede ao controlador central de movimento (movement_calculation_node) para zerar os
+          // comandos deste robô, em vez de publicar direto em /robot_commands: esse tópico agora
+          // tem um único escritor por robô (o controlador), que arbitra entre path-follow,
+          // AlignToBall, KickBall e Halt via /robot_motion_override.
+          auto override_msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
+          override_msg->robot_id = robot_id_;
+          override_msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
+          override_pub_->publish(std::move(override_msg));
           return BT::NodeStatus::SUCCESS;
       }, { BT::InputPort<std::string>("reason") });
 
@@ -407,7 +409,7 @@ private:
   rclcpp::Subscription<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_sub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_sub_;
   rclcpp::Subscription<ssl_league_msgs::msg::Referee>::SharedPtr gc_sub_;
-  rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr cmd_pub_;
+  rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_pub_;
 };
 
 int main(int argc, char * argv[])

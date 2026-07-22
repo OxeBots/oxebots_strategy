@@ -53,7 +53,16 @@ BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
-             BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)") };
+             BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
+             BT::InputPort<std::string>("planner", "dstar",
+                 "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
+                 "\"straight_line\" (linha reta, ignora a grade de obstáculos)") };
+}
+
+uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
+    if (planner == "straight_line") return oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+    if (planner == "astar") return oxebots_interfaces::msg::RobotGoal::PLANNER_ASTAR;
+    return oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
 }
 
 void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
@@ -77,8 +86,14 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
 void GoToPointNode::publishGoal() {
     double op_x, op_y;
     auto blackboard = config().blackboard;
-    
-    // Se a posição do gol adversário estiver no blackboard, faz o robô olhar para lá
+
+    // Se a posição do gol adversário estiver no blackboard, faz o robô olhar para lá.
+    //
+    // NÃO trocar isto por "olhar pra bola": já foi tentado (porta face_ball, revertida). Perto
+    // do ponto de captura (~115mm da bola) essa conta é geometricamente instável — pequeno
+    // ruído na posição da bola vira oscilação grande de ângulo (sensibilidade do bearing ~
+    // 1/distância), e o robô ficava girando e de costas pra bola em vez de convergir. Olhar pro
+    // gol (~2-4m) é estável porque o mesmo ruído dá variação de ângulo desprezível.
     if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
         target_w_ = std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
     } else {
@@ -88,8 +103,12 @@ void GoToPointNode::publishGoal() {
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
     goal_msg->pose.header.stamp = node_->now();
-    goal_msg->pose.header.frame_id = "map"; 
-    
+    goal_msg->pose.header.frame_id = "map";
+
+    std::string planner = "dstar";
+    getInput<std::string>("planner", planner);
+    goal_msg->planner_type = plannerFromString(planner);
+
     // Converte de milímetros (padrão interno) para metros (padrão do ROS/RobotGoal)
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
     goal_msg->pose.pose.position.y = target_pos_.y / 1000.0;
@@ -297,11 +316,21 @@ BT::NodeStatus GoToPointNode::onRunning() {
     if (tolerance > 0.0) {
         bool pos_ok = (dist < tolerance);
         // Verifica se a orientação também está próxima do desejado (dentro de ~8.5 graus)
-        bool ori_ok = (std::abs(normalizeAngle(target_w_ - robot->orientation)) < 0.15);
+        double ori_err_rad = normalizeAngle(target_w_ - robot->orientation);
+        bool ori_ok = (std::abs(ori_err_rad) < 0.15);
         if (pos_ok && ori_ok) {
             RCLCPP_INFO(node_->get_logger(), "Robô %d chegou ao alvo (dist: %.1f, tol: %.1f).", robot_id_, dist, tolerance);
             return BT::NodeStatus::SUCCESS;
         }
+
+        // Log throttled: sem isso, o GoToPoint fica em silêncio total enquanto RUNNING (só loga
+        // no SUCCESS). Se pos_ok já for verdade mas ori_ok nunca fechar (robô não consegue ficar
+        // de frente pro alvo de orientação), o nó nunca retorna SUCCESS e nada no log explica
+        // por quê — o robô simplesmente parece "parado sem fazer nada".
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+            "Robô %d GoToPoint: dist=%.1f (tol %.1f, pos_ok=%s) erro_orientacao=%.1fdeg (ori_ok=%s)",
+            robot_id_, dist, tolerance, pos_ok ? "sim" : "nao",
+            ori_err_rad * 180.0 / M_PI, ori_ok ? "sim" : "nao");
     }
 
     // Continua executando até chegar no destino ou ser interrompido

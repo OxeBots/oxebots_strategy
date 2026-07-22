@@ -18,6 +18,10 @@ public:
 
   static BT::PortsList providedPorts();
 
+  // Converte a porta string "planner" (ex: "straight_line") no valor uint8 de
+  // RobotGoal::planner_type. Qualquer valor não reconhecido cai em PLANNER_DSTAR.
+  static uint8_t plannerFromString(const std::string& planner);
+
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
   void onHalted() override;

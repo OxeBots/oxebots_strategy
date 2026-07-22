@@ -19,6 +19,7 @@ public:
 
 private:
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
+  static double normalizeAngleDeg(double angle);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
