@@ -69,6 +69,7 @@ target_include_directories(movement_calculation_node PUBLIC
 add_executable(
   d_star_planner_node
   src/d_star_planner.cpp
+  src/a_star_planner.cpp
 )
 
 ament_target_dependencies(

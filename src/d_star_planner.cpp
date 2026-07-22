@@ -545,6 +545,10 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
     // Adiciona a BOLA como um obstáculo dinâmico para evitar colidir com ela "sem querer"
     allies.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f});
 
+    // Guardado à parte para ser reutilizado por qualquer estratégia de planejamento (ex.: A*),
+    // não só pelo D*, que mantém sua própria cópia interna.
+    last_ally_positions_ = allies;
+
     if (planner_)
         planner_->setAllyPositions(allies);
 }
@@ -564,11 +568,50 @@ void DStarPlannerNode::plan_and_publish()
 
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
+    uint8_t planner_type = target_goal_msg_.value()->planner_type;
+
+    // Checagem de "chegou ao objetivo" é independente da estratégia usada para chegar até ele.
+    double dx = current_x_ - target.x;
+    double dy = current_y_ - target.y;
+    if (std::sqrt(dx * dx + dy * dy) < 0.05) {
+        nav_msgs::msg::Path empty_path;
+        empty_path.header.stamp = now();
+        empty_path.header.frame_id = "map";
+        path_pub_->publish(empty_path);
+        target_goal_msg_ = std::nullopt;  // Clear goal after reaching it
+        return;
+    }
 
     // Convert world coordinates to grid coordinates
     auto s = planner_->worldToGrid(current_x_, current_y_, origin.x, origin.y);
     auto g = planner_->worldToGrid(target.x, target.y, origin.x, origin.y);
 
+    nav_msgs::msg::Path path;
+    switch (planner_type)
+    {
+        case oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE:
+            path = planStraightLine(target);
+            break;
+        case oxebots_interfaces::msg::RobotGoal::PLANNER_ASTAR:
+            path = planWithAStar(s, g, origin);
+            break;
+        case oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR:
+        default:
+            path = planWithDStar(s, g, origin);
+            break;
+    }
+
+    // Contrato de saída único, igual para qualquer estratégia: nav_msgs/Path no mesmo tópico.
+    path.header = last_map_data_->header;
+    path_pub_->publish(path);
+    if (rviz_path_pub_) {
+        rviz_path_pub_->publish(path);
+    }
+}
+
+nav_msgs::msg::Path DStarPlannerNode::planWithDStar(const GridCell & s, const GridCell & g,
+                                                      const geometry_msgs::msg::Point & origin)
+{
     auto cur_goal = planner_->getGoal();
     if (!cur_goal || *cur_goal != g)
     {
@@ -576,37 +619,107 @@ void DStarPlannerNode::plan_and_publish()
         planner_->initialize(s, g);
         if (planner_->plan() != planning::PlannerStatus::SUCCESS)
         {
-            // Publish empty path on failure to stop the robot
             nav_msgs::msg::Path empty_path;
-            empty_path.header.stamp = now();
-            empty_path.header.frame_id = "map";
-            path_pub_->publish(empty_path);
-            return;
+            return empty_path;
         }
     }
     else
     {
-        // Check if we are already close enough to the goal (within 5cm)
-        double dx = current_x_ - target.x;
-        double dy = current_y_ - target.y;
-        if (std::sqrt(dx*dx + dy*dy) < 0.05) {
-            nav_msgs::msg::Path empty_path;
-            empty_path.header.stamp = now();
-            empty_path.header.frame_id = "map";
-            path_pub_->publish(empty_path);
-            target_goal_msg_ = std::nullopt; // Clear goal after reaching it
-            return;
-        }
         // Same goal: incremental replanning based on map updates
         planner_->updateMapAndReplan(s);
     }
 
-    auto path = planner_->reconstructPath(s, origin.x, origin.y);
-    path.header = last_map_data_->header;
-    path_pub_->publish(path);
-    if (rviz_path_pub_) {
-        rviz_path_pub_->publish(path);
+    return planner_->reconstructPath(s, origin.x, origin.y);
+}
+
+nav_msgs::msg::Path DStarPlannerNode::planWithAStar(const GridCell & s, const GridCell & g,
+                                                      const geometry_msgs::msg::Point & origin)
+{
+    nav_msgs::msg::Path path;
+    int width = static_cast<int>(last_map_data_->info.width);
+    int height = static_cast<int>(last_map_data_->info.height);
+    if (width <= 0 || height <= 0)
+        return path;
+
+    if (!a_star_planner_ || a_star_grid_width_ != width || a_star_grid_height_ != height)
+    {
+        a_star_planner_ = std::make_unique<oxebots_strategy::AStarPlanner>(width, height);
+        a_star_grid_width_ = width;
+        a_star_grid_height_ = height;
     }
+
+    const auto & config = planner_->getConfig();
+    double resolution = planner_->getResolution();
+
+    // Grid de ocupação: mesma fonte (mapa + threshold) e mesma dilatação de obstáculos dinâmicos
+    // usada pelo D*, para que ambas as estratégias enxerguem o mesmo mundo.
+    std::vector<std::vector<int>> grid(height, std::vector<int>(width, 0));
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            int8_t val = last_map_data_->data[y * width + x];
+            if (val >= config.occupancy_threshold)
+                grid[y][x] = 1;
+        }
+    }
+
+    int radius_cells = static_cast<int>(std::ceil(config.robot_safety_radius / resolution));
+    for (const auto & ally : last_ally_positions_)
+    {
+        auto center = planner_->worldToGrid(ally.first, ally.second, origin.x, origin.y);
+        for (int dxc = -radius_cells; dxc <= radius_cells; ++dxc)
+        {
+            for (int dyc = -radius_cells; dyc <= radius_cells; ++dyc)
+            {
+                int cx = center.x + dxc;
+                int cy = center.y + dyc;
+                if (cx >= 0 && cx < width && cy >= 0 && cy < height)
+                    grid[cy][cx] = 1;
+            }
+        }
+    }
+
+    oxebots_strategy::Node start_node(s.y, s.x);
+    oxebots_strategy::Node goal_node(g.y, g.x);
+    if (start_node.y < 0 || start_node.y >= height || start_node.x < 0 || start_node.x >= width ||
+        goal_node.y < 0 || goal_node.y >= height || goal_node.x < 0 || goal_node.x >= width)
+        return path;
+
+    // Início/objetivo nunca podem ficar bloqueados pela própria dilatação (ex.: robô perto de um aliado).
+    grid[start_node.y][start_node.x] = 0;
+    grid[goal_node.y][goal_node.x] = 0;
+
+    auto nodes = a_star_planner_->findPath(start_node, goal_node, grid);
+    path.poses.reserve(nodes.size());
+    for (const auto & n : nodes)
+    {
+        GridCell cell{n.x, n.y};
+        path.poses.push_back(planner_->gridToWorld(cell, origin.x, origin.y));
+    }
+    return path;
+}
+
+nav_msgs::msg::Path DStarPlannerNode::planStraightLine(const geometry_msgs::msg::Point & target)
+{
+    nav_msgs::msg::Path path;
+    constexpr double kStepMeters = 0.1;
+
+    double dx = target.x - current_x_;
+    double dy = target.y - current_y_;
+    double dist = std::hypot(dx, dy);
+    int steps = std::max(1, static_cast<int>(dist / kStepMeters));
+
+    path.poses.reserve(steps + 1);
+    for (int i = 0; i <= steps; ++i)
+    {
+        double t = static_cast<double>(i) / steps;
+        geometry_msgs::msg::PoseStamped ps;
+        ps.pose.position.x = current_x_ + dx * t;
+        ps.pose.position.y = current_y_ + dy * t;
+        path.poses.push_back(ps);
+    }
+    return path;
 }
 
 }  // namespace planning

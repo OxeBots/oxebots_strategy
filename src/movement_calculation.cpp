@@ -80,54 +80,44 @@ void PathFollowerNode::calculate_and_move() {
     }
     if (!found_me) return;
 
+    // O caminho a seguir vem sempre do planejador (D*, A* ou linha reta, conforme escolhido na
+    // árvore de comportamento) publicado em <robot>/path. Este nó só converte path -> velocidade,
+    // sem decidir estratégia de aproximação.
     movement::Coordinate target_pt;
     bool target_found = false;
 
-    // --- Lógica de Ataque Direto (Short-circuit) ---
-    // Se estiver a menos de 400mm do alvo (bola ou pre_kick), vai direto para ignorar o obstáculo no mapa
-    if (target_goal_.has_value()) {
-        double dist_to_final = std::hypot(target_goal_->x - current_pos.x, target_goal_->y - current_pos.y);
-        if (dist_to_final < 400.0) {
-            target_pt = *target_goal_;
+    if (last_path_ && !last_path_->poses.empty()) {
+        double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
+        for (const auto& pose_stamped : last_path_->poses) {
+            float px = pose_stamped.pose.position.x * 1000.0f;
+            float py = pose_stamped.pose.position.y * 1000.0f;
+            double d = std::hypot(px - current_pos.x, py - current_pos.y);
+
+            if (d > lookahead_dist) {
+                target_pt = {px, py, 0.0f};
+                target_found = true;
+                break;
+            }
+        }
+        if (!target_found) {
+            target_pt = {
+                (float)last_path_->poses.back().pose.position.x * 1000.0f,
+                (float)last_path_->poses.back().pose.position.y * 1000.0f,
+                0.0f
+            };
             target_found = true;
         }
-    }
-
-    // --- Seguir Rota do D* (Caso não esteja perto o suficiente para o ataque direto) ---
-    if (!target_found) {
-        if (last_path_ && !last_path_->poses.empty()) {
-            double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
-            for (const auto& pose_stamped : last_path_->poses) {
-                float px = pose_stamped.pose.position.x * 1000.0f;
-                float py = pose_stamped.pose.position.y * 1000.0f;
-                double d = std::hypot(px - current_pos.x, py - current_pos.y);
-                
-                if (d > lookahead_dist) {
-                    target_pt = {px, py, 0.0f};
-                    target_found = true;
-                    break;
-                }
-            }
-            if (!target_found) {
-                target_pt = {
-                    (float)last_path_->poses.back().pose.position.x * 1000.0f,
-                    (float)last_path_->poses.back().pose.position.y * 1000.0f,
-                    0.0f
-                };
-                target_found = true;
-            }
-        } else if (last_path_ && last_path_->poses.empty()) {
-            // Rota vazia recebida: parar o robô
-            auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
-            oxebots_interfaces::msg::RobotCmdData cmd_data;
-            cmd_data.id = robot_id_;
-            cmd_data.x_velocity = 0.0;
-            cmd_data.y_velocity = 0.0;
-            cmd_data.angular_velocity = 0.0;
-            cmd_msg->robots.push_back(cmd_data);
-            cmd_vel_pub_->publish(std::move(cmd_msg));
-            return;
-        }
+    } else if (last_path_ && last_path_->poses.empty()) {
+        // Rota vazia recebida: parar o robô
+        auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
+        oxebots_interfaces::msg::RobotCmdData cmd_data;
+        cmd_data.id = robot_id_;
+        cmd_data.x_velocity = 0.0;
+        cmd_data.y_velocity = 0.0;
+        cmd_data.angular_velocity = 0.0;
+        cmd_msg->robots.push_back(cmd_data);
+        cmd_vel_pub_->publish(std::move(cmd_msg));
+        return;
     }
 
     if (!target_found) return;
@@ -136,11 +126,26 @@ void PathFollowerNode::calculate_and_move() {
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
 
+    // --- Controle Angular (calculado antes do linear: a rotação tem prioridade) ---
+    double angle_err = 0.0;
+    bool has_target_w = target_w_.has_value();
+    double angle_tolerance = this->get_parameter("angle_tolerance").as_double();
+    if (has_target_w) {
+        angle_err = normalizeAngle(*target_w_ - current_pos.orientation);
+        if (std::abs(angle_err) < angle_tolerance) {
+            cmd_data.angular_velocity = 0.0;
+        } else {
+            double p_ang = this->get_parameter("p_gain_angular").as_double();
+            double max_ang = this->get_parameter("max_angular_speed").as_double();
+            cmd_data.angular_velocity = std::clamp(angle_err * p_ang, -max_ang, max_ang);
+        }
+    }
+
     // --- Controle Linear ---
     double dist_to_target = std::hypot(target_pt.x - current_pos.x, target_pt.y - current_pos.y);
-    
+
     // Se tivermos um alvo final, checamos se chegamos nele
-    double check_dist = target_goal_.has_value() ? 
+    double check_dist = target_goal_.has_value() ?
         std::hypot(target_goal_->x - current_pos.x, target_goal_->y - current_pos.y) : dist_to_target;
 
     if (check_dist < 40.0 || dist_to_target < 0.001) {
@@ -149,25 +154,22 @@ void PathFollowerNode::calculate_and_move() {
     } else {
         double p_lin = this->get_parameter("p_gain_linear").as_double();
         double max_lin = this->get_parameter("max_linear_speed").as_double();
-        
+
         double vx = (target_pt.x - current_pos.x) / dist_to_target;
         double vy = (target_pt.y - current_pos.y) / dist_to_target;
-        
+
         double speed = std::min(max_lin, (dist_to_target / 1000.0) * p_lin);
+
+        // Prioriza alinhar antes de avançar: com erro angular >= 90 graus a velocidade linear
+        // vai a zero (gira no lugar); alinhado (erro ~0) mantém a velocidade cheia. Isso evita que
+        // o robô "empurre" a bola fora de posição enquanto ainda está girando para encará-la.
+        if (has_target_w) {
+            double alignment_factor = std::max(0.0, std::cos(angle_err));
+            speed *= alignment_factor;
+        }
+
         cmd_data.x_velocity = vx * speed;
         cmd_data.y_velocity = vy * speed;
-    }
-
-    // --- Controle Angular ---
-    if (target_w_.has_value()) {
-        double angle_err = normalizeAngle(*target_w_ - current_pos.orientation);
-        if (std::abs(angle_err) < this->get_parameter("angle_tolerance").as_double()) {
-            cmd_data.angular_velocity = 0.0;
-        } else {
-            double p_ang = this->get_parameter("p_gain_angular").as_double();
-            double max_ang = this->get_parameter("max_angular_speed").as_double();
-            cmd_data.angular_velocity = std::clamp(angle_err * p_ang, -max_ang, max_ang);
-        }
     }
 
     cmd_msg->robots.push_back(cmd_data);

@@ -30,6 +30,7 @@
 #include "nav_msgs/msg/path.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
+#include "oxebots_strategy/a_star_planner.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace planning
@@ -217,6 +218,8 @@ class DStarPlanner
     std::optional<GridCell> getGoal() const { return goal_cell_; }
     const PlannerMetrics & getMetrics() const { return metrics_; }
     void resetMetrics() { metrics_.reset(); }
+    const PlannerConfig & getConfig() const { return config_; }
+    double getResolution() const { return resolution_; }
 
    private:
     /**
@@ -306,6 +309,23 @@ class DStarPlannerNode : public rclcpp::Node
      */
     void plan_and_publish();
 
+    /**
+     * @brief Runs the D* planner (default strategy). Preserves original incremental-replan behavior.
+     */
+    nav_msgs::msg::Path planWithDStar(const GridCell & start, const GridCell & goal,
+                                       const geometry_msgs::msg::Point & origin);
+
+    /**
+     * @brief Runs a single-shot A* search over the same occupancy grid + dynamic obstacles as D*.
+     */
+    nav_msgs::msg::Path planWithAStar(const GridCell & start, const GridCell & goal,
+                                       const geometry_msgs::msg::Point & origin);
+
+    /**
+     * @brief Builds a direct point-to-point path, ignoring the occupancy grid entirely.
+     */
+    nav_msgs::msg::Path planStraightLine(const geometry_msgs::msg::Point & target);
+
     // ROS Handles
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr rviz_path_pub_;
@@ -316,14 +336,18 @@ class DStarPlannerNode : public rclcpp::Node
 
     // Components
     std::unique_ptr<planning::DStarPlanner> planner_;
+    std::unique_ptr<oxebots_strategy::AStarPlanner> a_star_planner_;
     nav_msgs::msg::OccupancyGrid::SharedPtr last_map_data_;
     std::mutex node_mutex_;
 
     // State
     std::optional<oxebots_interfaces::msg::RobotGoal::SharedPtr> target_goal_msg_;
+    std::vector<std::pair<float, float>> last_ally_positions_;  ///< Meters. Shared obstacle source for D*/A*.
     float current_x_ = 0.0f;
     float current_y_ = 0.0f;
     int robot_id_ = 0;
     int consecutive_failures_ = 0;
+    int a_star_grid_width_ = 0;
+    int a_star_grid_height_ = 0;
 };
 }  // namespace planning

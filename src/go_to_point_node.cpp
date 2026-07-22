@@ -27,7 +27,15 @@ BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
-             BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)") };
+             BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
+             BT::InputPort<std::string>("planner", "dstar",
+                 "Estratégia de planejamento para este objetivo: dstar, astar ou straight_line") };
+}
+
+uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
+    if (planner == "astar") return oxebots_interfaces::msg::RobotGoal::PLANNER_ASTAR;
+    if (planner == "straight_line") return oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+    return oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
 }
 
 void GoToPointNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
@@ -51,11 +59,15 @@ void GoToPointNode::publishGoal() {
         target_w_ = 0.0;
     }
 
+    std::string planner_name = "dstar";
+    getInput<std::string>("planner", planner_name);
+
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
+    goal_msg->planner_type = plannerFromString(planner_name);
     goal_msg->pose.header.stamp = node_->now();
-    goal_msg->pose.header.frame_id = "map"; 
-    
+    goal_msg->pose.header.frame_id = "map";
+
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
     goal_msg->pose.pose.position.y = target_pos_.y / 1000.0;
     

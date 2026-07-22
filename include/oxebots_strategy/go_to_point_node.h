@@ -24,6 +24,7 @@ private:
   void publishGoal();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
   std::optional<oxebots_interfaces::msg::RobotGameData> getRobotData(unsigned int robot_id);
+  static uint8_t plannerFromString(const std::string& planner);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;

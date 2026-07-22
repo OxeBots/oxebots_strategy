@@ -14,8 +14,9 @@
         <Sequence name="AttackerLoop">
           <!-- Atualiza dados da bola e verifica se está pronto para o chute -->
           <UpdateBallPosition robot_id="2"
-                              ball_x="{ball_x}" ball_y="{ball_y}" 
-                              pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                              ball_x="{ball_x}" ball_y="{ball_y}"
+                              pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                              capture_x="{cpx}" capture_y="{cpy}"
                               is_ready_to_kick="{is_ready}"
                               goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
 
@@ -29,8 +30,9 @@
 
              <!-- Fase de Rush e Chute -->
              <Parallel success_count="1" failure_count="1">
-                <!-- Empurra o robô contra a bola -->
-                <GoToPoint robot_id="2" x="{ball_x}" y="{ball_y}" />
+                <!-- Avança até o ponto de captura (perto da bola, já alinhado com o gol), em linha reta:
+                     nesta distância o D* não é necessário e sua saída (nav_msgs/Path) é a mesma. -->
+                <GoToPoint robot_id="2" x="{cpx}" y="{cpy}" planner="straight_line" />
 
                 <Sequence>
                    <RetryUntilSuccessful num_attempts="-1">

@@ -14,10 +14,12 @@ UpdateBallPositionNode::UpdateBallPositionNode(const std::string& name, const BT
 
 BT::PortsList UpdateBallPositionNode::providedPorts()
 {
-  return { BT::OutputPort<double>("ball_x"), 
+  return { BT::OutputPort<double>("ball_x"),
            BT::OutputPort<double>("ball_y"),
            BT::OutputPort<double>("pre_kick_x"),
            BT::OutputPort<double>("pre_kick_y"),
+           BT::OutputPort<double>("capture_x"),
+           BT::OutputPort<double>("capture_y"),
            BT::OutputPort<bool>("is_ready_to_kick"),
            BT::InputPort<unsigned int>("robot_id"),
            BT::InputPort<double>("goal_x"),
@@ -66,6 +68,14 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
       
       setOutput("pre_kick_x", pk_x);
       setOutput("pre_kick_y", pk_y);
+
+      // --- Ponto de Captura: mesma linha gol->bola, mas bem perto da bola ---
+      // Usado na fase de "Rush" no lugar da posição exata da bola, para que o robô
+      // termine a aproximação já alinhado (em vez de mirar no centro da bola e bater nela).
+      double cp_x = ball_x + (dx / dist_ball_goal) * kCaptureDistanceMm;
+      double cp_y = ball_y + (dy / dist_ball_goal) * kCaptureDistanceMm;
+      setOutput("capture_x", cp_x);
+      setOutput("capture_y", cp_y);
 
       // --- Verificar se o robô já está "atrás da bola" ---
       if (getInput<unsigned int>("robot_id", robot_id)) {
