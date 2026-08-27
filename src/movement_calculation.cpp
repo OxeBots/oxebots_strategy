@@ -28,7 +28,7 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
 
     std::string robot_prefix = "/robot_" + std::to_string(robot_id_);
     
-    cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", 10);
+    cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", rclcpp::SensorDataQoS());
     status_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionStatus>("/robot_motion_status", 10);
 
     game_data_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
