@@ -43,6 +43,7 @@ add_executable(
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
   src/smother_save_node.cpp
+  src/ai_parse_node.cpp
 )
 
 ament_target_dependencies(
@@ -60,8 +61,12 @@ ament_target_dependencies(
 target_include_directories(strategy_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  /usr/local/include
 )
 
+target_link_directories(strategy_node PRIVATE /usr/local/lib)
+
+target_link_libraries(strategy_node onnxruntime)
 
 add_executable(
   movement_calculation_node
@@ -133,6 +138,11 @@ install(
 
 install(
     DIRECTORY launch
+    DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+    DIRECTORY models
     DESTINATION share/${PROJECT_NAME}
 )
 

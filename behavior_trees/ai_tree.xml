@@ -21,16 +21,19 @@
 
         <Repeat num_cycles="-1">
           <ReactiveSequence name="AttackerLogicLoop">
+
             <UpdateBallPosition robot_id="{robot_id}"
                                 ball_x="{ball_x}" ball_y="{ball_y}"
                                 pre_kick_x="{pkx}" pre_kick_y="{pky}"
                                 is_ready_to_kick="{is_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
 
+            <!-- 2. O SELETOR DE ESTRATÉGIA -->
             <ReactiveFallback name="StrategySelector">
 
               <Sequence name="AI_Strategy">
                 <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
+
                 <AiParser robot_id="{robot_id}" model_name="attacker_treino1_best.onnx" />
 
               </Sequence>
