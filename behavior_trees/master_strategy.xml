@@ -18,7 +18,18 @@
       <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
-        <Repeat num_cycles="-1">
+        <!-- RetryUntilSuccessful, NÃO Repeat: Repeat para de repetir e devolve FAILURE assim que
+             o filho falha uma vez (não tenta de nova sozinho) — isso cascateava a falha de
+             qualquer etapa de ChaseAndKick (timeout de alinhamento, timeout de proximidade, ou o
+             gatilho de contato indevido com a bola) pra fora do AttackerRole inteiro, caindo no
+             Halt/"sem papel" no fim do MasterStrategy. Como o Halt zera a velocidade, o robô ficava
+             fisicamente parado exatamente na mesma posição/distância da bola que causou a falha, e
+             a próxima tentativa (só no próximo tick de MasterStrategy) falhava de novo pelo mesmo
+             motivo — um loop infinito preso na mesma distância constante (confirmado no log).
+             RetryUntilSuccessful tenta de novo IMEDIATAMENTE no próximo tick após uma falha, sem
+             nunca sair do AttackerRole, o que de fato recalcula a rota do zero (CalculateInterception
+             roda de novo logo acima) em vez de cair num Halt que trava o robô no lugar. -->
+        <RetryUntilSuccessful num_attempts="-1">
           <ReactiveSequence name="AttackerLogicLoop">
             <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
             <UpdateBallPosition robot_id="{robot_id}"
@@ -43,8 +54,20 @@
                      linha bola-gol), ainda longe da bola de verdade. Usa D* (padrão) para
                      contornar a bola como obstáculo em vez de cruzar por cima dela a caminho
                      desse ponto. tolerance maior (120mm) porque aqui só precisamos estar
-                     posicionados e alinhados, não colados na bola. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0" />
+                     posicionados e alinhados, não colados na bola.
+
+                     ball_contact_threshold_mm=150.0: casa com o raio de segurança da bola no D*
+                     (ball_safety_radius_m_, d_star_planner.cpp). Mesmo com esse raio, o robô ainda
+                     conseguia encostar de verdade na bola durante a Fase 1 (raspando a 60-100mm
+                     por vários segundos — confirmado em log de teste), porque nada reagia depois
+                     que o contato já tinha acontecido: o GoToPoint continuava mandando seguir o
+                     path antigo. Esse limite faz o próprio GoToPoint falhar se isso acontecer,
+                     derrubando a Sequence inteira — o ReactiveFallback tenta de novo no tick
+                     seguinte com CalculateInterceptionNode recalculando os pontos a partir da
+                     posição real e atual da bola, e o D* replanejando do zero. NÃO usar esse
+                     limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo. -->
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0"
+                           ball_contact_threshold_mm="150.0" />
 
                 <!-- Fase 2: já alinhado atrás da bola, avança reto até o ponto de captura (bem
                      mais perto, int_cap_x/y). planner="straight_line" porque, chegando desta
@@ -115,7 +138,7 @@
               </Sequence>
             </ReactiveFallback>
           </ReactiveSequence>
-        </Repeat>
+        </RetryUntilSuccessful>
       </ReactiveSequence>
 
       <!-- 3. DEFESA (Robô 1 - Lógica vinda da branch defender) -->

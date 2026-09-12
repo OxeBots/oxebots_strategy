@@ -44,6 +44,7 @@ private:
   unsigned int robot_id_;
   geometry_msgs::msg::Point target_pos_;
   double target_w_;
+  std::optional<rclcpp::Time> ball_contact_since_;
 };
 
 } // namespace oxebots_strategy

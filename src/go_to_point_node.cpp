@@ -56,7 +56,17 @@ BT::PortsList GoToPointNode::providedPorts() {
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
              BT::InputPort<std::string>("planner", "dstar",
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
-                 "\"straight_line\" (linha reta, ignora a grade de obstáculos)") };
+                 "\"straight_line\" (linha reta, ignora a grade de obstáculos)"),
+             BT::InputPort<double>("ball_contact_threshold_mm", -1.0,
+                 "Se > 0, o nó falha (FAILURE) caso a bola AO VIVO chegue mais perto do robô do "
+                 "que esse valor antes de \"chegar\" ao alvo. Use só em GoToPoints longe da bola "
+                 "de propósito (ex: Fase 1, indo pro ponto de pré-chute): um contato ali é sempre "
+                 "acidental (bola se moveu, ruído), então a falha derruba a Sequence e força o "
+                 "ReactiveFallback a recalcular tudo do zero na posição atual da bola, em vez de "
+                 "continuar empurrando-a pelo caminho antigo. NÃO usar em GoToPoints que terminam "
+                 "perto da bola de propósito (ex: Fase 2, ponto de captura) — nesse caso, chegar "
+                 "perto é o objetivo, não um acidente. Default -1.0 = desabilitado (nenhum "
+                 "comportamento novo para quem já usa este nó sem setar essa porta).") };
 }
 
 uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
@@ -195,6 +205,8 @@ void GoToPointNode::publishMarkers() {
 
 // Chamado uma vez quando o nó BT é ativado
 BT::NodeStatus GoToPointNode::onStart() {
+    ball_contact_since_.reset();
+
     unsigned int input_id;
     if (!getInput<unsigned int>("robot_id", input_id)) return BT::NodeStatus::FAILURE;
 
@@ -300,6 +312,38 @@ BT::NodeStatus GoToPointNode::onRunning() {
     // Pega a posição atual do robô para verificar se ele já chegou no destino
     auto robot = getRobotData(robot_id_);
     if (!robot) return BT::NodeStatus::RUNNING;
+
+    // Gatilho de contato indevido com a bola (ver comentário da porta em providedPorts()): só
+    // ativo se ball_contact_threshold_mm > 0 for explicitamente passado (ex: Fase 1 em
+    // master_strategy.xml). Falhar aqui, em vez de tentar corrigir a velocidade no controlador,
+    // devolve a decisão pra árvore: a Sequence falha, o ReactiveFallback tenta de novo no próximo
+    // tick com CalculateInterceptionNode já tendo recalculado os pontos a partir da posição REAL
+    // e atual da bola — um replanejamento completo, não um ajuste de velocidade brigando com o
+    // GoToPoint por cima (foi tentado como repulsão de velocidade direto no controlador e
+    // resultou em oscilação: a bola no meio do caminho não empurra mais, mas o robô fica preso
+    // "indo e voltando" na borda do raio de contato, sem nunca de fato progredir).
+    double ball_contact_threshold = -1.0;
+    getInput<double>("ball_contact_threshold_mm", ball_contact_threshold);
+    if (ball_contact_threshold > 0.0 && last_game_data_) {
+        double ball_dist = std::hypot(robot->x - last_game_data_->ball.x, robot->y - last_game_data_->ball.y);
+        // Debounce: exige contato sustentado (150ms) antes de abortar, não um único frame de
+        // ruído de visão/predição. Sem isso, um blip passageiro de posição da bola já derrubaria
+        // a Sequence inteira à toa.
+        constexpr double kSustainedContactSec = 0.15;
+        if (ball_dist < ball_contact_threshold) {
+            if (!ball_contact_since_.has_value()) {
+                ball_contact_since_ = node_->now();
+            } else if ((node_->now() - *ball_contact_since_).seconds() >= kSustainedContactSec) {
+                RCLCPP_WARN(node_->get_logger(),
+                    "Robô %d: contato indevido com a bola durante GoToPoint (dist=%.1f, limite=%.1f) — "
+                    "abortando para recalcular a rota do zero.", robot_id_, ball_dist, ball_contact_threshold);
+                ball_contact_since_.reset();
+                return BT::NodeStatus::FAILURE;
+            }
+        } else {
+            ball_contact_since_.reset();
+        }
+    }
 
     // O objetivo em si só é (re)publicado quando muda (bloco acima), respeitando o QoS
     // transient_local do tópico /robot_goal. Os marcadores são só visualização e podem

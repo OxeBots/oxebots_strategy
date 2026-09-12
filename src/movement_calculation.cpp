@@ -109,6 +109,21 @@ void PathFollowerNode::calculate_and_move() {
         effective_mode = last_override_msg_->mode;
     }
 
+    // Diagnóstico temporário: avisa sempre que o robô encostar (ou quase) na bola FORA do chute
+    // intencional (MODE_KICK) — raio do robô (~75mm) + raio da bola (~22mm) ~ 97mm de contato
+    // real. Ajuda a identificar em qual fase/estado exatamente a colisão relatada (bola atrás,
+    // robô não desvia) está acontecendo, já que não há nenhum outro marcador de contato no log.
+    if (effective_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK) {
+        double ball_dist = std::hypot(last_game_data_->ball.x - current_pos.x, last_game_data_->ball.y - current_pos.y);
+        if (ball_dist < 100.0) {
+            RCLCPP_WARN(this->get_logger(),
+                "Robô %d PERTO/ENCOSTANDO na bola fora do chute: dist=%.1fmm modo=%d heading=%.1fdeg "
+                "robot(%.1f,%.1f) ball(%.1f,%.1f)",
+                robot_id_, ball_dist, effective_mode, current_pos.orientation * 180.0 / M_PI,
+                current_pos.x, current_pos.y, last_game_data_->ball.x, last_game_data_->ball.y);
+        }
+    }
+
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
         publishHalt();
         return;
