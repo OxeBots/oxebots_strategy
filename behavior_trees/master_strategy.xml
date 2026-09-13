@@ -117,8 +117,15 @@
                 <!-- Mantém a sequência ativa até a bola estar perto o bastante para o chute.
                      180mm era maior que o alcance real do kicker (~110mm = raio do robô + raio da
                      bola): o robô chutava "no vácuo". 140mm cobre a folga da tolerância da fase 2
-                     (115±20mm) sem passar longe demais. Ângulo já garantido pelo AlignToBall
-                     acima, então aqui só distância.
+                     (115±20mm) sem passar longe demais.
+
+                     angle_threshold_deg="10.0": antes só checava distância, confiando que o
+                     AlignToBall acima já tinha resolvido o ângulo — mas há uma janela de corrida
+                     entre o AlignToBall reportar sucesso (via /robot_motion_status, assíncrono) e
+                     este nó tickar de novo, tempo em que a bola pode ter se movido um pouco.
+                     Reconferir o ângulo aqui, no instante exato antes do chute, evita disparar com
+                     a bola já fora do cone do kicker (mesmo limite de 10° usado no AlignToBall,
+                     pra não introduzir um segundo padrão de tolerância).
 
                      Timeout de 1.5s: sem isso, se a bola sair de perto DEPOIS que o GoToPoint já
                      teve sucesso (rolou, foi tocada por outro robô), o robô fica preso aqui para
@@ -131,10 +138,25 @@
                      da bola). -->
                 <Timeout msec="1500">
                   <RetryUntilSuccessful num_attempts="-1">
-                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0"/>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
                   </RetryUntilSuccessful>
                 </Timeout>
                 <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+
+                <!-- Recuo pós-chute: sem isso, assim que KickBall sucede a Sequence inteira
+                     retorna SUCCESS, RetryUntilSuccessful vê sucesso e não reinicia sozinho, mas o
+                     ReactiveFallback do MasterStrategy retickando por fora entra de novo direto na
+                     Fase 1 no PRÓXIMO tick (dezenas de ms depois), mirando a bola que — se o chute
+                     foi fraco ou o robô ainda está encostado nela — ainda está a poucos
+                     centímetros. O CalculateInterception recalcula um ponto de pré-chute quase em
+                     cima do robô, e a Fase 1/2 "recaptura" e empurra a bola de novo em vez de
+                     deixar ela rolar livre — percebido como "carregar a bola" logo depois de
+                     chutar. Este delay dá ~600ms pra bola sair da zona de recaptura (kick_speed
+                     mínimo efetivo de ~1.5 m/s já cobre bem mais que a distância de captura de
+                     115mm nesse tempo) antes do loop reiniciar. -->
+                <Delay delay_msec="600">
+                  <AlwaysSuccess/>
+                </Delay>
               </Sequence>
             </ReactiveFallback>
           </ReactiveSequence>

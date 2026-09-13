@@ -53,11 +53,12 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
     if (msg->robot_id != robot_id_) return;
     std::lock_guard<std::mutex> lock(data_mutex_);
     target_goal_ = movement::Coordinate{
-        (float)(msg->pose.pose.position.x * 1000.0), 
-        (float)(msg->pose.pose.position.y * 1000.0)  
+        (float)(msg->pose.pose.position.x * 1000.0),
+        (float)(msg->pose.pose.position.y * 1000.0)
     };
     const auto& q = msg->pose.pose.orientation;
     target_w_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    target_planner_type_ = msg->planner_type;
 }
 
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -253,6 +254,39 @@ void PathFollowerNode::calculate_and_move() {
 
         cmd_data.x_velocity = vx * speed;
         cmd_data.y_velocity = vy * speed;
+    }
+
+    // Repulsão de contato — SÓ na Fase 1 (planner_type == PLANNER_DSTAR). Já tentamos isso sem
+    // esse filtro antes e quebrou a Fase 2 (straight_line): lá chegar perto da bola (~115mm,
+    // kCaptureDistanceMm) é o objetivo, e a repulsão brigava com a aproximação legítima, travando
+    // o robô num cabo-de-guerra "indo e voltando" bem na borda do raio de contato. Restrito à Fase
+    // 1, esse conflito não existe: qualquer contato ali é sempre acidental (perseguindo a bola
+    // pelo campo), e o ganho real desta correção é agir NO MESMO ciclo de 50ms em que o contato é
+    // detectado — sem esperar o roundtrip árvore→D*→path que tem defasagem de dezenas a centenas
+    // de ms (confirmado em log: robô e bola avançando colineares por 700ms-1s a ~60-70mm antes do
+    // BT sequer re-tickar). Histerese (entra a 100mm, só desarma a 130mm) evita flapping bem na
+    // borda; complementa (não substitui) o ball_contact_threshold_mm do GoToPoint, que continua
+    // responsável por forçar um replanejamento completo caso o contato persista.
+    if (last_game_data_ && !arrived && target_planner_type_ == oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR) {
+        double bdx = current_pos.x - last_game_data_->ball.x;
+        double bdy = current_pos.y - last_game_data_->ball.y;
+        double ball_dist = std::hypot(bdx, bdy);
+        constexpr double kContactEnterMm = 100.0;
+        constexpr double kContactExitMm = 130.0;
+
+        if (contact_repulsion_active_) {
+            if (ball_dist > kContactExitMm) contact_repulsion_active_ = false;
+        } else if (ball_dist < kContactEnterMm) {
+            contact_repulsion_active_ = true;
+        }
+
+        if (contact_repulsion_active_ && ball_dist > 1e-3) {
+            double max_lin = this->get_parameter("max_linear_speed").as_double();
+            double repel_speed = max_lin * std::clamp(1.0 - ball_dist / kContactExitMm, 0.0, 1.0);
+            cmd_data.x_velocity = (bdx / ball_dist) * repel_speed;
+            cmd_data.y_velocity = (bdy / ball_dist) * repel_speed;
+            cmd_data.angular_velocity = 0.0;
+        }
     }
 
     cmd_msg->robots.push_back(cmd_data);

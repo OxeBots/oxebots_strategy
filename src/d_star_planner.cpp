@@ -482,7 +482,18 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     robot_id_ = safe_param("robot_id", 0).as_int();
     is_yellow_ = safe_param("is_yellow_team", false).as_bool();
     invert_sides_ = safe_param("invert_sides", false).as_bool();
-    double hz = safe_param("planning_rate_hz", 10.0).as_double();
+    planning_rate_hz_ = safe_param("planning_rate_hz", 10.0).as_double();
+    // Taxa usada só quando a bola está a close_ball_distance_m_ ou menos do robô: a defasagem
+    // entre "detectar contato" (na árvore, via GoToPointNode::ball_contact_threshold_mm) e o
+    // robô de fato mudar de rota é dominada pelo período deste timer — a 10Hz (100ms), o robô
+    // segue empurrando a bola por vários ciclos antes do D* sequer recalcular. Confirmado em log:
+    // robô e bola avançando juntos por 700ms-1s a ~60-70mm de distância constante, com o D*
+    // aprovando "Path found" o tempo todo (não é falha de planejamento, é lentidão de replanejar).
+    // Perto da bola, sobe pra 4x mais rápido (~40Hz/25ms por padrão) só nesse robô, sem competir
+    // com o controlador de velocidade (PathFollowerNode continua sendo o único a publicar
+    // /robot_commands, isso só faz o *caminho* que ele segue ficar mais atualizado).
+    planning_rate_hz_close_ = safe_param("planning_rate_hz_close", 40.0).as_double();
+    close_ball_distance_m_ = safe_param("close_ball_distance_m", 0.4).as_double();
 
     planning::PlannerConfig config;
     config.robot_safety_radius = safe_param("robot_safety_radius", 0.20).as_double();
@@ -520,6 +531,19 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     geometry_sub_ = create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
     "/field_geometry", qos, std::bind(&DStarPlannerNode::geometry_callback, this, std::placeholders::_1));
 
+    planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / planning_rate_hz_)),
+                                        std::bind(&DStarPlannerNode::plan_and_publish, this));
+}
+
+void DStarPlannerNode::updatePlanningRate(double ball_dist_m)
+{
+    bool should_be_fast = ball_dist_m < close_ball_distance_m_;
+    if (should_be_fast == fast_replan_active_)
+        return;  // já está na taxa certa, evita recriar o timer todo tick
+
+    fast_replan_active_ = should_be_fast;
+    double hz = should_be_fast ? planning_rate_hz_close_ : planning_rate_hz_;
+    planning_timer_->cancel();
     planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / hz)),
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
@@ -658,6 +682,8 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
 
     if (planner_)
         planner_->setDynamicObstacles(obstacles);
+
+    updatePlanningRate(std::hypot(current_x_ - ball_x_, current_y_ - ball_y_));
 }
 
 void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& target)

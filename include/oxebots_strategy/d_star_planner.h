@@ -342,6 +342,13 @@ class DStarPlannerNode : public rclcpp::Node
     void plan_and_publish();
 
     /**
+     * @brief Troca a taxa do planning_timer_ entre normal (planning_rate_hz_) e rápida
+     * (planning_rate_hz_close_) conforme a distância robô-bola. Ver comentário completo em
+     * updatePlanningRate() na implementação.
+     */
+    void updatePlanningRate(double ball_dist_m);
+
+    /**
      * @brief Gera um caminho em linha reta até o alvo (sem consultar a grade de obstáculos —
      * a área de penalidade e os outros robôs continuam sem nenhum desvio aqui), usado quando
      * planner_type == PLANNER_STRAIGHT_LINE para a aproximação final do atacante até o ponto de
@@ -373,6 +380,10 @@ class DStarPlannerNode : public rclcpp::Node
     float ball_x_ = 0.0f;
     float ball_y_ = 0.0f;
     int robot_id_ = 0;
+    double planning_rate_hz_ = 10.0;
+    double planning_rate_hz_close_ = 10.0;
+    double close_ball_distance_m_ = 0.4;
+    bool fast_replan_active_ = false;
     double ally_safety_radius_m_ = 0.20;
     // Raio (m) mantido livre ao redor do CENTRO da bola no grid do D*. Precisa cobrir raio do
     // robô (~75mm) + raio da bola (~22mm) + margem, senão o D* aprova caminhos que passam perto

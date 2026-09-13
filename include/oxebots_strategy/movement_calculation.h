@@ -61,6 +61,15 @@ private:
     std::optional<movement::Coordinate> target_goal_;
     nav_msgs::msg::Path::SharedPtr last_path_;
     std::optional<double> target_w_;
+    // Guardado à parte de target_goal_ (que só tem x/y) porque a repulsão de contato (ver
+    // calculate_and_move()) só deve agir na Fase 1 (perseguição via D*, onde qualquer contato é
+    // acidental) — nunca na Fase 2 (straight_line), onde chegar perto da bola é o objetivo. Default
+    // DSTAR: se por algum motivo nenhum goal ainda chegou, mantém a repulsão habilitada (mais
+    // seguro do que assumir straight_line e desabilitar por engano).
+    uint8_t target_planner_type_ = oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
+    // Histerese da repulsão: entra a kContactEnterMm, só desarma a kContactExitMm (maior), evitando
+    // a repulsão ligar/desligar em flapping bem na borda do raio de contato.
+    bool contact_repulsion_active_ = false;
 
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     int robot_id_ = 0;

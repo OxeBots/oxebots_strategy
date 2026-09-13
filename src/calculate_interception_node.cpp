@@ -97,6 +97,23 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   double b_ax = last_ball_pred_->ax;
   double b_ay = last_ball_pred_->ay;
 
+  // Banda-morta: com a bola parada (ou quase), ruído de alguns cm/s na predição do Kalman é
+  // amplificado pela busca abaixo, que extrapola até 3s no futuro — um resíduo de velocidade
+  // pequeno mas instável faz o "ponto de interceptação" pular entre lugares bem diferentes a
+  // cada tick (confirmado no log: GoToPoint dist alternando entre ~60mm e >1000mm seguidamente,
+  // o robô nunca convergindo pra chutar). Um toque leve do próprio robô na bola (mesmo que breve)
+  // já basta pra o filtro "ver" isso como velocidade real e disparar esse ciclo. Abaixo do limiar
+  // de ruído, zera velocidade/aceleração preditas: o ponto de interceptação vira simplesmente a
+  // posição atual da bola (estável), sem descartar a predição balística de verdade quando a bola
+  // está genuinamente em movimento rápido (ex: após um chute ou disputa).
+  constexpr double kBallStationarySpeedMmS = 150.0;
+  if (std::hypot(b_vx, b_vy) < kBallStationarySpeedMmS) {
+    b_vx = 0.0;
+    b_vy = 0.0;
+    b_ax = 0.0;
+    b_ay = 0.0;
+  }
+
   // Limitações físicas do robô
   double max_speed = 1500.0; // mm/s
   double max_accel = 2000.0; // mm/s^2
