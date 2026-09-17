@@ -196,11 +196,12 @@ public:
       tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
 
       try {
-        int port = 1667 + robot_id_;
+        int port = (is_yellow_ ? 1677 : 1667) + robot_id_;
         RCLCPP_INFO(this->get_logger(), "Iniciando Groot2 na porta %d...", port);
         publisher_ = std::make_unique<BT::Groot2Publisher>(tree_, port);
       } catch (const std::exception& e) {
-        RCLCPP_WARN(this->get_logger(), "Groot2 falhou na porta %d: %s", 1667 + robot_id_, e.what());
+        int port = (is_yellow_ ? 1677 : 1667) + robot_id_;
+        RCLCPP_WARN(this->get_logger(), "Groot2 falhou na porta %d: %s", port, e.what());
       }
 
       return true;
