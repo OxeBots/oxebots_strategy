@@ -1,12 +1,30 @@
 <root BTCPP_format="4">
-<BehaviorTree ID="KickInTree">
-    <Fallback>
+  <BehaviorTree ID="KickInTree">
+    <!-- O Fallback distribui as tarefas: Atacante cobra, Defensor se posiciona -->
+    <Fallback name="KickInRoles">
+        
+        <!-- 1. COBRADOR (Atacante) -->
         <Sequence name="Kicker">
-            <IsValueTrue value="{is_attacker}"/>
-            <GoToPoint x="{ball_x}" y="{ball_y}" tolerance="80"/>
-            <KickBall target_x="{opponent_goal_x}" target_y="500"/>
+            <IsMyRole role="attacker"/>
+            <!-- Vai até a bola -->
+            <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="40.0"/>
+            <!-- Chuta cruzado para a frente do gol adversário (y=0) -->
+            <PrecisionKick robot_id="{robot_id}" 
+                           target_x="{opponent_goal_x}" 
+                           target_y="0.0" 
+                           kick_speed="5.0"/>
         </Sequence>
-        <GoToPoint x="{ball_x -500}" y="{ball_y * 0.5}"/>
+
+        <!-- 2. RECEBEDOR / COBERTURA (Zagueiro) -->
+        <Sequence name="Receiver">
+            <IsMyRole role="defender"/>
+            <!-- Fica no meio do campo (x=0), pronto para atacar ou voltar -->
+            <GoToPoint robot_id="{robot_id}" x="0.0" y="0.0" tolerance="100.0"/>
+        </Sequence>
+
+        <!-- 3. OUTROS ROBÔS (Reservas/Goleiro, se caírem aqui por engano) -->
+        <Halt reason="waiting_kick_in"/>
+
     </Fallback>
-</BehaviorTree>
+  </BehaviorTree>
 </root>

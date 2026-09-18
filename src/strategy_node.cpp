@@ -19,6 +19,7 @@
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/keep_distance_node.h"
 #include "oxebots_strategy/align_to_ball_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/calculate_interception_node.h"
@@ -35,6 +36,10 @@
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
+#include "oxebots_strategy/is_normal_free_kick.hpp"
+#include "oxebots_strategy/aim_at_node.hpp"
+#include "oxebots_strategy/intercept_ball_node.hpp"
+#include "oxebots_strategy/has_line_of_sight_node.hpp"
 #include "ssl_league_msgs/msg/referee.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <algorithm>
@@ -97,8 +102,13 @@ public:
 
       // Configura o contexto de controle utilizado pelos nós da defender_tree.
       configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
+      factory_.registerNodeType<oxebots_strategy::KeepDistanceNode>("KeepDistance", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::IsNormalFreeKick>("IsNormalFreeKick");
+      factory_.registerNodeType<oxebots_strategy::AimAtNode>("AimAt", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::InterceptBallNode>("InterceptBall", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::HasLineOfSightNode>("HasLineOfSight", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::AlignToBallNode>("AlignToBall", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::CalculateInterceptionNode>("CalculateInterception", shared_from_this());
@@ -366,6 +376,9 @@ private:
 
   void gc_callback(const ssl_league_msgs::msg::Referee::SharedPtr msg)
   {
+    // ==========================================================
+    // 1. ATUALIZAÇÃO BÁSICA DO JUIZ
+    // ==========================================================
     int current_cmd;
     if (!blackboard_->get<int>("gc_command", current_cmd) || current_cmd != static_cast<int>(msg->command)) {
         RCLCPP_INFO(this->get_logger(), "Robô %d -> Novo comando do Juiz: %d", robot_id_, msg->command);
@@ -374,18 +387,70 @@ private:
     blackboard_->set("gc_command", static_cast<int>(msg->command));
     blackboard_->set("gc_stage", static_cast<int>(msg->stage));
 
-    // Lógica para Falta trazida da branch defender (adaptada para o comando do GC padrão da liga)
-    // 8: DIRECT_FREE_YELLOW, 9: DIRECT_FREE_BLUE
-    bool our_foul = (is_yellow_ && msg->command == 8) || (!is_yellow_ && msg->command == 9);
-    blackboard_->set("is_free_kick", our_foul);
-
-    // O bridge da A-TEAM envia designated_position como um array opcional
+    // ==========================================================
+    // 2. EXTRAÇÃO DA POSIÇÃO DA FALTA
+    // ==========================================================
+    double des_x = 0.0;
+    double des_y = 0.0;
+    
     if (!msg->designated_position.empty()) {
-        blackboard_->set("designated_x", static_cast<double>(msg->designated_position[0].x * 1000.0));
-        blackboard_->set("designated_y", static_cast<double>(msg->designated_position[0].y * 1000.0));
+        des_x = static_cast<double>(msg->designated_position[0].x * 1000.0);
+        des_y = static_cast<double>(msg->designated_position[0].y * 1000.0);
+        blackboard_->set("designated_x", des_x);
+        blackboard_->set("designated_y", des_y);
     } else {
         blackboard_->set("designated_x", 0.0);
         blackboard_->set("designated_y", 0.0);
+        // Usamos (void) para evitar aquele warning chato do compilador
+        (void)blackboard_->get("ball_x", des_x);
+        (void)blackboard_->get("ball_y", des_y);
+    }
+
+    // ==========================================================
+    // 3. DETETIVE GEOMÉTRICO E MEMÓRIA DA ÁRVORE
+    // ==========================================================
+    bool is_direct = (is_yellow_ && msg->command == 8) || (!is_yellow_ && msg->command == 9);
+    bool is_indirect = (is_yellow_ && msg->command == 10) || (!is_yellow_ && msg->command == 11);
+    bool our_foul = (is_direct || is_indirect);
+
+    // Mapeando TODAS as bolas paradas do oponente
+    bool opp_direct = (is_yellow_ && msg->command == 9) || (!is_yellow_ && msg->command == 8);
+    bool opp_indirect = (is_yellow_ && msg->command == 11) || (!is_yellow_ && msg->command == 10);
+    bool opp_kickoff = (is_yellow_ && msg->command == 5) || (!is_yellow_ && msg->command == 4);
+    bool opp_penalty = (is_yellow_ && msg->command == 7) || (!is_yellow_ && msg->command == 6);
+    bool opp_foul = (opp_direct || opp_indirect || opp_kickoff || opp_penalty);
+
+    if (our_foul) {
+        // FASE DE PREPARAÇÃO DA NOSSA FALTA
+        bool near_x_edge = std::abs(des_x) > 1800.0;
+        bool near_y_edge = std::abs(des_y) > 1200.0;
+
+        blackboard_->set("is_corner_kick", near_x_edge && near_y_edge);
+        blackboard_->set("is_kick_in", !near_x_edge && near_y_edge);
+        blackboard_->set("is_free_kick", !near_x_edge && !near_y_edge);
+        blackboard_->set("is_opponent_foul", false);
+        
+        RCLCPP_INFO(this->get_logger(), "Robô %d -> Preparando Bola Parada NOSSA...", robot_id_);
+    } 
+    else if (opp_foul) {
+        // FASE DE PREPARAÇÃO DA FALTA INIMIGA
+        blackboard_->set("is_corner_kick", false);
+        blackboard_->set("is_kick_in", false);
+        blackboard_->set("is_free_kick", false);
+        blackboard_->set("is_opponent_foul", true);
+        
+        RCLCPP_INFO(this->get_logger(), "Robô %d -> Defendendo Bola Parada INIMIGA!", robot_id_);
+    }
+    else if (msg->command == 2) {
+        // FASE DE AÇÃO (Normal Start = 2): O juiz autorizou!
+        RCLCPP_INFO(this->get_logger(), "Robô %d -> Apito autorizado! Jogo rolando!", robot_id_);
+    } 
+    else {
+        // O jogo parou ou resetou: Limpamos a memória tática.
+        blackboard_->set("is_corner_kick", false);
+        blackboard_->set("is_kick_in", false);
+        blackboard_->set("is_free_kick", false);
+        blackboard_->set("is_opponent_foul", false);
     }
   }
 

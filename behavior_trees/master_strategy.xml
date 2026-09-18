@@ -3,19 +3,64 @@
   <BehaviorTree ID="MainTree">
     <ReactiveFallback name="MasterStrategy">
       
-      <!-- 1. BOTÃO DE PARAR (STOP - Comando 1) -->
-      <Sequence name="StopBranch">
-        <CheckGCCommand expected="1"/>
-        <Halt reason="gc"/>
+      <!-- ======================================================== -->
+      <!-- 1. INTERRUPÇÕES DE EMERGÊNCIA                            -->
+      <!-- ======================================================== -->
+      <Sequence name="HaltBranch">
+          <CheckGCCommand expected="0"/>
+          <SubTree ID="HaltSubTree" _autoremap="true" /> 
       </Sequence>
 
-      <!-- 2. GOLEIRO (Apenas Robô 0) -->
+      <Sequence name="StopBranch">
+          <CheckGCCommand expected="1"/>
+          <SubTree ID="StopSubTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ======================================================== -->
+      <!-- 2. BOLAS PARADAS (A NOSSO FAVOR - AMARELO)               -->
+      <!-- ======================================================== -->
+      <Sequence name="KickOffBranch">
+          <CheckGCCommand expected="4"/>
+          <SubTree ID="KickOffTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="PenaltyBranch">
+          <CheckGCCommand expected="6"/>
+          <SubTree ID="PenaltyTree" _autoremap="true" /> 
+      </Sequence>
+
+      <!-- NOSSAS FALTAS: Decididas inteligentemente pelo C++! -->
+      <Sequence name="CornerBranch">
+          <IsValueTrue value="{is_corner_kick}"/>
+          <SubTree ID="CornerTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="ThrowInBranch">
+          <IsValueTrue value="{is_kick_in}"/>
+          <SubTree ID="ThrowInTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="FreeKickBranch">
+          <IsValueTrue value="{is_free_kick}"/>
+          <SubTree ID="FreeKickTree" _autoremap="true" /> 
+      </Sequence>
+
+<!-- ======================================================== -->
+      <!-- 3. BOLAS PARADAS (OPONENTE - MANTER 50CM DE DISTÂNCIA)   -->
+      <!-- ======================================================== -->
+      <Sequence name="OpponentSetPieceBranch">
+          <IsValueTrue value="{is_opponent_foul}"/>
+          <SubTree ID="OppSetPieceTree" _autoremap="true" /> 
+      </Sequence>
+      <!-- ======================================================== -->
+      <!-- 4. JOGO ROLANDO (NORMAL_START 2, FORCE_START 3 ou -1)    -->
+      <!-- ======================================================== -->
+
       <ReactiveSequence name="GoalkeeperRole">
         <IsRobotId robot_id="0" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
         <Repeat num_cycles="-1">
@@ -31,100 +76,27 @@
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
                                    intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
-                                   intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
                                    is_ready_to_kick="{is_ready_pred}" />
-
+            
             <ReactiveFallback name="AttackLogicActions">
-              <!-- ATAQUE em DUAS FASES. O robô não tem dribbler (físico nem simulado): qualquer
-                   desalinhamento no contato final vira "empurrar a bola de lado" em vez de um
-                   chute limpo, então é essencial chegar já alinhado ANTES de se aproximar. -->
-              <Sequence name="ChaseAndKick">
-                <!-- Fase 1: vai até o ponto de pré-chute (int_pk_x/y, ~400mm atrás da bola, na
-                     linha bola-gol), ainda longe da bola de verdade. Usa D* (padrão) para
-                     contornar a bola como obstáculo em vez de cruzar por cima dela a caminho
-                     desse ponto. tolerance maior (120mm) porque aqui só precisamos estar
-                     posicionados e alinhados, não colados na bola. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0" />
-
-                <!-- Fase 2: já alinhado atrás da bola, avança reto até o ponto de captura (bem
-                     mais perto, int_cap_x/y). planner="straight_line" porque, chegando desta
-                     posição, a linha reta até a bola É a jogada certa — sem dribbler, corrigir
-                     de lado só pioraria o contato. Tolerância apertada (20mm): o alvo já é quase
-                     o ponto de contato (kCaptureDistanceMm=115mm ~ raio do robô + raio da bola),
-                     então "chegar" aqui tem que significar estar mesmo perto o bastante para
-                     encostar o kicker na bola, não só "na vizinhança".
-
-                     NÃO usar face_ball aqui: já foi tentado e piorou muito (revertido). Fazer o
-                     GoToPoint mirar orientação na bola a partir de int_cap_x/y (só ~115mm de
-                     distância) é geometricamente instável — a essa distância curta, qualquer
-                     ruído pequeno na posição da bola ou na predição vira uma oscilação enorme de
-                     ângulo (sensibilidade do bearing ~ 1/distância). Resultado observado: robô
-                     girando e ficando de costas pra bola, travado perto dela sem conseguir
-                     concluir a aproximação. Olhar pro gol (~2-4m de distância) é estável porque o
-                     mesmo ruído produz variação de ângulo desprezível — por isso é o padrão. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}" tolerance="20.0" planner="straight_line" />
-
-                <!-- Correção ativa de ângulo: gira o robô no lugar até a frente dele apontar para
-                     a bola REAL. O alvo de orientação do GoToPoint da fase 2 é calculado antes de
-                     chegar (olhando para o gol a partir do ponto de captura ideal), e na prática
-                     fica alguns graus fora do necessário — confirmado no log (offset 18.8° a
-                     124mm deu chute ruim; 6.3° a 118mm chutou normal). Antes disso era só uma
-                     checagem passiva (IsBallClose com threshold de ângulo): como o GoToPoint já
-                     tinha parado de mover o robô, um desalinhamento persistente travava o robô
-                     ali, sem nunca chutar, até o papel de atacante trocar para outro robô. Esse
-                     nó ativamente corrige em vez de só esperar.
-
-                     Timeout de 1.5s: sem isso, o AlignToBall persegue cegamente o ângulo AO VIVO
-                     da bola sem nenhum limite. Logo após um chute a bola sai rolando com
-                     velocidade real; enquanto rola perto do robô parado, o ângulo dela varre um
-                     arco enorme muito rápido (como um carro passando perto de um pedestre), mais
-                     rápido do que o robô consegue girar — confirmado no log: heading varrendo o
-                     círculo inteiro repetidamente (-18.9°→107.2°→-137.5°→...) por 9s seguidos,
-                     nunca convergindo, terminando com a bola a 559.9mm de distância. É o mesmo
-                     mecanismo do "carrega a bola girando" e do "vai de costas pra bola, sem
-                     conseguir dar a volta": o alvo (bola) se move mais rápido que a correção
-                     consegue seguir. Com o Timeout, se não alinhar a tempo (1.5s cobre até um giro
-                     de 180° na velocidade angular máxima, ~1s), a Sequence falha e reinicia da
-                     fase 1 mirando a posição ATUAL da bola, em vez de girar atrás de um alvo que
-                     está fugindo. -->
-                <Timeout msec="1500">
-                  <AlignToBall robot_id="{robot_id}" angle_threshold_deg="10.0" />
-                </Timeout>
-
-                <!-- Mantém a sequência ativa até a bola estar perto o bastante para o chute.
-                     180mm era maior que o alcance real do kicker (~110mm = raio do robô + raio da
-                     bola): o robô chutava "no vácuo". 140mm cobre a folga da tolerância da fase 2
-                     (115±20mm) sem passar longe demais. Ângulo já garantido pelo AlignToBall
-                     acima, então aqui só distância.
-
-                     Timeout de 1.5s: sem isso, se a bola sair de perto DEPOIS que o GoToPoint já
-                     teve sucesso (rolou, foi tocada por outro robô), o robô fica preso aqui para
-                     sempre — Sequence não retickada GoToPoint de novo já que ele já retornou
-                     SUCCESS, e RetryUntilSuccessful(-1) nunca desiste sozinho. Só saía daí quando
-                     o papel de atacante trocava para outro robô (visto no log: 19s parado com a
-                     bola indo de 144mm para quase 1m de distância). Com o Timeout, se a bola não
-                     voltar a ficar perto a tempo, toda a Sequence falha e a ReactiveFallback
-                     reinicia do zero no próximo tick (fase 1 de novo, com a posição real e atual
-                     da bola). -->
-                <Timeout msec="1500">
+              <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                <GoToPoint robot_id="{robot_id}" x="{int_ball_x}" y="{int_ball_y}" tolerance="50.0" />
+                <Sequence>
                   <RetryUntilSuccessful num_attempts="-1">
-                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0"/>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="180.0"/>
                   </RetryUntilSuccessful>
-                </Timeout>
-                <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
-              </Sequence>
+                  <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+                </Sequence>
+              </Parallel>
             </ReactiveFallback>
           </ReactiveSequence>
         </Repeat>
       </ReactiveSequence>
 
-      <!-- 3. DEFESA (Robô 1 - Lógica vinda da branch defender) -->
       <SubTree ID="DefenderTree" _autoremap="true" />
 
-      <!-- 4. RESERVAS (Outros robôs ficam parados) -->
       <Halt reason="idle"/>
 
     </ReactiveFallback>
   </BehaviorTree>
-
 </root>

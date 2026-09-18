@@ -1,12 +1,55 @@
 <root BTCPP_format="4">
-<BehaviorTree ID="FreeKickTree">
-    <Fallback>
-        <Sequence name="Kicker">
-            <IsValueTrue value= "{is_attacker}"/>
-            <GoToPoint x="{ball_x}" y="{ball_y}" tolerance="50"/>
-            <KickBall target_x= "{opponent_goal_x}" target_y="0"/>
-        </Sequence>
-        <GoToPoint x="-500" y="0"/>
-    </Fallback>
-</BehaviorTree>
+    <BehaviorTree ID="FreeKickTree">
+        <Fallback name="FreeKickRoles">
+            
+            <!-- 1. GOLEIRO: Continua na meta -->
+            <Sequence name="GoalkeeperRole">
+                <IsRobotId robot_id="0"/>
+                <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+            </Sequence>
+
+            <!-- 2. COBRADOR (Atacante) -->
+            <Sequence name="KickerRole">
+                <IsMyRole role="attacker"/>
+                
+                <UpdateBallPosition robot_id="{robot_id}"
+                                    ball_x="{ball_x}" ball_y="{ball_y}"
+                                    pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                                    is_ready_to_kick="{dummy_ready}"
+                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+                
+                <!-- A MÁGICA: Alinha primeiro, depois atropela e chuta -->
+                <Sequence name="AlignAndKick">
+                    
+                    <!-- PASSO 1: Pré-alinhamento com tolerância -->
+                    <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="50.0"/>
+                    
+                    <!-- PASSO 2: Investida final e chute forte letal -->
+                    <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                        <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="30.0"/>
+                        <Sequence>
+                            <RetryUntilSuccessful num_attempts="-1">
+                                <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
+                            </RetryUntilSuccessful>
+                            <KickBall robot_id="{robot_id}" kick_speed="7.5"/>
+                        </Sequence>
+                    </Parallel>
+
+                </Sequence>
+            </Sequence>
+
+            <!-- 3. SUPORTE (Zagueiro): Defende respeitando a regra de distância -->
+            <Sequence name="SupportRole">
+                <IsMyRole role="defender"/>
+                <Fallback name="SafePositioning">
+                    <Sequence>
+                        <IsBallClose robot_id="{robot_id}" distance_threshold="600.0"/>
+                        <KeepDistance robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" distance="650.0"/>
+                    </Sequence>
+                    <GoToPoint robot_id="{robot_id}" x="-500.0" y="0.0" tolerance="100.0"/>
+                </Fallback>
+            </Sequence>
+            
+        </Fallback>
+    </BehaviorTree>
 </root>

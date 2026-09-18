@@ -1,9 +1,21 @@
 <root BTCPP_format="4">
   <BehaviorTree ID="StopSubTree">
-    <Sequence name="StopLogic">
-      <!-- Por enquanto, o STOP apenas para o robô. -->
-      <!-- No futuro, aqui entra a lógica de manter 500mm da bola. -->
-      <Halt/>
-    </Sequence>
+    <ReactiveSequence name="StopLogic">
+      
+      <!-- O robô precisa continuar "olhando" a bola enquanto o jogo está parado -->
+      <!-- Caso contrário ele afasta, a bola rola, e ele não atualiza a distância! -->
+      <UpdateBallPosition robot_id="{robot_id}"
+                          ball_x="{ball_x}" ball_y="{ball_y}" 
+                          pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                          is_ready_to_kick="{is_ready}"
+                          goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+      
+      <!-- Aciona o nosso novo nó informando para manter 550mm (0.5m + 5cm de margem de segurança) -->
+      <KeepDistance robot_id="{robot_id}" 
+                    ball_x="{ball_x}" 
+                    ball_y="{ball_y}" 
+                    distance="550.0" />
+                    
+    </ReactiveSequence>
   </BehaviorTree>
 </root>

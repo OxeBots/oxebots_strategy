@@ -1,0 +1,65 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="PenaltyTree">
+        <!-- O Fallback garante que o robô execute apenas o bloco correspondente ao seu papel -->
+        <Fallback name="PenaltyRoles">
+            
+            <!-- ========================================== -->
+            <!-- 1. ATACANTE (O Cobrador do Pênalti)        -->
+            <!-- ========================================== -->
+            <Sequence name="AttackerPenalty">
+                <IsMyRole role="attacker"/>
+                <ReactiveFallback name="AttackerPenaltyLogic">
+                    
+                    <!-- AÇÃO B: O juiz apitou NORMAL_START (2). Vai pra bola e chuta! -->
+                    <Sequence name="ExecutePenalty">
+                        <CheckGCCommand expected="2"/>
+                        <UpdateBallPosition robot_id="{robot_id}" 
+                                            ball_x="{ball_x}" ball_y="{ball_y}" 
+                                            pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                            is_ready_to_kick="{is_ready}" 
+                                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+                        
+                        <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                            <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="30.0"/>
+                            <Sequence>
+                                <RetryUntilSuccessful num_attempts="-1">
+                                    <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
+                                </RetryUntilSuccessful>
+                                <!-- Velocidade máxima do pênalti pode chegar até 8.0 m/s dependendo das regras locais -->
+                                <KickBall robot_id="{robot_id}" kick_speed="7.5"/>
+                            </Sequence>
+                        </Parallel>
+                    </Sequence>
+                    
+                    <!-- AÇÃO A: O juiz está em PREPARE_PENALTY (6 ou 7). Apenas se posiciona. -->
+                    <Sequence name="PreparePenalty">
+                        <UpdateBallPosition robot_id="{robot_id}" 
+                                            ball_x="{ball_x}" ball_y="{ball_y}" 
+                                            pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                            is_ready_to_kick="{is_ready}" 
+                                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+                        
+                        <!-- Vai para a posição de pré-chute (pkx, pky) calculada pelo seu nó e aguarda -->
+                        <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="20.0"/>
+                    </Sequence>
+                </ReactiveFallback>
+            </Sequence>
+
+            <!-- ========================================== -->
+            <!-- 2. GOLEIRO (Fica na nossa meta)            -->
+            <!-- ========================================== -->
+            <Sequence name="GoalkeeperPenalty">
+                <IsRobotId robot_id="0"/>
+                <Goalkeeper robot_id="{robot_id}"/>
+            </Sequence>
+
+            <!-- ========================================== -->
+            <!-- 3. OUTROS ROBÔS (Zagueiros / Reservas)     -->
+            <!-- ========================================== -->
+            <Sequence name="OthersPenalty">
+                <Halt reason="wait_penalty"/>
+            </Sequence>
+
+        </Fallback>
+    </BehaviorTree>
+</root>

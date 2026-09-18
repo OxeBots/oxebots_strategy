@@ -1,0 +1,31 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="Desafio3">
+        <Sequence>
+            <IsNormalFreeKick/>
+            <CheckGCCommand expected="2"/>
+
+            <Parallel success_threshold="2" failure_threshold="1">
+                <GoToPoint robot_id="1" x="-200" y="0"/>
+                <GoToPoint robot_id="2" x="-1675" y="900"/>
+            </Parallel>
+
+            <Fallback>
+                <Sequence>
+                    <HasLineOfSight origin_x="-200" origin_y="0" target_x="-2175" target_y="350"/>
+                    <AimAt robot_id="1" target_x="-2175" target_y="350"/>
+                    <KickBall robot_id="1" kick_speed="8.0"/>
+                </Sequence>
+
+                <Sequence>
+                    <AimAt robot_id="1" target_x="-1675" target_y="900"/>
+                    <KickBall robot_id="1" kick_speed="4.5"/>
+
+                    <InterceptBall robot_id="2" face_x="-2175" face_y="0"/>
+                    <KickBall robot_id="2" kick_speed="6.5"/>
+                </Sequence>
+            </Fallback>
+            
+            
+        </Sequence>
+    </BehaviorTree>
+</root>
