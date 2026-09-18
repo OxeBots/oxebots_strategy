@@ -321,7 +321,6 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
 // instantaneamente, virando uma "metralhadora" que nunca solta a bola direito.
 void PathFollowerNode::runKick() {
     auto now = std::chrono::steady_clock::now();
-
     if (kick_phase_ == KickPhase::IDLE && now >= kick_cooldown_until_) {
         kick_phase_ = KickPhase::FIRING;
         kick_start_time_ = now;
@@ -334,15 +333,29 @@ void PathFollowerNode::runKick() {
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
             cmd_data.kick_speed = last_override_msg_->kick_speed;
-            cmd_data.x_velocity = 0.5; // avançar enquanto chuta, para garantir contato
-            cmd_data.y_velocity = 0.0;
+            
+            // LÓGICA DE INVESTIDA (LUNGE)
+            // Pega a orientação atual do robô para dar um tranco para FRENTE (coordenadas globais)
+            double theta = 0.0;
+            if (last_game_data_) {
+                for (const auto& ally : last_game_data_->robots.allies) {
+                    if (static_cast<int>(ally.id) == robot_id_) {
+                        theta = ally.orientation;
+                        break;
+                    }
+                }
+            }
+            
+            // Avança a 1.0 m/s na direção que está olhando para "atropelar" a bola com o chute
+            cmd_data.x_velocity = 1.0 * std::cos(theta);
+            cmd_data.y_velocity = 1.0 * std::sin(theta);
             cmd_data.angular_velocity = 0.0;
+            
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));
             publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
             return;
         }
-
         kick_phase_ = KickPhase::IDLE;
         kick_cooldown_until_ = now + kKickCooldown;
         kick_fire_count_++;

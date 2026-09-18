@@ -75,8 +75,8 @@ BT::NodeStatus KickBallNode::onStart()
   if (!getInput<unsigned int>("robot_id", robot_id)) return BT::NodeStatus::FAILURE;
   if (!getInput<double>("kick_speed", kick_speed)) return BT::NodeStatus::FAILURE;
 
-  if (kick_speed > 3.0) {
-      kick_speed = 3.0;
+  if (kick_speed > 8.0) {
+      kick_speed = 8.0;
   }
 
   robot_id_ = robot_id;

@@ -53,10 +53,11 @@ BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
+             BT::InputPort<double>("face_x", "Opcional: X para onde o robo deve olhar"),
+             BT::InputPort<double>("face_y", "Opcional: Y para onde o robo deve olhar"),
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
              BT::InputPort<std::string>("planner", "dstar",
-                 "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
-                 "\"straight_line\" (linha reta, ignora a grade de obstáculos)") };
+                 "Estratégia de planejamento: \"dstar\" (padrão), \"straight_line\" (linha reta)") };
 }
 
 uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
@@ -85,16 +86,15 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
 // Publica a mensagem de RobotGoal com a posição e orientação desejadas
 void GoToPointNode::publishGoal() {
     double op_x, op_y;
+    double face_x, face_y;
     auto blackboard = config().blackboard;
-
-    // Se a posição do gol adversário estiver no blackboard, faz o robô olhar para lá.
-    //
-    // NÃO trocar isto por "olhar pra bola": já foi tentado (porta face_ball, revertida). Perto
-    // do ponto de captura (~115mm da bola) essa conta é geometricamente instável — pequeno
-    // ruído na posição da bola vira oscilação grande de ângulo (sensibilidade do bearing ~
-    // 1/distância), e o robô ficava girando e de costas pra bola em vez de convergir. Olhar pro
-    // gol (~2-4m) é estável porque o mesmo ruído dá variação de ângulo desprezível.
-    if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+    
+    // Se passarmos face_x e face_y no XML, ele trava a mira nesse alvo!
+    if (getInput<double>("face_x", face_x) && getInput<double>("face_y", face_y)) {
+        target_w_ = std::atan2(face_y - target_pos_.y, face_x - target_pos_.x);
+    } 
+    // Senão, comportamento antigo: olha para o gol adversário
+    else if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
         target_w_ = std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
     } else {
         target_w_ = 0.0;
@@ -104,19 +104,17 @@ void GoToPointNode::publishGoal() {
     goal_msg->robot_id = robot_id_;
     goal_msg->pose.header.stamp = node_->now();
     goal_msg->pose.header.frame_id = "map";
-
+    
     std::string planner = "dstar";
     getInput<std::string>("planner", planner);
     goal_msg->planner_type = plannerFromString(planner);
-
-    // Converte de milímetros (padrão interno) para metros (padrão do ROS/RobotGoal)
+    
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
     goal_msg->pose.pose.position.y = target_pos_.y / 1000.0;
     
-    // Converte o ângulo (target_w_) para um Quatérnio (representação de rotação em 3D)
     goal_msg->pose.pose.orientation.z = std::sin(target_w_ * 0.5);
     goal_msg->pose.pose.orientation.w = std::cos(target_w_ * 0.5);
-
+    
     goal_pub_->publish(std::move(goal_msg));
     publishMarkers();
 }
