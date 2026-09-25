@@ -1,10 +1,9 @@
 <root BTCPP_format="4">
     <BehaviorTree ID="Desafio2">
         <Sequence>
-            <!-- 1. Gatilho do Juiz -->
+            <!-- Gatilho do Juiz -->
             <IsNormalFreeKick/>
             
-            <!-- Divide as mentes dos robôs -->
             <Fallback>
                 
                 <!-- ============================================== -->
@@ -13,6 +12,7 @@
                 <Sequence>
                     <IsThisNodeID id="1"/>
                     
+                    <!-- Prepara a matemática olhando pro gol (-2175, 0) -->
                     <UpdateBallPosition robot_id="1" goal_x="-2175" goal_y="0" 
                                         ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{pkx_gol}" pre_kick_y="{pky_gol}" 
                                         is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>
@@ -20,13 +20,10 @@
                     <Fallback>
                         <!-- OPÇÃO A: CAMINHO LIVRE PRO GOL (Chute Direto) -->
                         <Sequence>
-                            <!-- Checa a visão usando a posição REAL da bola em vez de coordenadas fixas -->
                             <HasLineOfSight origin_x="{bx1}" origin_y="{by1}" target_x="-2175" target_y="0"/>
                             
-                            <!-- Alinha mirando no gol -->
                             <GoToPoint robot_id="1" x="{pkx_gol}" y="{pky_gol}" face_x="-2175" face_y="0" tolerance="50.0"/>
                             
-                            <!-- Bote e Chute (Trava geométrica blindada) -->
                             <RetryUntilSuccessful num_attempts="-1">
                                 <ReactiveFallback>
                                     <Sequence>
@@ -43,22 +40,20 @@
                             </RetryUntilSuccessful>
                         </Sequence>
 
-                        <!-- OPÇÃO B: GOL BLOQUEADO (Passe para o Robô 2) -->
+                        <!-- OPÇÃO B: GOL BLOQUEADO (Passe cadenciado para o Robô 2) -->
                         <Sequence>
-                            <!-- Recalcula o ponto de pré-chute para mirar no Robô 2 (-1200, 700) -->
                             <UpdateBallPosition robot_id="1" goal_x="-1200" goal_y="700" 
                                                 ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{pkx_passe}" pre_kick_y="{pky_passe}" 
                                                 is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>
                             
-                            <!-- Alinha mirando no parceiro -->
                             <GoToPoint robot_id="1" x="{pkx_passe}" y="{pky_passe}" face_x="-1200" face_y="700" tolerance="50.0"/>
                             
-                            <!-- Bote e Passe (Velocidade menor pra não isolar a bola) -->
+                            <!-- Bote com velocidade reduzida para a bola parar no Robô 2 -->
                             <RetryUntilSuccessful num_attempts="-1">
                                 <ReactiveFallback>
                                     <Sequence>
                                         <IsBallClose robot_id="1" distance_threshold="125.0" angle_threshold_deg="15.0"/>
-                                        <KickBall robot_id="1" kick_speed="4.5"/>
+                                        <KickBall robot_id="1" kick_speed="2.0"/>
                                     </Sequence>
                                     <Sequence>
                                         <UpdateBallPosition robot_id="1" goal_x="-1200" goal_y="700" 
@@ -71,7 +66,7 @@
                         </Sequence>
                     </Fallback>
 
-                    <!-- Terminou a ação? Congela -->
+                    <!-- Congela a mente após a ação -->
                     <Repeat num_cycles="-1">
                         <Sequence>
                             <Halt reason="acao_concluida"/>
@@ -81,53 +76,55 @@
                 </Sequence>
 
                 <!-- ============================================== -->
-                <!-- ROBÔ 2 (O PIVÔ FINALIZADOR)                    -->
+                <!-- ROBÔ 2 (O PIVÔ PACIENTE)                       -->
                 <!-- ============================================== -->
                 <Sequence>
                     <IsThisNodeID id="2"/>
                     
-                    <!-- 1. Espera no ponto, olhando pra bola pra fazer a recepção -->
+                    <!-- FASE 1: Espera a bola chegar perto (< 800mm) e dá 2s pra ela parar de rolar -->
                     <RetryUntilSuccessful num_attempts="-1">
                         <Sequence>
                             <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" 
                                                 ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}" 
                                                 is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>
                             <Fallback>
-                                <IsBallClose robot_id="2" distance_threshold="1200.0"/>
+                                <Sequence>
+                                    <IsBallClose robot_id="2" distance_threshold="800.0"/>
+                                    <Sleep msec="2000"/>
+                                </Sequence>
                                 <Sequence>
                                     <GoToPoint robot_id="2" x="-1200" y="700" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>
-                                    <IsValueTrue value="false"/>
+                                    <AlwaysFailure/>
                                 </Sequence>
                             </Fallback>
                         </Sequence>
                     </RetryUntilSuccessful>
                     
-                    <!-- 2. Bola chegou! Recebe de frente, gira pro gol e fuzila -->
+                    <!-- FASE 2: A bola parou! Lê a posição, dá a volta e chuta pro gol -->
+                    <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" 
+                                        ball_x="{bx_final}" ball_y="{by_final}" pre_kick_x="{pkx_final}" pre_kick_y="{pky_final}" 
+                                        is_ready_to_kick="{dummy_r}" ball_in_enemy_half="{dummy_a}"/>
+                    
+                    <!-- Posiciona atrás da bola já mirando no gol -->
+                    <GoToPoint robot_id="2" x="{pkx_final}" y="{pky_final}" face_x="-2175" face_y="0" tolerance="50.0"/>
+                    
+                    <!-- Bote final blindado -->
                     <RetryUntilSuccessful num_attempts="-1">
                         <ReactiveFallback>
                             <Sequence>
-                                <IsBallClose robot_id="2" distance_threshold="250.0" angle_threshold_deg="180.0"/>
-                                <Parallel success_count="1" failure_count="2">
-                                    <ForceFailure>
-                                        <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="-2175" face_y="0" tolerance="0.0" planner="straight_line"/>
-                                    </ForceFailure>
-                                    <Sequence>
-                                        <RetryUntilSuccessful num_attempts="-1">
-                                            <IsBallClose robot_id="2" distance_threshold="150.0" angle_threshold_deg="15.0"/>
-                                        </RetryUntilSuccessful>
-                                        <KickBall robot_id="2" kick_speed="8.0"/>
-                                    </Sequence>
-                                </Parallel>
+                                <IsBallClose robot_id="2" distance_threshold="125.0" angle_threshold_deg="15.0"/>
+                                <KickBall robot_id="2" kick_speed="8.0"/>
                             </Sequence>
                             <Sequence>
                                 <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" 
-                                                    ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x2}" pre_kick_y="{dummy_y2}" 
+                                                    ball_x="{bx_final}" ball_y="{by_final}" pre_kick_x="{dummy_x2}" pre_kick_y="{dummy_y2}" 
                                                     is_ready_to_kick="{dummy_ready2}" ball_in_enemy_half="{dummy_adv2}"/>
-                                <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="{bx2}" face_y="{by2}" tolerance="0.0" planner="straight_line"/>
+                                <GoToPoint robot_id="2" x="{bx_final}" y="{by_final}" face_x="-2175" face_y="0" tolerance="0.0" planner="straight_line"/>
                             </Sequence>
                         </ReactiveFallback>
                     </RetryUntilSuccessful>
                     
+                    <!-- Comemora o gol -->
                     <Repeat num_cycles="-1">
                         <Sequence>
                             <Halt reason="gol_marcado"/>
@@ -137,7 +134,7 @@
                 </Sequence>
                 
                 <!-- ============================================== -->
-                <!-- OUTROS ROBÔS (Goleiro/Zagueiro)               -->
+                <!-- OUTROS ROBÔS                                   -->
                 <!-- ============================================== -->
                 <Repeat num_cycles="-1">
                     <Sequence>

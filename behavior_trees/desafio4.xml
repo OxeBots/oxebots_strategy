@@ -12,26 +12,28 @@
                 <Sequence>
                     <IsThisNodeID id="1"/>
                     
-                    <!-- Rastreia a bola mirando no Robô 2 (-1600, 200) -->
-                    <UpdateBallPosition robot_id="1" goal_x="-1600" goal_y="200" 
+                    <!-- Rastreia a bola MIRANDO NA NOVA POSIÇÃO do Robô 2 (-1300, 0) -->
+                    <UpdateBallPosition robot_id="1" goal_x="-1200" goal_y="0" 
                                         ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{pkx1}" pre_kick_y="{pky1}" 
                                         is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>
                     
-                    <!-- Posiciona atrás da bola e alinha pro cruzamento -->
-                    <GoToPoint robot_id="1" x="{pkx1}" y="{pky1}" face_x="-1600" face_y="200" tolerance="50.0"/>
+                    <!-- Posiciona atrás da bola e alinha pro cruzamento olhando para (-1300, 0) -->
+                    <GoToPoint robot_id="1" x="{pkx1}" y="{pky1}" face_x="-1200" face_y="0" tolerance="50.0"/>
                     
-                    <!-- Bote: Avança e cruza (kick_speed 5.0) -->
+                    <!-- Bote: Avança e cruza cravado na bola -->
                     <RetryUntilSuccessful num_attempts="-1">
                         <ReactiveFallback>
                             <Sequence>
                                 <IsBallClose robot_id="1" distance_threshold="125.0" angle_threshold_deg="15.0"/>
-                                <KickBall robot_id="1" kick_speed="5.0"/>
+                                <KickBall robot_id="1" kick_speed="3.0"/>
                             </Sequence>
                             <Sequence>
-                                <UpdateBallPosition robot_id="1" goal_x="-1600" goal_y="200" 
+                                <!-- Atualiza o alvo durante a investida (-1300, 0) -->
+                                <UpdateBallPosition robot_id="1" goal_x="-1200" goal_y="0" 
                                                     ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{dummy_x1}" pre_kick_y="{dummy_y1}" 
                                                     is_ready_to_kick="{dummy_ready1}" ball_in_enemy_half="{dummy_adv1}"/>
-                                <GoToPoint robot_id="1" x="{bx1}" y="{by1}" face_x="-1600" face_y="200" tolerance="0.0" planner="straight_line"/>
+                                <!-- Bote mantendo a mira na nova coordenada -->
+                                <GoToPoint robot_id="1" x="{bx1}" y="{by1}" face_x="-1200" face_y="0" tolerance="0.0" planner="straight_line"/>
                             </Sequence>
                         </ReactiveFallback>
                     </RetryUntilSuccessful>
@@ -51,53 +53,47 @@
                 <Sequence>
                     <IsThisNodeID id="2"/>
                     
-                    <!-- 1. Espera no meio da área (-1600, 200), olhando pra bola pra não perder a recepção -->
+                    <!-- FASE 1: QUARENTENA! Obriga o robô a chegar na nova base (-1300, 0) antes de ligar o radar -->
+                    <RetryUntilSuccessful num_attempts="-1">
+                        <Sequence>
+                            <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}" is_ready_to_kick="{dummy_r}" ball_in_enemy_half="{dummy_a}"/>
+                            <GoToPoint robot_id="2" x="-1200" y="0" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>
+                        </Sequence>
+                    </RetryUntilSuccessful>
+                    
+                    <!-- FASE 2: RADAR LIGADO! Espera o cruzamento chegar perto (< 600mm) olhando pra bola -->
                     <RetryUntilSuccessful num_attempts="-1">
                         <Sequence>
                             <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" 
                                                 ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}" 
                                                 is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>
                             <Fallback>
-                                <IsBallClose robot_id="2" distance_threshold="1200.0"/>
+                                <IsBallClose robot_id="2" distance_threshold="600.0"/>
                                 <Sequence>
-                                    <GoToPoint robot_id="2" x="-1600" y="200" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>
-                                    <IsValueTrue value="false"/>
+                                    <GoToPoint robot_id="2" x="-1300" y="0" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>
+                                    <IsValueTrue value="false"/> <!-- Força o laço a continuar esperando -->
                                 </Sequence>
                             </Fallback>
                         </Sequence>
                     </RetryUntilSuccessful>
                     
-                    <!-- 2. O cruzamento chegou! Domina, gira rápido pro gol (-2175, 0) e estufa a rede! -->
+                    <!-- FASE 3: BOLA NA ÁREA! Domina e gira pro gol (-2175, 0) para finalizar -->
                     <RetryUntilSuccessful num_attempts="-1">
                         <ReactiveFallback>
-                            
-                            <!-- Fase 2.1: A bola colou. Gira a cara pro gol e atira! (Velocidade 8.0) -->
                             <Sequence>
-                                <IsBallClose robot_id="2" distance_threshold="250.0" angle_threshold_deg="180.0"/>
-                                <Parallel success_count="1" failure_count="2">
-                                    <ForceFailure>
-                                        <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="-2175" face_y="0" tolerance="0.0" planner="straight_line"/>
-                                    </ForceFailure>
-                                    <Sequence>
-                                        <RetryUntilSuccessful num_attempts="-1">
-                                            <IsBallClose robot_id="2" distance_threshold="150.0" angle_threshold_deg="15.0"/>
-                                        </RetryUntilSuccessful>
-                                        <KickBall robot_id="2" kick_speed="8.0"/>
-                                    </Sequence>
-                                </Parallel>
+                                <IsBallClose robot_id="2" distance_threshold="125.0" angle_threshold_deg="15.0"/>
+                                <KickBall robot_id="2" kick_speed="3.0"/>
                             </Sequence>
-
-                            <!-- Fase 2.2: A bola tá vindo. Vai de encontro a ela sem desviar o olhar -->
                             <Sequence>
                                 <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" 
                                                     ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x2}" pre_kick_y="{dummy_y2}" 
                                                     is_ready_to_kick="{dummy_ready2}" ball_in_enemy_half="{dummy_adv2}"/>
-                                <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="{bx2}" face_y="{by2}" tolerance="0.0" planner="straight_line"/>
+                                <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="-2175" face_y="0" tolerance="0.0" planner="straight_line"/>
                             </Sequence>
-                            
                         </ReactiveFallback>
                     </RetryUntilSuccessful>
                     
+                    <!-- Comemora o gol -->
                     <Repeat num_cycles="-1">
                         <Sequence>
                             <Halt reason="gol_marcado"/>
