@@ -23,6 +23,21 @@ void clampFromPenaltyArea(double& tx, double& ty, double goal_x, double depth, d
         }
     }
 }
+
+void clampInsidePenaltyArea(double& tx, double& ty, double goal_x, double depth, double width, double margin) {
+    double half_width = width / 2.0;
+    if (goal_x > 0) {
+        double min_x = goal_x - depth - margin;
+        double max_x = goal_x;
+        tx = std::clamp(tx, min_x, max_x);
+    } else {
+        double min_x = goal_x;
+        double max_x = goal_x + depth + margin;
+        tx = std::clamp(tx, min_x, max_x);
+    }
+    double max_y = half_width + margin;
+    ty = std::clamp(ty, -max_y, max_y);
+}
 }
 
 namespace oxebots_strategy {
@@ -220,8 +235,8 @@ BT::NodeStatus GoToPointNode::onStart() {
     double my_goal_x = 2200.0;
     double opponent_goal_x = -2200.0;
     bool is_gk = false;
-    double p_depth = 500.0;
-    double p_width = 1350.0;
+    const double p_depth = 500.0;  // 500mm em X
+    const double p_width = 1350.0; // 1350mm em Y
     double margin = 100.0; // mm
 
     auto blackboard = config().blackboard;
@@ -231,20 +246,16 @@ BT::NodeStatus GoToPointNode::onStart() {
         (void)blackboard->get("is_goalkeeper", is_gk);
     }
 
-    if (field_size_.has_value()) {
-        p_depth = field_size_->penalty_area_depth;
-        p_width = field_size_->penalty_area_width;
-        double half_len = field_size_->field_length / 2.0;
-        my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
-        opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
-    }
+    if (robot_id_ == 0) is_gk = true;
 
     // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
     clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
 
-    // 2. Bloquear a própria área apenas se NÃO for o goleiro
+    // 2. Bloquear a própria área apenas se NÃO for o goleiro; se FOR goleiro, limitar a NÃO sair da área (sem margem)
     if (!is_gk) {
         clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
+    } else {
+        clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
     }
 
     publishGoal();
@@ -259,8 +270,8 @@ BT::NodeStatus GoToPointNode::onRunning() {
         double my_goal_x = 2200.0;
         double opponent_goal_x = -2200.0;
         bool is_gk = false;
-        double p_depth = 500.0;
-        double p_width = 1350.0;
+        const double p_depth = 500.0;  // 500mm em X
+        const double p_width = 1350.0; // 1350mm em Y
         double margin = 100.0; // mm
 
         auto blackboard = config().blackboard;
@@ -270,23 +281,19 @@ BT::NodeStatus GoToPointNode::onRunning() {
             (void)blackboard->get("is_goalkeeper", is_gk);
         }
 
-        if (field_size_.has_value()) {
-            p_depth = field_size_->penalty_area_depth;
-            p_width = field_size_->penalty_area_width;
-            double half_len = field_size_->field_length / 2.0;
-            my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
-            opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
-        }
-
         double clamped_x = tx;
         double clamped_y = ty;
+
+        if (robot_id_ == 0) is_gk = true;
 
         // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
         clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
 
-        // 2. Bloquear a própria área apenas se NÃO for o goleiro
+        // 2. Bloquear a própria área apenas se NÃO for o goleiro; se FOR goleiro, limitar a NÃO sair da área (sem margem)
         if (!is_gk) {
             clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
+        } else {
+            clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
         }
         
         // Se houver uma mudança significativa (> 2mm), publica um novo objetivo
