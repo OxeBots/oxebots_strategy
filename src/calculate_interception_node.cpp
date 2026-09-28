@@ -24,12 +24,31 @@ BT::PortsList CalculateInterceptionNode::providedPorts()
   return { BT::InputPort<unsigned int>("robot_id"),
            BT::InputPort<double>("goal_x", 0.0, "X do gol alvo"),
            BT::InputPort<double>("goal_y", 0.0, "Y do gol alvo"),
+           BT::InputPort<double>("carry_distance_mm", kCarryDistanceMm,
+               "Distância (mm) do ponto de carga até a bola, do lado OPOSTO ao gol. Negativo = "
+               "além do centro da bola (mais residual de distância = mais velocidade sustentada "
+               "em movement_calculation.cpp, que é proporcional a essa distância). Exposto como "
+               "porta pra cada árvore/estratégia poder escolher sua própria agressividade de "
+               "carga sem precisar editar essa constante em C++."),
+           BT::InputPort<double>("carry_face_lookahead_mm", kCarryFaceLookaheadMm,
+               "Distância (mm) do ponto de mira da carga até a bola, do lado do gol. Ver "
+               "carry_distance_mm — mesmo raciocínio de porta configurável."),
            BT::OutputPort<double>("intercept_x"),
            BT::OutputPort<double>("intercept_y"),
            BT::OutputPort<double>("intercept_pk_x"),
            BT::OutputPort<double>("intercept_pk_y"),
+           BT::OutputPort<double>("intercept_pk_safe_x",
+               "Igual a intercept_pk_x, exceto quando o robô está do lado ERRADO da bola agora "
+               "mesmo (mesmo lado do gol) — nesse caso, um waypoint de contorno lateral em vez do "
+               "ponto de pré-chute direto, pra forçar o D* a rodear em vez de arriscar um atalho "
+               "por cima/perto da bola. Ver kSwingLateralOffsetMm."),
+           BT::OutputPort<double>("intercept_pk_safe_y"),
            BT::OutputPort<double>("intercept_capture_x"),
            BT::OutputPort<double>("intercept_capture_y"),
+           BT::OutputPort<double>("intercept_carry_x"),
+           BT::OutputPort<double>("intercept_carry_y"),
+           BT::OutputPort<double>("intercept_carry_face_x"),
+           BT::OutputPort<double>("intercept_carry_face_y"),
            BT::OutputPort<bool>("is_ready_to_kick") };
 }
 
@@ -241,6 +260,54 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   setOutput("intercept_pk_x", pk_x);
   setOutput("intercept_pk_y", pk_y);
 
+  // --- Waypoint de contorno (intercept_pk_safe_x/y) ---
+  // Ver comentário de kSwingLateralOffsetMm no .h: o D* (Fase 1) só evita colidir com a bola,
+  // não tem noção de "por qual lado contornar" pra chegar em pk_x/y (atrás da bola). Se o robô já
+  // está do lado ERRADO (mesmo lado do gol) quando esta função roda, ir direto pra pk_x/y arrisca
+  // um caminho que passa perto/por cima da bola pela frente — o D* pode escolher esse atalho
+  // porque, como obstáculo, ele só precisa desviar da bola em si, não do "lado errado" dela.
+  // Confirmado em teste: reposicionar a bola perto ou atrás do robô faz ele ir pra frente dela
+  // repetidamente, mesmo com ball_side_check forçando replanejamento (o replanejamento usa o
+  // mesmo D* sem noção de lado, comete o mesmo erro de novo).
+  //
+  // Solução: quando do lado errado, mirar num waypoint deslocado LATERALMENTE (perpendicular à
+  // linha bola-gol) a partir da bola, do lado em que o robô já está lateralmente — esse ponto
+  // fica longe o bastante da bola pra que o caminho até ele não precise passar perto dela, forçando
+  // o D* a rodear em vez de cortar caminho pela frente. Uma vez lá (ou já do lado certo), o alvo
+  // volta a ser pk_x/y diretamente.
+  {
+    // dx_g/dy_g aqui é (bola - gol) — o OPOSTO do "a=robô-bola, b=gol-bola, dot(a,b)>0 => lado
+    // errado" usado em go_to_point_node.cpp (lá b=gol-bola). Com dx_g=bola-gol=-b:
+    // dot_side := dx_g·(robô-bola) = -b·a = -dot(a,b). Logo dot(a,b)>0 (lado errado) equivale a
+    // dot_side<0 — sinal invertido em relação à convenção usual, por isso o comentário explícito
+    // aqui (já apanhei uma vez por causa disso).
+    double dot_side = dx_g * (rx - intercept_x) + dy_g * (ry - intercept_y);
+    constexpr double kSafelyBehindMarginMm = 80.0; // histerese: só desarma com folga real
+    if (dot_side < 0.0) {
+      swing_active_ = true;
+    } else if (dot_side > kSafelyBehindMarginMm) {
+      swing_active_ = false;
+    }
+  }
+
+  double pk_safe_x = pk_x;
+  double pk_safe_y = pk_y;
+  if (swing_active_ && dist_ball_goal > 10.0) {
+    // back_dir: de dx_g/dy_g (já normalizado por dist_ball_goal), aponta do gol pra bola e além —
+    // "atrás" da bola, mesma direção usada para calcular pk_x/y acima.
+    double back_x = dx_g / dist_ball_goal;
+    double back_y = dy_g / dist_ball_goal;
+    // Perpendicular a back_dir; o sinal escolhe o lado em que o robô já está lateralmente, pra
+    // não mandar ele cruzar pro outro lado à toa.
+    double perp_x = -back_y;
+    double perp_y = back_x;
+    double side_sign = (perp_x * (rx - intercept_x) + perp_y * (ry - intercept_y)) >= 0.0 ? 1.0 : -1.0;
+    pk_safe_x = intercept_x + back_x * 400.0 + perp_x * side_sign * kSwingLateralOffsetMm;
+    pk_safe_y = intercept_y + back_y * 400.0 + perp_y * side_sign * kSwingLateralOffsetMm;
+  }
+  setOutput("intercept_pk_safe_x", pk_safe_x);
+  setOutput("intercept_pk_safe_y", pk_safe_y);
+
   // --- Ponto de Captura: mesma linha gol->bola, mas bem perto da bola ---
   // Usado como alvo do GoToPoint em vez do centro exato da bola (intercept_x/y), para que o
   // robô termine a aproximação já alinhado, em vez de bater na bola de frente.
@@ -252,6 +319,43 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   }
   setOutput("intercept_capture_x", cap_x);
   setOutput("intercept_capture_y", cap_y);
+
+  // --- Ponto de Carga e Ponto de Mira da Carga: usados só pela árvore de carregar a bola.
+  //
+  // Base é a posição BRUTA da bola (bx/by), NÃO intercept_x/y como pk/capture acima. intercept_x/y
+  // é o resultado da busca balística preditiva ("onde a bola vai estar"), útil pra perseguir uma
+  // bola ainda distante e em movimento (int_ball_x/y, int_pk_x/y) — mas ao carregar, o robô já
+  // está em contato empurrando a bola, então a pergunta certa é "onde ela está AGORA", não uma
+  // previsão. Confirmado como causa de um bug real: com a carga rápida o bastante pra bola
+  // ultrapassar os 150mm/s da banda-morta acima, a predição balística passava a extrapolar o
+  // ponto de interceptação à frente da bola de verdade (na direção do empurrão) — carry_x/y e
+  // carry_face_x/y deslizavam junto, ocasionalmente posicionando o robô à FRENTE da bola em vez
+  // de atrás dela.
+  double dx_g_raw = bx - goal_x;
+  double dy_g_raw = by - goal_y;
+  double dist_ball_goal_raw = std::hypot(dx_g_raw, dy_g_raw);
+
+  double carry_distance_mm = kCarryDistanceMm;
+  getInput<double>("carry_distance_mm", carry_distance_mm);
+  double carry_face_lookahead_mm = kCarryFaceLookaheadMm;
+  getInput<double>("carry_face_lookahead_mm", carry_face_lookahead_mm);
+
+  double carry_x = bx;
+  double carry_y = by;
+  double carry_face_x = bx;
+  double carry_face_y = by;
+  if (dist_ball_goal_raw > 10.0) {
+    // Do lado OPOSTO ao gol (mesmo sinal que pk/capture usam para dx_g/dy_g).
+    carry_x = bx + (dx_g_raw / dist_ball_goal_raw) * carry_distance_mm;
+    carry_y = by + (dy_g_raw / dist_ball_goal_raw) * carry_distance_mm;
+    // Do lado do gol (sinal oposto).
+    carry_face_x = bx - (dx_g_raw / dist_ball_goal_raw) * carry_face_lookahead_mm;
+    carry_face_y = by - (dy_g_raw / dist_ball_goal_raw) * carry_face_lookahead_mm;
+  }
+  setOutput("intercept_carry_x", carry_x);
+  setOutput("intercept_carry_y", carry_y);
+  setOutput("intercept_carry_face_x", carry_face_x);
+  setOutput("intercept_carry_face_y", carry_face_y);
 
   // --- Checar se o robô já está no pré-chute pronto para o PrecisionKick ---
   double r_dx = intercept_x - rx;

@@ -42,6 +42,7 @@
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
                                    intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                                   intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
                                    intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
                                    is_ready_to_kick="{is_ready_pred}" />
 
@@ -65,8 +66,18 @@
                      derrubando a Sequence inteira — o ReactiveFallback tenta de novo no tick
                      seguinte com CalculateInterceptionNode recalculando os pontos a partir da
                      posição real e atual da bola, e o D* replanejando do zero. NÃO usar esse
-                     limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0"
+                     limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo.
+
+                     x/y usam intercept_pk_safe (não intercept_pk direto): o D* só evita colidir
+                     com a bola como obstáculo, sem noção de "por qual lado contornar" — se o
+                     caminho mais curto até o pré-chute real passa perto da bola pela frente, o D*
+                     vai por ali, deixando o robô do lado errado (confirmado em teste: reposicionar
+                     a bola perto/atrás do robô faz ele ir pra frente dela repetidamente). Quando o
+                     robô está do lado errado agora, intercept_pk_safe_x/y aponta pra um waypoint
+                     de contorno lateral em vez do pré-chute direto (ver
+                     calculate_interception_node.cpp); assim que ele está seguramente do lado
+                     certo, volta a ser exatamente intercept_pk_x/y no próximo tick. -->
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
                            ball_contact_threshold_mm="150.0" />
 
                 <!-- Fase 2: laço único de aproximação+chute, substituindo a cadeia antiga

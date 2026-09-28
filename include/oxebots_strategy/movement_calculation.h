@@ -67,6 +67,10 @@ private:
     // DSTAR: se por algum motivo nenhum goal ainda chegou, mantém a repulsão habilitada (mais
     // seguro do que assumir straight_line e desabilitar por engano).
     uint8_t target_planner_type_ = oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
+    // Espelha RobotGoal::disable_arrival_latch do último /robot_goal recebido (ver comentário no
+    // .msg): quando true, o freio de "chegada" (kArrivedDistanceMm) em calculate_and_move() nunca
+    // dispara para este alvo.
+    bool disable_arrival_latch_ = false;
     // Histerese da repulsão: entra a kContactEnterMm, só desarma a kContactExitMm (maior), evitando
     // a repulsão ligar/desligar em flapping bem na borda do raio de contato.
     bool contact_repulsion_active_ = false;

@@ -59,6 +59,7 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
     const auto& q = msg->pose.pose.orientation;
     target_w_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     target_planner_type_ = msg->planner_type;
+    disable_arrival_latch_ = msg->disable_arrival_latch;
 }
 
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -198,7 +199,32 @@ void PathFollowerNode::calculate_and_move() {
     // travando pra sempre alguns mm fora do alcance (confirmado no log: "dist=28.5" congelado
     // por 8+ segundos, GoToPoint nunca retornando SUCCESS, robô parado na frente da bola).
     constexpr double kArrivedDistanceMm = 10.0;
-    bool arrived = check_dist < kArrivedDistanceMm || dist_to_target < 0.001;
+    // disable_arrival_latch_ (ver RobotGoal.msg e GoToPointNode::publishGoal): alvos publicados
+    // com tolerance<=0 (contrato "nunca chega formalmente", ex: pontos de carga deliberadamente
+    // além da bola) nunca travam aqui, mesmo cruzando os 10mm em contato real — sem isso, o freio
+    // zera target_w_ e o GoToPoint só republica o objetivo quando ele muda o bastante (>2mm/1.1°);
+    // se o robô trava empurrando uma bola que também para de se mover, o alvo nunca muda e nada
+    // nunca destrava (deadlock confirmado em teste, robô preso ~4s seguidos "na frente da bola"
+    // ou girado ~180° sem nenhum mecanismo de recuperação).
+    bool arrived = !disable_arrival_latch_ && (check_dist < kArrivedDistanceMm || dist_to_target < 0.001);
+
+    // Diagnóstico temporário: robô fica parado perto da bola sem motivo aparente em alguns casos
+    // (ver histórico). Loga o estado bruto de decisão de velocidade sempre que perto da bola, pra
+    // capturar exatamente qual condição (arrived, cos(angle_err) negativo, path vazio/curto etc)
+    // está zerando o comando nesses episódios.
+    {
+        double diag_ball_dist = std::hypot(last_game_data_->ball.x - current_pos.x, last_game_data_->ball.y - current_pos.y);
+        if (diag_ball_dist < 200.0) {
+            RCLCPP_WARN(this->get_logger(),
+                "Robô %d DIAG: robot(%.1f,%.1f) ori=%.1fdeg target_pt(%.1f,%.1f) dist_to_target=%.1f "
+                "target_goal=%s check_dist=%.1f arrived=%d target_w=%s path_size=%zu",
+                robot_id_, current_pos.x, current_pos.y, current_pos.orientation * 180.0 / M_PI,
+                target_pt.x, target_pt.y, dist_to_target,
+                target_goal_.has_value() ? "sim" : "nao", check_dist, arrived ? 1 : 0,
+                target_w_.has_value() ? "sim" : "nao",
+                last_path_ ? last_path_->poses.size() : 0u);
+        }
+    }
 
     // --- Controle Angular ---
     // Uma vez que o robô "chegou" (arrived), este nó para de disputar autoridade angular: sem
@@ -247,6 +273,15 @@ void PathFollowerNode::calculate_and_move() {
         // essa corrida inteira e deixaria o robô lento bem quando ele já devia estar alinhado e
         // só precisa avançar reto. 100mm reduz o freio para só os últimos centímetros.
         constexpr double kAlignmentPriorityRangeMm = 100.0;
+        double diag_ball_dist2 = std::hypot(last_game_data_->ball.x - current_pos.x, last_game_data_->ball.y - current_pos.y);
+        if (diag_ball_dist2 < 200.0) {
+            RCLCPP_WARN(this->get_logger(),
+                "Robô %d DIAG2: speed_pre=%.3f angle_err=%.1fdeg has_target_w=%d check_dist=%.1f "
+                "(gate<%.0f=%d) cos(angle_err)=%.3f",
+                robot_id_, speed, angle_err * 180.0 / M_PI, has_target_w ? 1 : 0, check_dist,
+                kAlignmentPriorityRangeMm, (has_target_w && check_dist < kAlignmentPriorityRangeMm) ? 1 : 0,
+                std::cos(angle_err));
+        }
         if (has_target_w && check_dist < kAlignmentPriorityRangeMm) {
             double alignment_factor = std::max(0.0, std::cos(angle_err));
             speed *= alignment_factor;
@@ -286,6 +321,14 @@ void PathFollowerNode::calculate_and_move() {
             cmd_data.x_velocity = (bdx / ball_dist) * repel_speed;
             cmd_data.y_velocity = (bdy / ball_dist) * repel_speed;
             cmd_data.angular_velocity = 0.0;
+        }
+    }
+
+    {
+        double diag_ball_dist3 = last_game_data_ ? std::hypot(last_game_data_->ball.x - current_pos.x, last_game_data_->ball.y - current_pos.y) : -1.0;
+        if (diag_ball_dist3 >= 0.0 && diag_ball_dist3 < 200.0) {
+            RCLCPP_WARN(this->get_logger(), "Robô %d DIAG3: FINAL vx=%.3f vy=%.3f w=%.3f",
+                robot_id_, cmd_data.x_velocity, cmd_data.y_velocity, cmd_data.angular_velocity);
         }
     }
 

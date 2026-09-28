@@ -70,7 +70,17 @@ BT::PortsList GoToPointNode::providedPorts() {
                  "continuar empurrando-a pelo caminho antigo. NÃO usar em GoToPoints que terminam "
                  "perto da bola de propósito (ex: Fase 2, ponto de captura) — nesse caso, chegar "
                  "perto é o objetivo, não um acidente. Default -1.0 = desabilitado (nenhum "
-                 "comportamento novo para quem já usa este nó sem setar essa porta).") };
+                 "comportamento novo para quem já usa este nó sem setar essa porta)."),
+             BT::InputPort<bool>("ball_side_check", false,
+                 "Se true, o nó falha (FAILURE) caso o robô esteja do lado ERRADO da bola — mesmo "
+                 "lado que o gol adversário (\"na frente\" da bola) em vez de atrás dela — enquanto "
+                 "estiver perto o bastante pra isso importar. Usa opponent_goal_x/y do blackboard. "
+                 "Pensado pra Fase 1 (ponto de pré-chute via D*): o D* só evita colidir com a bola, "
+                 "não garante de qual lado ele contorna — se contornar pelo lado errado, o robô "
+                 "pode \"chegar\" no ponto de pré-chute fisicamente correto mas por trás de si "
+                 "mesmo, ficando entre a bola e o gol. Mesmo mecanismo do ball_contact_threshold_mm "
+                 "(falha força recalcular tudo do zero). NÃO usar em GoToPoints que terminam do "
+                 "lado do gol de propósito. Default false = desabilitado.") };
 }
 
 uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
@@ -131,6 +141,13 @@ void GoToPointNode::publishGoal() {
     std::string planner = "dstar";
     getInput<std::string>("planner", planner);
     goal_msg->planner_type = plannerFromString(planner);
+
+    // Ver comentário em RobotGoal.msg: tolerance<=0 é o contrato de "este GoToPoint nunca retorna
+    // SUCCESS formalmente" (ex: pontos de carga deliberadamente além da bola) — nesse caso,
+    // movement_calculation.cpp nunca deve travar o robô por proximidade geométrica do alvo.
+    double tolerance = -1.0;
+    getInput<double>("tolerance", tolerance);
+    goal_msg->disable_arrival_latch = (tolerance <= 0.0);
 
     // Converte de milímetros (padrão interno) para metros (padrão do ROS/RobotGoal)
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
@@ -219,6 +236,7 @@ void GoToPointNode::publishMarkers() {
 // Chamado uma vez quando o nó BT é ativado
 BT::NodeStatus GoToPointNode::onStart() {
     ball_contact_since_.reset();
+    ball_wrong_side_since_.reset();
 
     unsigned int input_id;
     if (!getInput<unsigned int>("robot_id", input_id)) return BT::NodeStatus::FAILURE;
@@ -364,6 +382,52 @@ BT::NodeStatus GoToPointNode::onRunning() {
             }
         } else {
             ball_contact_since_.reset();
+        }
+    }
+
+    // Gatilho de lado errado da bola (ver comentário da porta): só ativo se ball_side_check=true.
+    // ball_contact_threshold_mm cobre CONTATO (distância), mas o D* pode "chegar" ao ponto de
+    // pré-chute sem nunca chegar perto o bastante da bola pra disparar aquele gatilho, mesmo
+    // tendo contornado pelo lado errado — resultado: robô fisicamente no ponto certo, mas do lado
+    // ERRADO da bola (entre ela e o gol, em vez de atrás). Confirmado em teste: robô "se
+    // posicionando na frente da bola algumas vezes" durante a Fase 1. Mesma lógica de
+    // "dot product" já usada em CalculateInterceptionNode::computeKickReadiness pra decidir se o
+    // robô está do lado certo — aqui aplicada de forma contínua, não só na checagem final de
+    // pronto-pra-chutar.
+    bool ball_side_check = false;
+    getInput<bool>("ball_side_check", ball_side_check);
+    if (ball_side_check && last_game_data_) {
+        double bx = last_game_data_->ball.x;
+        double by = last_game_data_->ball.y;
+        double ball_dist = std::hypot(robot->x - bx, robot->y - by);
+        // Só importa perto da bola: longe, o D* ainda está em trânsito e pode cruzar
+        // momentaneamente o eixo bola-gol sem que isso signifique nada de errado.
+        constexpr double kSideCheckRangeMm = 600.0;
+        auto blackboard = config().blackboard;
+        double op_x, op_y;
+        if (ball_dist < kSideCheckRangeMm && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+            // a = vetor bola->robô, b = vetor bola->gol. Se o robô está corretamente atrás da
+            // bola (do lado oposto ao gol), a e b apontam em direções opostas (dot < 0). Se o
+            // robô está na frente (mesmo lado do gol), dot > 0.
+            double a_x = robot->x - bx, a_y = robot->y - by;
+            double b_x = op_x - bx, b_y = op_y - by;
+            double dot = a_x * b_x + a_y * b_y;
+            constexpr double kSustainedWrongSideSec = 0.15;
+            if (dot > 0.0) {
+                if (!ball_wrong_side_since_.has_value()) {
+                    ball_wrong_side_since_ = node_->now();
+                } else if ((node_->now() - *ball_wrong_side_since_).seconds() >= kSustainedWrongSideSec) {
+                    RCLCPP_WARN(node_->get_logger(),
+                        "Robô %d: do lado errado da bola durante GoToPoint (na frente dela, não atrás) — "
+                        "abortando para recalcular a rota do zero.", robot_id_);
+                    ball_wrong_side_since_.reset();
+                    return BT::NodeStatus::FAILURE;
+                }
+            } else {
+                ball_wrong_side_since_.reset();
+            }
+        } else {
+            ball_wrong_side_since_.reset();
         }
     }
 
