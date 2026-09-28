@@ -1,12 +1,13 @@
 #include "oxebots_strategy/lateral_clear_node.h"
 #include <cmath>
+#include <algorithm>
 #include <memory>
 
 namespace oxebots_strategy
 {
 
 static constexpr double LATERAL_TARGET_Y = 2000.0;
-static constexpr double POS_UPDATE_THRESHOLD = 10.0;
+static constexpr double POS_UPDATE_THRESHOLD = 5.0;
 static constexpr double ANG_UPDATE_THRESHOLD = 0.05;
 
 LateralClearNode::LateralClearNode(const std::string & name, const BT::NodeConfig & config, rclcpp::Node::SharedPtr node_ptr)
@@ -49,13 +50,37 @@ BT::NodeStatus LateralClearNode::onRunning()
     if (!config().blackboard->get("robot_x", rx) || 
         !config().blackboard->get("robot_y", ry) || 
         !config().blackboard->get("robot_yaw", ryaw)) {
-        return BT::NodeStatus::RUNNING; // Wait for data
+        return BT::NodeStatus::RUNNING; // Aguarda dados
     }
 
-    double target_x = ball_x;
-    double target_y = ball_y;
-    double target_side_y = (ball_y > 0) ? LATERAL_TARGET_Y : -LATERAL_TARGET_Y;
+    // Direção de chute lateral: se a bola está na metade de cima (y >= 0), chuta para lateral +Y, senão -Y
+    double target_side_y = (ball_y >= 0.0) ? LATERAL_TARGET_Y : -LATERAL_TARGET_Y;
     double target_w = std::atan2(target_side_y - ball_y, 0.0 - ball_x);
+
+    double ux = std::cos(target_w);
+    double uy = std::sin(target_w);
+
+    // Alvo para avanço e contato físico com a bola
+    double target_x = ball_x + ux * 50.0;
+    double target_y = ball_y + uy * 50.0;
+
+    // Restringir à área de pênalti com margem de 30cm (300mm)
+    double my_goal_x = -2200.0, p_depth = 500.0, p_width = 1350.0;
+    auto bb = config().blackboard;
+    if (bb) {
+        (void)bb->get("my_goal_x", my_goal_x);
+        (void)bb->get("penalty_area_depth", p_depth);
+        (void)bb->get("penalty_area_width", p_width);
+    }
+    double half_width = p_width / 2.0;
+    constexpr double kGkMargin = 0.0;
+
+    if (my_goal_x > 0) {
+        target_x = std::clamp(target_x, my_goal_x - p_depth - kGkMargin, my_goal_x);
+    } else {
+        target_x = std::clamp(target_x, my_goal_x, my_goal_x + p_depth + kGkMargin);
+    }
+    target_y = std::clamp(target_y, -half_width - kGkMargin, half_width + kGkMargin);
 
     bool target_changed = (std::abs(target_x - last_target_x_) > POS_UPDATE_THRESHOLD || 
                            std::abs(target_y - last_target_y_) > POS_UPDATE_THRESHOLD ||
@@ -66,6 +91,8 @@ BT::NodeStatus LateralClearNode::onRunning()
         goal_msg->robot_id = robot_id_;
         goal_msg->pose.header.stamp = node_->now();
         goal_msg->pose.header.frame_id = "map";
+        // PLANNER_STRAIGHT_LINE evita que o D* pare no obstáculo inflado da bola
+        goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
         goal_msg->pose.pose.position.x = target_x / 1000.0;
         goal_msg->pose.pose.position.y = target_y / 1000.0;
         goal_msg->pose.pose.orientation.z = std::sin(target_w * 0.5);
@@ -78,17 +105,16 @@ BT::NodeStatus LateralClearNode::onRunning()
         last_target_w_ = target_w;
     }
 
-    // Check if we arrived at the ball to trigger SUCCESS
-    double dx = target_x - rx;
-    double dy = target_y - ry;
-    double dist = std::sqrt(dx*dx + dy*dy);
+    // Verificar se chegou perto da bola para autorizar o chute
+    double dx = ball_x - rx;
+    double dy = ball_y - ry;
+    double dist = std::sqrt(dx * dx + dy * dy);
     
-    // Normalize angle difference
     double angle_diff = target_w - ryaw;
     while (angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
     while (angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
 
-    if (dist < 150.0 && std::abs(angle_diff) < 0.2) {
+    if (dist < 180.0 && std::abs(angle_diff) < 0.35) {
         return BT::NodeStatus::SUCCESS;
     }
 
@@ -97,4 +123,4 @@ BT::NodeStatus LateralClearNode::onRunning()
 
 void LateralClearNode::onHalted() {}
 
-}
+} // namespace oxebots_strategy
