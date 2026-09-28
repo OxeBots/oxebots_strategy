@@ -131,7 +131,7 @@ void PathFollowerNode::calculate_and_move() {
         return;
     }
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK) {
-        runKick();
+        runKick(current_pos);
         return;
     }
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_BALL ||
@@ -352,7 +352,7 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
 // janela, e então segura kKickCooldown antes de aceitar outro pedido — sem isso, um pedido de
 // chute que continue chegando (o leaf reenvia a cada tick enquanto RUNNING) dispararia de novo
 // instantaneamente, virando uma "metralhadora" que nunca solta a bola direito.
-void PathFollowerNode::runKick() {
+void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
     auto now = std::chrono::steady_clock::now();
 
     if (kick_phase_ == KickPhase::IDLE && now >= kick_cooldown_until_) {
@@ -367,8 +367,19 @@ void PathFollowerNode::runKick() {
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
             cmd_data.kick_speed = last_override_msg_->kick_speed;
-            cmd_data.x_velocity = 0.5; // avançar enquanto chuta, para garantir contato
-            cmd_data.y_velocity = 0.0;
+            // Avançar enquanto chuta, para garantir contato — na direção que o robô está
+            // REALMENTE olhando (current_pos.orientation), não em +X global fixo. RobotCmdData
+            // usa velocidades em referencial global (mesma convenção do resto deste arquivo, ver
+            // vx/vy do seguimento de caminho acima), então +X fixo só empurra "para frente" por
+            // coincidência quando o robô já está de frente pro +X — ou seja, só funciona pro time
+            // que ataca em direção a +X. Para o time que ataca em -X (opponent_goal_x negativo),
+            // empurrava para TRÁS do chute, cancelando o próprio avanço — o chute "completava"
+            // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
+            // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
+            // toda tentativa, exclusivo do time amarelo).
+            constexpr double kKickAdvanceSpeed = 0.5;
+            cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
+            cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0;
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));

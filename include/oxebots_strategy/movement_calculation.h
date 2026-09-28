@@ -44,7 +44,7 @@ private:
     // (D*/linha reta + apontar para o gol) permanece inalterada, no corpo de calculate_and_move(),
     // e roda sempre que não há override ativo (modo NONE, incluindo por expiração de TTL).
     void runAlign(const movement::Coordinate& current_pos, uint8_t mode);
-    void runKick();
+    void runKick(const movement::Coordinate& current_pos);
     void publishHalt();
     void publishStatus(uint8_t active_mode, bool aligned);
 

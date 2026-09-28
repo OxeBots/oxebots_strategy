@@ -96,14 +96,19 @@
                       <IsBallInOurHalf ball_x="{ball_x}" />
                     </Inverter>
                     <!-- face_x/y usa int_carry_face_x/y (NÃO ball_x/y): mirar na própria bola,
-                         só ~115mm do alvo de posição, é instável — qualquer desvio lateral pequeno
+                         tão perto do alvo de posição, é instável — qualquer desvio lateral pequeno
                          vira uma guinada angular grande (mesmo problema já visto no Carry, que por
                          isso usa um ponto de mira longe/estável na mesma linha em vez da bola ou
                          do gol direto). int_cap_x/y e int_carry_x/y ficam na mesma linha bola→gol,
-                         então o mesmo ponto de mira serve pros dois. -->
+                         então o mesmo ponto de mira serve pros dois.
+
+                         SEM ball_side_check aqui: nesse alcance apertado, ruído pequeno de posição
+                         já basta pra inverter o sinal do produto escalar por um instante mesmo com
+                         o robô fisicamente correto, disparando falso positivo e abortando pra Fase
+                         1 à toa. -->
                     <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
                                face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                               tolerance="0.0" planner="straight_line" />
                   </ReactiveSequence>
                   <ReactiveSequence name="Carry">
                     <IsBallInOurHalf ball_x="{ball_x}" />
