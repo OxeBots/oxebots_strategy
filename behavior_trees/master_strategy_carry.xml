@@ -65,21 +65,19 @@
                      velocidade de empurrão via controle proporcional (kCarryDistanceMm em
                      calculate_interception_node.h). face_x/y usa int_carry_face_x/y (ponto à
                      frente da bola na mesma linha) em vez da bola ou do gol direto, pra não ter
-                     zigue-zague nem instabilidade de bearing. Serve tanto pra carregar (bola no
-                     nosso campo) quanto pra realinhar antes do chute (já no campo adversário): é
-                     o mesmo alvo nos dois casos, então um único GoToPoint cobre ambos — não há
-                     mais IsBallInOurHalf separando os dois em ramos diferentes, propositalmente:
-                     duas instâncias de GoToPoint miram no mesmo ponto com ball_side_check cada
-                     uma tendo seu próprio debounce, e o ReactiveFallback ficava revezando entre
-                     elas (uma falha, a outra assume do zero antes de completar seu debounce, e
-                     vice-versa) sem NUNCA propagar FAILURE pra fora — mascarando o lado errado
-                     indefinidamente em vez de forçar a Fase 1 a corrigir (confirmado em log:
-                     warning de lado errado toda hora, mas nenhum replanejamento da Fase 1
-                     acontecia depois). Com uma instância só, uma falha é sempre uma falha de
-                     verdade, propaga pra fora de ChaseAndKick e cai no RetryUntilSuccessful
-                     externo, que reinicia pela Fase 1 (D*) — só ali o robô é reposicionado. -->
+                     zigue-zague nem instabilidade de bearing.
+                     Um único GoToPoint (não dois, um pra "carregar" e outro pra "realinhar" — já
+                     tentei isso e virou um bug: duas instâncias no mesmo alvo, cada uma com seu
+                     próprio debounce de ball_side_check, ficavam revezando no ReactiveFallback sem
+                     NUNCA propagar FAILURE pra fora, mascarando o lado errado indefinidamente).
+                     Shoot só é tentado com Inverter(IsBallInOurHalf) na frente — ou seja, só
+                     depois que a bola cruzou pro campo adversário — senão o ReactiveFallback
+                     chutaria assim que alinhasse, mesmo ainda no nosso campo, pulando a carga. -->
                 <ReactiveFallback name="ApproachAndKick">
                   <Sequence name="Shoot">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
                     <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
                   </Sequence>
