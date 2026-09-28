@@ -60,19 +60,29 @@
                 <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
                            ball_contact_threshold_mm="150.0" />
 
-                <!-- Fase 2: empurra continuamente via int_carry_x/y — um ponto além da bola (do
-                     lado do gol) na linha bola→gol, recalculado a cada tick, que sustenta
-                     velocidade de empurrão via controle proporcional (kCarryDistanceMm em
-                     calculate_interception_node.h). face_x/y usa int_carry_face_x/y (ponto à
-                     frente da bola na mesma linha) em vez da bola ou do gol direto, pra não ter
-                     zigue-zague nem instabilidade de bearing.
-                     Um único GoToPoint (não dois, um pra "carregar" e outro pra "realinhar" — já
-                     tentei isso e virou um bug: duas instâncias no mesmo alvo, cada uma com seu
-                     próprio debounce de ball_side_check, ficavam revezando no ReactiveFallback sem
-                     NUNCA propagar FAILURE pra fora, mascarando o lado errado indefinidamente).
-                     Shoot só é tentado com Inverter(IsBallInOurHalf) na frente — ou seja, só
-                     depois que a bola cruzou pro campo adversário — senão o ReactiveFallback
-                     chutaria assim que alinhasse, mesmo ainda no nosso campo, pulando a carga. -->
+                <!-- Fase 2, três ramos. Tentei eliminar o Realign e só deixar a Fase 1 recuperar
+                     quando a bola já passou o meio-campo mas não está pronta pro chute — não
+                     funciona: a Fase 1 para no pré-chute (~400mm da bola, tolerance=120mm), longe
+                     demais pro alcance do Shoot (~140mm), e nada nesta árvore fecha essa distância
+                     final. Resultado: Fase 1 "termina" (já satisfeita, robô não se moveu), Fase 2
+                     falha na hora (Shoot longe demais, Carry com a bola já do lado errado),
+                     reinicia a Fase 1 (já satisfeita de novo) — loop apertado bem na distância do
+                     pré-chute, robô preso sem nunca chutar (confirmado em teste).
+
+                     Shoot: bola já no campo adversário, perto e alinhada — chuta.
+                     Realign: bola já no campo adversário mas ainda não alinhada — fecha essa
+                     distância final mirando em int_cap_x/y (perto da bola, ~115mm, NÃO além dela)
+                     olhando direto pra ela (face=ball_x/y), em vez de continuar empurrando através
+                     dela — para de fato de carregar em vez de curvar em movimento.
+                     Carry: bola ainda no nosso campo — empurra via int_carry_x/y, um ponto além
+                     da bola (do lado do gol) na linha bola→gol, que sustenta velocidade de
+                     empurrão via controle proporcional (kCarryDistanceMm). face_x/y usa
+                     int_carry_face_x/y (ponto à frente da bola na mesma linha) em vez da bola ou
+                     do gol direto, pra não ter zigue-zague nem instabilidade de bearing.
+
+                     Realign e Carry miram em alvos DIFERENTES e são gateados por condições
+                     complementares, então não competem pelo mesmo estado de ball_side_check (não
+                     recria o bug de mascaramento de duas instâncias no MESMO alvo). -->
                 <ReactiveFallback name="ApproachAndKick">
                   <Sequence name="Shoot">
                     <Inverter>
@@ -81,9 +91,26 @@
                     <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
                   </Sequence>
-                  <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
-                             face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                             tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                  <ReactiveSequence name="Realign">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
+                    <!-- face_x/y usa int_carry_face_x/y (NÃO ball_x/y): mirar na própria bola,
+                         só ~115mm do alvo de posição, é instável — qualquer desvio lateral pequeno
+                         vira uma guinada angular grande (mesmo problema já visto no Carry, que por
+                         isso usa um ponto de mira longe/estável na mesma linha em vez da bola ou
+                         do gol direto). int_cap_x/y e int_carry_x/y ficam na mesma linha bola→gol,
+                         então o mesmo ponto de mira serve pros dois. -->
+                    <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                  </ReactiveSequence>
+                  <ReactiveSequence name="Carry">
+                    <IsBallInOurHalf ball_x="{ball_x}" />
+                    <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                  </ReactiveSequence>
                 </ReactiveFallback>
 
                 <!-- Recuo pós-chute: sem isso, o loop reinicia imediatamente e recaptura a bola
