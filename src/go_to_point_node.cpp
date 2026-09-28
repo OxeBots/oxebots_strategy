@@ -53,6 +53,10 @@ BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
+             BT::InputPort<double>("face_x", "Opcional: X do alvo de orientação (bola, companheiro, canto do "
+                 "gol...). Aceita literal ou remapeamento de blackboard, ex: \"{ball_x}\". Se omitido (junto "
+                 "com face_y), mantém o padrão de sempre olhar para o gol adversário."),
+             BT::InputPort<double>("face_y", "Opcional: Y do alvo de orientação. Ver face_x."),
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
              BT::InputPort<std::string>("planner", "dstar",
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
@@ -92,23 +96,32 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
     return std::nullopt;
 }
 
-// Publica a mensagem de RobotGoal com a posição e orientação desejadas
-void GoToPointNode::publishGoal() {
+// Resolve para onde o robô deve olhar ao chegar: usa face_x/face_y se a chamada (no XML) tiver
+// passado os dois; senão cai no padrão de sempre olhar para o gol adversário (comportamento
+// antigo, preservado). face_x/face_y aceitam remapeamento de blackboard (ex: "{ball_x}"), então
+// "olhar para a bola" ou "olhar para um companheiro" não exige nenhuma lógica nova aqui — quem
+// decide o alvo é quem chama o nó no XML, não este código. Perto da bola (~115mm), mirar nela é
+// geometricamente instável se ficar tentando "chegar" com tolerância de orientação apertada
+// antes de poder chutar — por isso quem usa face_x/face_y="{ball_x}/{ball_y}" na Fase 2 usa
+// tolerance="0.0" (nunca "chega" formalmente) e deixa o IsBallClose, não este nó, decidir quando
+// o alinhamento já está bom o suficiente pra chutar.
+double GoToPointNode::resolveFaceAngle() {
+    double face_x, face_y;
+    if (getInput<double>("face_x", face_x) && getInput<double>("face_y", face_y)) {
+        return std::atan2(face_y - target_pos_.y, face_x - target_pos_.x);
+    }
+
     double op_x, op_y;
     auto blackboard = config().blackboard;
-
-    // Se a posição do gol adversário estiver no blackboard, faz o robô olhar para lá.
-    //
-    // NÃO trocar isto por "olhar pra bola": já foi tentado (porta face_ball, revertida). Perto
-    // do ponto de captura (~115mm da bola) essa conta é geometricamente instável — pequeno
-    // ruído na posição da bola vira oscilação grande de ângulo (sensibilidade do bearing ~
-    // 1/distância), e o robô ficava girando e de costas pra bola em vez de convergir. Olhar pro
-    // gol (~2-4m) é estável porque o mesmo ruído dá variação de ângulo desprezível.
     if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
-        target_w_ = std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
-    } else {
-        target_w_ = 0.0;
+        return std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
     }
+    return 0.0;
+}
+
+// Publica a mensagem de RobotGoal com a posição e orientação desejadas
+void GoToPointNode::publishGoal() {
+    target_w_ = resolveFaceAngle();
 
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
@@ -301,10 +314,19 @@ BT::NodeStatus GoToPointNode::onRunning() {
             clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
         }
         
-        // Se houver uma mudança significativa (> 2mm), publica um novo objetivo
-        if (std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0) {
+        // Se houver uma mudança significativa de posição (> 2mm), publica um novo objetivo. Além
+        // disso, se o alvo de orientação (face_x/face_y, ex: "{ball_x}/{ball_y}") se moveu o
+        // bastante sozinho mesmo com a posição-alvo parada, recalcula/republica também — senão
+        // target_w_ (usado no ori_ok abaixo) ficaria parado na última vez que a posição mudou,
+        // mesmo perseguindo um alvo de orientação que continua se movendo tick a tick.
+        bool position_changed = std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0;
+        if (position_changed) {
             target_pos_.x = clamped_x;
             target_pos_.y = clamped_y;
+        }
+        double candidate_w = resolveFaceAngle();
+        bool orientation_changed = std::abs(normalizeAngle(candidate_w - target_w_)) > 0.02; // ~1.1 grau
+        if (position_changed || orientation_changed) {
             publishGoal();
         }
     }

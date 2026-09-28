@@ -28,6 +28,7 @@ public:
 
 private:
   void publishGoal();
+  double resolveFaceAngle();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
   void geometryDataCallback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
   void publishMarkers();
