@@ -62,25 +62,15 @@ BT::PortsList GoToPointNode::providedPorts() {
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
                  "\"straight_line\" (linha reta, ignora a grade de obstáculos)"),
              BT::InputPort<double>("ball_contact_threshold_mm", -1.0,
-                 "Se > 0, o nó falha (FAILURE) caso a bola AO VIVO chegue mais perto do robô do "
-                 "que esse valor antes de \"chegar\" ao alvo. Use só em GoToPoints longe da bola "
-                 "de propósito (ex: Fase 1, indo pro ponto de pré-chute): um contato ali é sempre "
-                 "acidental (bola se moveu, ruído), então a falha derruba a Sequence e força o "
-                 "ReactiveFallback a recalcular tudo do zero na posição atual da bola, em vez de "
-                 "continuar empurrando-a pelo caminho antigo. NÃO usar em GoToPoints que terminam "
-                 "perto da bola de propósito (ex: Fase 2, ponto de captura) — nesse caso, chegar "
-                 "perto é o objetivo, não um acidente. Default -1.0 = desabilitado (nenhum "
-                 "comportamento novo para quem já usa este nó sem setar essa porta)."),
+                 "Se > 0, o nó falha caso a bola AO VIVO chegue mais perto do robô do que esse "
+                 "valor antes de \"chegar\" ao alvo — força recalcular tudo do zero. Use só em "
+                 "GoToPoints longe da bola de propósito (ex: Fase 1); NÃO em GoToPoints que "
+                 "terminam perto dela de propósito (ex: Fase 2). Default -1.0 = desabilitado."),
              BT::InputPort<bool>("ball_side_check", false,
-                 "Se true, o nó falha (FAILURE) caso o robô esteja do lado ERRADO da bola — mesmo "
-                 "lado que o gol adversário (\"na frente\" da bola) em vez de atrás dela — enquanto "
-                 "estiver perto o bastante pra isso importar. Usa opponent_goal_x/y do blackboard. "
-                 "Pensado pra Fase 1 (ponto de pré-chute via D*): o D* só evita colidir com a bola, "
-                 "não garante de qual lado ele contorna — se contornar pelo lado errado, o robô "
-                 "pode \"chegar\" no ponto de pré-chute fisicamente correto mas por trás de si "
-                 "mesmo, ficando entre a bola e o gol. Mesmo mecanismo do ball_contact_threshold_mm "
-                 "(falha força recalcular tudo do zero). NÃO usar em GoToPoints que terminam do "
-                 "lado do gol de propósito. Default false = desabilitado.") };
+                 "Se true, o nó falha caso o robô esteja do lado ERRADO da bola (mesmo lado que o "
+                 "gol adversário, \"na frente\" dela) — força recalcular tudo do zero. Só faz "
+                 "sentido em alvos com um lado correto bem definido (ex: ponto de pré-chute, atrás "
+                 "da bola). Default false = desabilitado.") };
 }
 
 uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
@@ -107,14 +97,8 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
 }
 
 // Resolve para onde o robô deve olhar ao chegar: usa face_x/face_y se a chamada (no XML) tiver
-// passado os dois; senão cai no padrão de sempre olhar para o gol adversário (comportamento
-// antigo, preservado). face_x/face_y aceitam remapeamento de blackboard (ex: "{ball_x}"), então
-// "olhar para a bola" ou "olhar para um companheiro" não exige nenhuma lógica nova aqui — quem
-// decide o alvo é quem chama o nó no XML, não este código. Perto da bola (~115mm), mirar nela é
-// geometricamente instável se ficar tentando "chegar" com tolerância de orientação apertada
-// antes de poder chutar — por isso quem usa face_x/face_y="{ball_x}/{ball_y}" na Fase 2 usa
-// tolerance="0.0" (nunca "chega" formalmente) e deixa o IsBallClose, não este nó, decidir quando
-// o alinhamento já está bom o suficiente pra chutar.
+// passado os dois; senão olha para o gol adversário. face_x/face_y aceitam remapeamento de
+// blackboard (ex: "{ball_x}").
 double GoToPointNode::resolveFaceAngle() {
     double face_x, face_y;
     if (getInput<double>("face_x", face_x) && getInput<double>("face_y", face_y)) {
@@ -142,9 +126,8 @@ void GoToPointNode::publishGoal() {
     getInput<std::string>("planner", planner);
     goal_msg->planner_type = plannerFromString(planner);
 
-    // Ver comentário em RobotGoal.msg: tolerance<=0 é o contrato de "este GoToPoint nunca retorna
-    // SUCCESS formalmente" (ex: pontos de carga deliberadamente além da bola) — nesse caso,
-    // movement_calculation.cpp nunca deve travar o robô por proximidade geométrica do alvo.
+    // tolerance<=0 = "nunca retorna SUCCESS" — nesse caso movement_calculation.cpp não trava o
+    // robô por proximidade do alvo (ver RobotGoal.msg).
     double tolerance = -1.0;
     getInput<double>("tolerance", tolerance);
     goal_msg->disable_arrival_latch = (tolerance <= 0.0);
@@ -332,11 +315,8 @@ BT::NodeStatus GoToPointNode::onRunning() {
             clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
         }
         
-        // Se houver uma mudança significativa de posição (> 2mm), publica um novo objetivo. Além
-        // disso, se o alvo de orientação (face_x/face_y, ex: "{ball_x}/{ball_y}") se moveu o
-        // bastante sozinho mesmo com a posição-alvo parada, recalcula/republica também — senão
-        // target_w_ (usado no ori_ok abaixo) ficaria parado na última vez que a posição mudou,
-        // mesmo perseguindo um alvo de orientação que continua se movendo tick a tick.
+        // Republica o objetivo se a posição mudou o bastante (>2mm) ou se o alvo de orientação
+        // (face_x/face_y) mudou sozinho mesmo com a posição parada.
         bool position_changed = std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0;
         if (position_changed) {
             target_pos_.x = clamped_x;
@@ -353,22 +333,14 @@ BT::NodeStatus GoToPointNode::onRunning() {
     auto robot = getRobotData(robot_id_);
     if (!robot) return BT::NodeStatus::RUNNING;
 
-    // Gatilho de contato indevido com a bola (ver comentário da porta em providedPorts()): só
-    // ativo se ball_contact_threshold_mm > 0 for explicitamente passado (ex: Fase 1 em
-    // master_strategy.xml). Falhar aqui, em vez de tentar corrigir a velocidade no controlador,
-    // devolve a decisão pra árvore: a Sequence falha, o ReactiveFallback tenta de novo no próximo
-    // tick com CalculateInterceptionNode já tendo recalculado os pontos a partir da posição REAL
-    // e atual da bola — um replanejamento completo, não um ajuste de velocidade brigando com o
-    // GoToPoint por cima (foi tentado como repulsão de velocidade direto no controlador e
-    // resultou em oscilação: a bola no meio do caminho não empurra mais, mas o robô fica preso
-    // "indo e voltando" na borda do raio de contato, sem nunca de fato progredir).
+    // Gatilho de contato indevido com a bola (ver providedPorts()): falhar aqui devolve a decisão
+    // pra árvore — a Sequence falha e o ReactiveFallback recalcula tudo do zero na posição real e
+    // atual da bola, em vez de continuar empurrando pelo caminho antigo.
     double ball_contact_threshold = -1.0;
     getInput<double>("ball_contact_threshold_mm", ball_contact_threshold);
     if (ball_contact_threshold > 0.0 && last_game_data_) {
         double ball_dist = std::hypot(robot->x - last_game_data_->ball.x, robot->y - last_game_data_->ball.y);
-        // Debounce: exige contato sustentado (150ms) antes de abortar, não um único frame de
-        // ruído de visão/predição. Sem isso, um blip passageiro de posição da bola já derrubaria
-        // a Sequence inteira à toa.
+        // Debounce: exige contato sustentado (150ms), não um blip de ruído de visão/predição.
         constexpr double kSustainedContactSec = 0.15;
         if (ball_dist < ball_contact_threshold) {
             if (!ball_contact_since_.has_value()) {
@@ -385,22 +357,16 @@ BT::NodeStatus GoToPointNode::onRunning() {
         }
     }
 
-    // Gatilho de lado errado da bola (ver comentário da porta): só ativo se ball_side_check=true.
-    // ball_contact_threshold_mm cobre CONTATO (distância), mas o D* pode "chegar" ao ponto de
-    // pré-chute sem nunca chegar perto o bastante da bola pra disparar aquele gatilho, mesmo
-    // tendo contornado pelo lado errado — resultado: robô fisicamente no ponto certo, mas do lado
-    // ERRADO da bola (entre ela e o gol, em vez de atrás). Confirmado em teste: robô "se
-    // posicionando na frente da bola algumas vezes" durante a Fase 1. Mesma lógica de
-    // "dot product" já usada em CalculateInterceptionNode::computeKickReadiness pra decidir se o
-    // robô está do lado certo — aqui aplicada de forma contínua, não só na checagem final de
-    // pronto-pra-chutar.
+    // Gatilho de lado errado da bola (ver providedPorts()): mesma lógica de dot product usada em
+    // CalculateInterceptionNode::computeKickReadiness, aplicada continuamente em vez de só na
+    // checagem final de pronto-pra-chutar.
     bool ball_side_check = false;
     getInput<bool>("ball_side_check", ball_side_check);
     if (ball_side_check && last_game_data_) {
         double bx = last_game_data_->ball.x;
         double by = last_game_data_->ball.y;
         double ball_dist = std::hypot(robot->x - bx, robot->y - by);
-        // Só importa perto da bola: longe, o D* ainda está em trânsito e pode cruzar
+        // Só importa perto da bola: longe, o robô ainda está em trânsito e pode cruzar
         // momentaneamente o eixo bola-gol sem que isso signifique nada de errado.
         constexpr double kSideCheckRangeMm = 600.0;
         auto blackboard = config().blackboard;

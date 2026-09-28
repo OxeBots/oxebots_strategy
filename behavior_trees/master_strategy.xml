@@ -1,8 +1,8 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
-  
+
   <BehaviorTree ID="MainTree">
     <ReactiveFallback name="MasterStrategy">
-      
+
       <!-- 1. BOTÃO DE PARAR (STOP - Comando 1) -->
       <Sequence name="StopBranch">
         <CheckGCCommand expected="1"/>
@@ -18,26 +18,17 @@
       <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
-        <!-- RetryUntilSuccessful, NÃO Repeat: Repeat para de repetir e devolve FAILURE assim que
-             o filho falha uma vez (não tenta de nova sozinho) — isso cascateava a falha de
-             qualquer etapa de ChaseAndKick (timeout de alinhamento, timeout de proximidade, ou o
-             gatilho de contato indevido com a bola) pra fora do AttackerRole inteiro, caindo no
-             Halt/"sem papel" no fim do MasterStrategy. Como o Halt zera a velocidade, o robô ficava
-             fisicamente parado exatamente na mesma posição/distância da bola que causou a falha, e
-             a próxima tentativa (só no próximo tick de MasterStrategy) falhava de novo pelo mesmo
-             motivo — um loop infinito preso na mesma distância constante (confirmado no log).
-             RetryUntilSuccessful tenta de novo IMEDIATAMENTE no próximo tick após uma falha, sem
-             nunca sair do AttackerRole, o que de fato recalcula a rota do zero (CalculateInterception
-             roda de novo logo acima) em vez de cair num Halt que trava o robô no lugar. -->
+        <!-- RetryUntilSuccessful, não Repeat: uma falha em qualquer etapa de ChaseAndKick deve
+             recalcular a rota do zero (CalculateInterception roda de novo logo abaixo) no
+             próximo tick, não cair num Halt que trava o robô no lugar. -->
         <RetryUntilSuccessful num_attempts="-1">
           <ReactiveSequence name="AttackerLogicLoop">
-            <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
             <UpdateBallPosition robot_id="{robot_id}"
-                                ball_x="{ball_x}" ball_y="{ball_y}" 
-                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                ball_x="{ball_x}" ball_y="{ball_y}"
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}"
                                 is_ready_to_kick="{is_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-            
+
             <CalculateInterception robot_id="{robot_id}"
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
@@ -47,60 +38,25 @@
                                    is_ready_to_kick="{is_ready_pred}" />
 
             <ReactiveFallback name="AttackLogicActions">
-              <!-- ATAQUE em DUAS FASES. O robô não tem dribbler (físico nem simulado): qualquer
-                   desalinhamento no contato final vira "empurrar a bola de lado" em vez de um
-                   chute limpo, então é essencial chegar já alinhado ANTES de se aproximar. -->
+              <!-- Ataque em duas fases: sem dribbler, precisa chegar já alinhado antes de se
+                   aproximar, senão o contato vira "empurrar de lado" em vez de um chute limpo. -->
               <Sequence name="ChaseAndKick">
-                <!-- Fase 1: vai até o ponto de pré-chute (int_pk_x/y, ~400mm atrás da bola, na
-                     linha bola-gol), ainda longe da bola de verdade. Usa D* (padrão) para
-                     contornar a bola como obstáculo em vez de cruzar por cima dela a caminho
-                     desse ponto. tolerance maior (120mm) porque aqui só precisamos estar
-                     posicionados e alinhados, não colados na bola.
-
-                     ball_contact_threshold_mm=150.0: casa com o raio de segurança da bola no D*
-                     (ball_safety_radius_m_, d_star_planner.cpp). Mesmo com esse raio, o robô ainda
-                     conseguia encostar de verdade na bola durante a Fase 1 (raspando a 60-100mm
-                     por vários segundos — confirmado em log de teste), porque nada reagia depois
-                     que o contato já tinha acontecido: o GoToPoint continuava mandando seguir o
-                     path antigo. Esse limite faz o próprio GoToPoint falhar se isso acontecer,
-                     derrubando a Sequence inteira — o ReactiveFallback tenta de novo no tick
-                     seguinte com CalculateInterceptionNode recalculando os pontos a partir da
-                     posição real e atual da bola, e o D* replanejando do zero. NÃO usar esse
-                     limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo.
-
-                     x/y usam intercept_pk_safe (não intercept_pk direto): o D* só evita colidir
-                     com a bola como obstáculo, sem noção de "por qual lado contornar" — se o
-                     caminho mais curto até o pré-chute real passa perto da bola pela frente, o D*
-                     vai por ali, deixando o robô do lado errado (confirmado em teste: reposicionar
-                     a bola perto/atrás do robô faz ele ir pra frente dela repetidamente). Quando o
-                     robô está do lado errado agora, intercept_pk_safe_x/y aponta pra um waypoint
-                     de contorno lateral em vez do pré-chute direto (ver
-                     calculate_interception_node.cpp); assim que ele está seguramente do lado
-                     certo, volta a ser exatamente intercept_pk_x/y no próximo tick. -->
+                <!-- Fase 1: vai até o ponto de pré-chute (~400mm atrás da bola, linha bola-gol),
+                     via D*. x/y usam intercept_pk_safe, não intercept_pk direto: quando o robô
+                     está do lado errado da bola, aponta pra um waypoint de contorno lateral em
+                     vez do pré-chute direto, porque o D* sozinho só desvia da bola como
+                     obstáculo, sem noção de lado (ver calculate_interception_node.cpp).
+                     ball_contact_threshold_mm força replanejamento completo se o robô encostar
+                     na bola sem querer. -->
                 <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
                            ball_contact_threshold_mm="150.0" />
 
-                <!-- Fase 2: laço único de aproximação+chute, substituindo a cadeia antiga
-                     (GoToPoint(capture) → Timeout+AlignToBall → Timeout+IsBallClose), que
-                     empilhava até 3 handshakes sequenciais (cada um exigindo "terminar" antes do
-                     próximo começar, com até 1.5s de Timeout cada) entre "chegar perto" e
-                     "chutar". Inspirado no padrão usado com sucesso na branch
-                     technical-challenge-and-game-controller (desafio2.xml/desafio3.xml) para bola
-                     parada: em vez de fases seriais, testa a CADA tick se já pode chutar; se não
-                     pode, continua perseguindo o ponto de captura já mirando na bola real via
-                     face_x/face_y (porta nova em GoToPoint — ver go_to_point_node.cpp). O
-                     alinhamento não é mais uma etapa separada com timeout próprio: é resolvido de
-                     graça pelo GoToPoint enquanto ele avança, e o IsBallClose (ângulo+distância,
-                     sempre contra a bola AO VIVO) é quem decide o instante exato de chutar.
-
-                     tolerance="0.0" no GoToPoint: nunca retorna SUCCESS de propósito — ele só
-                     serve pra manter o robô perseguindo/mirando continuamente; quem encerra o
-                     ReactiveFallback é o IsBallClose+KickBall do outro ramo, assim que as
-                     condições baterem. Sem Timeout/FAILURE forçando reinício da Fase 1: como
-                     int_cap_x/y e ball_x/y são recalculados a cada tick (CalculateInterception e
-                     UpdateBallPosition, acima no loop), o alvo já se corrige sozinho se a bola se
-                     mover — não precisa mais de um "replanejamento forçado" via falha proposital
-                     pra isso. -->
+                <!-- Fase 2: laço único de aproximação+chute — testa a cada tick se já pode
+                     chutar; se não, continua perseguindo o ponto de captura mirando na bola real
+                     via face_x/face_y. tolerance="0.0": nunca retorna SUCCESS de propósito, só
+                     mantém o robô perseguindo/mirando; quem encerra é o IsBallClose+KickBall do
+                     outro ramo. int_cap_x/y e ball_x/y são recalculados a cada tick, então o alvo
+                     já se corrige sozinho se a bola se mover. -->
                 <RetryUntilSuccessful num_attempts="-1">
                   <ReactiveFallback name="ApproachAndKick">
                     <Sequence>
@@ -113,17 +69,8 @@
                   </ReactiveFallback>
                 </RetryUntilSuccessful>
 
-                <!-- Recuo pós-chute: sem isso, assim que KickBall sucede a Sequence inteira
-                     retorna SUCCESS, RetryUntilSuccessful vê sucesso e não reinicia sozinho, mas o
-                     ReactiveFallback do MasterStrategy retickando por fora entra de novo direto na
-                     Fase 1 no PRÓXIMO tick (dezenas de ms depois), mirando a bola que — se o chute
-                     foi fraco ou o robô ainda está encostado nela — ainda está a poucos
-                     centímetros. O CalculateInterception recalcula um ponto de pré-chute quase em
-                     cima do robô, e a Fase 1/2 "recaptura" e empurra a bola de novo em vez de
-                     deixar ela rolar livre — percebido como "carregar a bola" logo depois de
-                     chutar. Este delay dá ~600ms pra bola sair da zona de recaptura (kick_speed
-                     mínimo efetivo de ~1.5 m/s já cobre bem mais que a distância de captura de
-                     115mm nesse tempo) antes do loop reiniciar. -->
+                <!-- Recuo pós-chute: sem isso, o loop reinicia imediatamente e recaptura a bola
+                     (ainda perto do robô) em vez de deixá-la rolar livre após o chute. -->
                 <Delay delay_msec="600">
                   <AlwaysSuccess/>
                 </Delay>

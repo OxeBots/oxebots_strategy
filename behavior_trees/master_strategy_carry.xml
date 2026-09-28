@@ -1,9 +1,7 @@
 <root main_tree_to_execute="MainTreeCarry" BTCPP_format="4">
 
-  <!-- Extensão de master_strategy.xml (branch attacker-kick-loop-refactor): mesma árvore, com uma
-       única mudança na Fase 2 do ataque — carregar a bola até pelo menos o meio-campo antes de
-       chutar, em vez de chutar assim que estiver perto/alinhado. Ver o comentário em
-       "ApproachAndKick" abaixo pra o motivo de não precisar de nenhuma fase nova pra isso. -->
+  <!-- Extensão de master_strategy.xml: mesma árvore, mas a Fase 2 do ataque carrega a bola até
+       o meio-campo antes de chutar, em vez de chutar assim que estiver perto/alinhado. -->
   <BehaviorTree ID="MainTreeCarry">
     <ReactiveFallback name="MasterStrategy">
 
@@ -22,30 +20,17 @@
       <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
-        <!-- RetryUntilSuccessful, NÃO Repeat: Repeat para de repetir e devolve FAILURE assim que
-             o filho falha uma vez (não tenta de nova sozinho) — isso cascateava a falha de
-             qualquer etapa de ChaseAndKick (timeout de alinhamento, timeout de proximidade, ou o
-             gatilho de contato indevido com a bola) pra fora do AttackerRole inteiro, caindo no
-             Halt/"sem papel" no fim do MasterStrategy. Como o Halt zera a velocidade, o robô ficava
-             fisicamente parado exatamente na mesma posição/distância da bola que causou a falha, e
-             a próxima tentativa (só no próximo tick de MasterStrategy) falhava de novo pelo mesmo
-             motivo — um loop infinito preso na mesma distância constante (confirmado no log).
-             RetryUntilSuccessful tenta de novo IMEDIATAMENTE no próximo tick após uma falha, sem
-             nunca sair do AttackerRole, o que de fato recalcula a rota do zero (CalculateInterception
-             roda de novo logo acima) em vez de cair num Halt que trava o robô no lugar. -->
+        <!-- RetryUntilSuccessful, não Repeat: uma falha em qualquer etapa de ChaseAndKick deve
+             recalcular a rota do zero (CalculateInterception roda de novo logo abaixo) no
+             próximo tick, não cair num Halt que trava o robô no lugar. -->
         <RetryUntilSuccessful num_attempts="-1">
           <ReactiveSequence name="AttackerLogicLoop">
-            <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
             <UpdateBallPosition robot_id="{robot_id}"
                                 ball_x="{ball_x}" ball_y="{ball_y}"
                                 pre_kick_x="{pkx}" pre_kick_y="{pky}"
                                 is_ready_to_kick="{is_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
 
-            <!-- carry_distance_mm/carry_face_lookahead_mm: opcionais (porta com default em
-                 calculate_interception_node.h/cpp). Passados aqui explicitamente só pra deixar
-                 visível qual agressividade de carga esta árvore usa — outra árvore pode escolher
-                 valores diferentes (ou nenhum, caindo no default) sem tocar em C++. -->
             <CalculateInterception robot_id="{robot_id}"
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
@@ -58,192 +43,53 @@
                                    is_ready_to_kick="{is_ready_pred}" />
 
             <ReactiveFallback name="AttackLogicActions">
-              <!-- ATAQUE em DUAS FASES. O robô não tem dribbler (físico nem simulado): qualquer
-                   desalinhamento no contato final vira "empurrar a bola de lado" em vez de um
-                   chute limpo, então é essencial chegar já alinhado ANTES de se aproximar. -->
+              <!-- Ataque em duas fases: sem dribbler, precisa chegar já alinhado antes de se
+                   aproximar, senão o contato vira "empurrar de lado" em vez de um chute limpo. -->
               <Sequence name="ChaseAndKick">
-                <!-- Fase 1: vai até o ponto de pré-chute (int_pk_x/y, ~400mm atrás da bola, na
-                     linha bola-gol), ainda longe da bola de verdade. Usa D* (padrão) para
-                     contornar a bola como obstáculo em vez de cruzar por cima dela a caminho
-                     desse ponto. tolerance maior (120mm) porque aqui só precisamos estar
-                     posicionados e alinhados, não colados na bola.
-
-                     ball_contact_threshold_mm=150.0: casa com o raio de segurança da bola no D*
-                     (ball_safety_radius_m_, d_star_planner.cpp). Mesmo com esse raio, o robô ainda
-                     conseguia encostar de verdade na bola durante a Fase 1 (raspando a 60-100mm
-                     por vários segundos — confirmado em log de teste), porque nada reagia depois
-                     que o contato já tinha acontecido: o GoToPoint continuava mandando seguir o
-                     path antigo. Esse limite faz o próprio GoToPoint falhar se isso acontecer,
-                     derrubando a Sequence inteira — o ReactiveFallback tenta de novo no tick
-                     seguinte com CalculateInterceptionNode recalculando os pontos a partir da
-                     posição real e atual da bola, e o D* replanejando do zero. NÃO usar esse
-                     limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo.
-
-                     ball_side_check="true": ball_contact_threshold_mm só cobre CONTATO
-                     (distância) — o D* pode "chegar" fisicamente ao ponto de pré-chute sem nunca
-                     ficar perto o bastante da bola pra disparar aquele gatilho, mesmo tendo
-                     contornado pelo lado ERRADO dela (confirmado em teste: robô se posicionando
-                     na frente da bola, entre ela e o gol, em vez de atrás — o D* só garante
-                     desviar da bola como obstáculo, não de que lado passar). Esse check é
-                     geométrico (mesmo raciocínio de dot-product do kick-readiness), não de
-                     distância — falha e força replanejamento assim que o robô estiver do lado
-                     errado perto o bastante da bola pra importar. -->
-                <!-- x/y usam intercept_pk_safe (não intercept_pk direto): ver comentário grande em
-                     calculate_interception_node.cpp/computeSafePreKick — quando o robô já está do
-                     lado errado da bola, intercept_pk_safe_x/y aponta pra um waypoint de contorno
-                     lateral em vez do pré-chute direto, forçando o D* a rodear em vez de arriscar
-                     um atalho pela frente da bola (que o D*, sozinho, não sabe evitar — ele só
-                     desvia da bola como obstáculo, sem noção de lado). Assim que o robô estiver
-                     seguramente do lado certo (com histerese, ver kSafelyBehindMarginMm no .cpp),
-                     intercept_pk_safe_x/y volta a ser exatamente intercept_pk_x/y no tick
-                     seguinte — CalculateInterception roda a cada tick, então na prática o alvo já
-                     volta a ser o pré-chute real bem antes do robô fisicamente chegar perto do
-                     waypoint (só ~120mm de tolerância). -->
+                <!-- Fase 1: vai até o ponto de pré-chute (~400mm atrás da bola, linha bola-gol),
+                     via D*. x/y usam intercept_pk_safe, não intercept_pk direto: quando o robô
+                     está do lado errado da bola, aponta pra um waypoint de contorno lateral em
+                     vez do pré-chute direto, porque o D* sozinho só desvia da bola como
+                     obstáculo, sem noção de lado (ver calculate_interception_node.cpp).
+                     ball_contact_threshold_mm força replanejamento se o robô encostar na bola sem
+                     querer. SEM ball_side_check aqui: intercept_pk_safe já corrige o lado a cada
+                     tick de forma contínua — ball_side_check (reativo, aborta e reinicia)
+                     brigava com essa correção, derrubando a Fase 1 antes dela ter tempo de mover
+                     o robô até o waypoint de contorno (confirmado em log: falha a cada ~180ms,
+                     robô sem sair do lugar). -->
                 <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
-                           ball_contact_threshold_mm="150.0" ball_side_check="true" />
+                           ball_contact_threshold_mm="150.0" />
 
-                <!-- Fase 2: três ramos, testados em ordem a cada tick (ReactiveFallback).
-                     v1 desta árvore mirava direto em ball_x/ball_y (centro da bola) pra não travar
-                     no freio de chegada de movement_calculation.cpp (kArrivedDistanceMm=10mm: zera
-                     velocidade linear incondicionalmente a 10mm do alvo publicado — int_cap_x/y é
-                     bem ali, então travava parado sem empurrar). Só que mirar no centro da bola
-                     joga fora a correção de linha que int_cap_x/y dava: sem nenhum alvo "além da
-                     bola, na linha bola→gol", o robô empurra pra onde a bola estiver na hora, sem
-                     corrigir desvio lateral — carga sem critério, bola torta pro chute depois.
+                <!-- Fase 2: empurra continuamente via int_carry_x/y — um ponto além da bola (do
+                     lado do gol) na linha bola→gol, recalculado a cada tick, que sustenta
+                     velocidade de empurrão via controle proporcional (kCarryDistanceMm em
+                     calculate_interception_node.h). face_x/y usa int_carry_face_x/y (ponto à
+                     frente da bola na mesma linha) em vez da bola ou do gol direto, pra não ter
+                     zigue-zague nem instabilidade de bearing. Serve tanto pra carregar (bola no
+                     nosso campo) quanto pra realinhar antes do chute (já no campo adversário): é
+                     o mesmo alvo nos dois casos, então um único GoToPoint cobre ambos — não há
+                     mais IsBallInOurHalf separando os dois em ramos diferentes, propositalmente:
+                     duas instâncias de GoToPoint miram no mesmo ponto com ball_side_check cada
+                     uma tendo seu próprio debounce, e o ReactiveFallback ficava revezando entre
+                     elas (uma falha, a outra assume do zero antes de completar seu debounce, e
+                     vice-versa) sem NUNCA propagar FAILURE pra fora — mascarando o lado errado
+                     indefinidamente em vez de forçar a Fase 1 a corrigir (confirmado em log:
+                     warning de lado errado toda hora, mas nenhum replanejamento da Fase 1
+                     acontecia depois). Com uma instância só, uma falha é sempre uma falha de
+                     verdade, propaga pra fora de ChaseAndKick e cai no RetryUntilSuccessful
+                     externo, que reinicia pela Fase 1 (D*) — só ali o robô é reposicionado. -->
+                <ReactiveFallback name="ApproachAndKick">
+                  <Sequence name="Shoot">
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                    <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+                  </Sequence>
+                  <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                             face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                             tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                </ReactiveFallback>
 
-                     Correção: intercept_carry_x/y (novo, calculate_interception_node.cpp) é
-                     calculado EXATAMENTE como intercept_capture_x/y — na linha bola→gol,
-                     recalculado a cada tick a partir da bola atual — só que mais além dela
-                     (kCarryDistanceMm=250mm vs kCaptureDistanceMm=115mm). Mais longe o bastante
-                     pra nunca cruzar o freio de 10mm (fica sempre >100mm de distância real,
-                     travado pelo contato físico com a bola), o que também dá mais velocidade
-                     (speed = min(max_lin, dist/1000*p_gain_linear) cresce com a distância) — e
-                     ainda na mesma linha corrigida pro gol, então desvio lateral da bola já é
-                     compensado no tick seguinte, como o int_cap_x/y sempre fez.
-
-                     Ramo 1 (carrega): só ativo enquanto IsBallInOurHalf for verdadeiro. Empurra
-                     via int_carry_x/y.
-                     Ramo 2 (chuta): já no campo adversário e perto/alinhado — chuta.
-                     Ramo 3 (reaproxima): já no campo adversário mas ainda não perto/alinhado —
-                     volta a usar int_cap_x/y (o mesmo alvo de precisão do master_strategy.xml
-                     original), pra realinhar rente à bola antes do chute. É esse terceiro ramo que
-                     resolve o "não corrige depois de passar o meio-campo": a carga com
-                     int_carry_x/y é deliberadamente mais larga/menos precisa (é pra empurrar
-                     rápido, não pra terminar alinhada); cruzando o meio-campo, troca pro alvo
-                     apertado de novo antes de liberar o chute. -->
-                <!-- "Carry" é ReactiveSequence, NÃO Sequence: uma Sequence comum só tica
-                     IsBallInOurHalf UMA vez (enquanto o GoToPoint continua RUNNING, ela lembra o
-                     índice do filho atual e não retica os anteriores) — ou seja, depois que a
-                     carga começasse, o cruzamento do meio-campo nunca mais seria checado, e o
-                     robô ficaria empurrando pra sempre mesmo já no campo adversário (era essa a
-                     causa do "não corrige depois de passar o meio-campo"). ReactiveSequence retica
-                     TODOS os filhos, incluindo os já bem-sucedidos, a cada tick — então
-                     IsBallInOurHalf é reavaliado sempre, e assim que falhar (bola já do outro
-                     lado), a Sequence falha, o GoToPoint é halted pelo framework, e o
-                     ReactiveFallback cai pros ramos de baixo (Shoot ou reaproxima). -->
-                <!-- SEM RetryUntilSuccessful envolvendo este ReactiveFallback (havia um aqui antes):
-                     ele engolia QUALQUER falha da Fase 2 localmente, tentando de novo pra sempre
-                     só dentro da Fase 2 — inclusive falha de ball_side_check. Só que a Fase 2 é
-                     straight_line (sem desvio de obstáculo nenhum): se o robô já está do lado
-                     ERRADO da bola, replanejar só a Fase 2 de novo produz o MESMO alvo
-                     (int_carry_x/y, calculado só a partir de bola+gol, sem depender de que lado o
-                     robô está) — que, visto do lado errado, fica trivialmente alcançável (o robô já
-                     está quase lá), disparando de novo o freio de chegada de 10mm
-                     (kArrivedDistanceMm em movement_calculation.cpp) que zera velocidade linear E
-                     angular e larga a rotação — o mesmo travamento "parado na frente da bola" que
-                     ball_side_check deveria resolver, só que agora sem saída, porque a falha nunca
-                     saía da Fase 2 pra forçar nova aproximação. Confirmado em log: ball_side_check
-                     disparando repetidamente, check_dist oscilando 8-11mm, posição do robô
-                     congelada, sem nunca corrigir.
-                     Sem esse RetryUntilSuccessful, uma falha aqui (de qualquer ramo) propaga pra
-                     fora da Sequence "ChaseAndKick" inteira (Fase 1 já tinha sucedido, mas a falha
-                     agora derruba a Sequence mesmo assim) e cai no RetryUntilSuccessful EXTERNO (em
-                     volta de AttackerLogicLoop, linha ~36) — que tenta de novo imediatamente no
-                     próximo tick, mas dessa vez recomeçando pela FASE 1 (D*, que de fato contorna a
-                     bola pelo lado certo), reposicionando o robô de verdade antes de voltar pra
-                     Fase 2. -->
-                  <ReactiveFallback name="ApproachAndKick">
-                    <!-- face_x/face_y: v1 mirava na bola (instável perto, giros). v2 mirava no gol
-                         fixo (2-4m de distância) — melhorou a instabilidade, mas causou zigue-zague:
-                         intercept_carry_x/y (alvo de posição) é ancorado na bola ATUAL, recalculado
-                         a cada tick; o gol é um ponto FIXO, independente da bola. Qualquer desvio
-                         lateral da bola muda o ângulo bola→gol, e como só o alvo de posição
-                         acompanhava esse desvio (o de orientação continuava mirando o mesmo ponto
-                         fixo longe), a correção de ângulo não seguia a mesma linha local — virava
-                         sobrecorreção.
-
-                         v3 (esta): intercept_carry_face_x/y, um ponto um pouco À FRENTE da bola
-                         (kCarryFaceLookaheadMm=400mm, do lado do GOL), na MESMA linha bola→gol que
-                         intercept_carry_x/y já usa do outro lado — recalculado a cada tick a partir
-                         da bola atual, então acompanha a linha reta local de verdade (resolve o
-                         zigue-zague), mas está longe o suficiente da bola pra não ter a
-                         instabilidade de bearing de mirar na bola em si (resolve o giro). -->
-                    <!-- ball_side_check="true" de volta aqui (tinha sido removido numa rodada
-                         anterior por uma hipótese que não se confirmou — ver abaixo). O alvo do
-                         Carry (int_carry_x/y) fica DE PROPÓSITO além da bola, do lado do GOL
-                         (kCarryDistanceMm=-120), mas isso não é o mesmo que "o robô deveria ficar
-                         do lado do gol": durante um empurrão correto, o CENTRO do robô continua do
-                         lado de TRÁS da bola (~115mm, kCaptureDistanceMm, a distância física de
-                         contato) — só o alvo publicado é que fica mais além, pra sustentar
-                         velocidade via controle proporcional (ver comentário em
-                         calculate_interception_node.h). ball_side_check testa a posição REAL do
-                         robô, não o alvo, então empurrão legítimo não deveria disparar o teste.
-                         A remoção anterior partiu da hipótese de que empurrão legítimo cruzava o
-                         limiar (falso positivo) — não verificada contra a geometria; o sintoma
-                         observado (robô preso "na frente da bola") era, com mais evidência depois,
-                         o robô genuinamente do lado errado (causado por imprecisão de rota da Fase
-                         1, hoje mitigada por intercept_pk_safe_x/y) sem nenhuma rede de segurança
-                         na Fase 2 pra detectar e corrigir. Com o freio de chegada desabilitado para
-                         tolerance<=0 (RobotGoal::disable_arrival_latch) e o RetryUntilSuccessful
-                         interno da Fase 2 já removido (falha propaga até a Fase 1 de verdade),
-                         reativar este check não deve mais causar loop/travamento — na pior
-                         hipótese, gera replanejamento extra. -->
-                    <ReactiveSequence name="Carry">
-                      <IsBallInOurHalf ball_x="{ball_x}" />
-                      <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
-                                 face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                                 tolerance="0.0" planner="straight_line" ball_side_check="true" />
-                    </ReactiveSequence>
-                    <Sequence name="Shoot">
-                      <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
-                      <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
-                    </Sequence>
-                    <!-- Reaproximação (ramo de precisão antes do chute, já no campo adversário):
-                         mira em int_carry_x/y (NÃO int_cap_x/y). int_cap_x/y fica a ~115mm da
-                         bola — a distância FÍSICA real de contato, ou seja, alcançável de
-                         verdade. Isso reintroduzia o travamento que já resolvemos pro Carry: ao
-                         "chegar" (10mm de kArrivedDistanceMm em movement_calculation.cpp), o
-                         controlador zera velocidade linear E angular e larga a rotação
-                         (target_w_.reset()) — mecanismo pensado pra ceder o controle pra um
-                         AlignToBall logo depois, que não existe mais aqui (removido, substituído
-                         por face_x/face_y embutido no GoToPoint). Sem AlignToBall pra reassumir a
-                         rotação, o robô travava exatamente na orientação que tinha ao "chegar",
-                         mesmo se errada (de costas pra bola) — nada mais corrigia depois disso.
-                         Confirmado em log: offset preso em ~170-180° por dezenas de ticks,
-                         travamento sem nunca resolver, porque a cada retry o alvo recalculado
-                         (bola parada) era o mesmo, e o robô sempre "chegava" e travava de novo.
-                         int_carry_x/y é inalcançável de propósito (mesmo raciocínio do Carry) — o
-                         controlador nunca solta a rotação, então o ângulo continua sendo corrigido
-                         até convergir de verdade.
-                         ball_side_check="true" de volta aqui também (mesmo motivo do Carry acima):
-                         testa a posição REAL do robô contra a bola, não o alvo publicado, então
-                         não conflita com int_carry_x/y ficar além da bola de propósito. -->
-                    <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
-                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
-                  </ReactiveFallback>
-
-                <!-- Recuo pós-chute: sem isso, assim que KickBall sucede a Sequence inteira
-                     retorna SUCCESS, RetryUntilSuccessful vê sucesso e não reinicia sozinho, mas o
-                     ReactiveFallback do MasterStrategy retickando por fora entra de novo direto na
-                     Fase 1 no PRÓXIMO tick (dezenas de ms depois), mirando a bola que — se o chute
-                     foi fraco ou o robô ainda está encostado nela — ainda está a poucos
-                     centímetros. O CalculateInterception recalcula um ponto de pré-chute quase em
-                     cima do robô, e a Fase 1/2 "recaptura" e empurra a bola de novo em vez de
-                     deixar ela rolar livre — percebido como "carregar a bola" logo depois de
-                     chutar. Este delay dá ~600ms pra bola sair da zona de recaptura (kick_speed
-                     mínimo efetivo de ~1.5 m/s já cobre bem mais que a distância de captura de
-                     115mm nesse tempo) antes do loop reiniciar. -->
+                <!-- Recuo pós-chute: sem isso, o loop reinicia imediatamente e recaptura a bola
+                     (ainda perto do robô) em vez de deixá-la rolar livre após o chute. -->
                 <Delay delay_msec="600">
                   <AlwaysSuccess/>
                 </Delay>
