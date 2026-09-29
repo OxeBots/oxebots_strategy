@@ -24,7 +24,15 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("max_angular_speed", 4.0);
     this->declare_parameter("p_gain_angular", 3.0);
     this->declare_parameter("angle_tolerance", 0.1);
-    this->declare_parameter("lookahead_distance", 300.0); // mm
+    // --- Distância de Lookahead (Pure Pursuit) ---
+    // Padrão calibrado: 100.0 mm (anteriormente 300.0 mm).
+    // Motivo do ajuste:
+    // - 300.0 mm causava corte excessivo de curvas (~80-100 mm de desvio radial interno),
+    //   podendo colidir com adversários ao contorná-los e reduzindo a fidelidade de rotas.
+    // - 100.0 mm equivale a 2 células do grid do D* (resolução de 50 mm em match_config.yaml),
+    //   filtrando o efeito escada da grade sem oscilar e garantindo contornos limpos.
+    // - Para testes analíticos de bancada/artigos com malha densa, pode ser reduzido até 45 mm via launch.
+    this->declare_parameter("lookahead_distance", 100.0); // mm
 
     std::string robot_prefix = "/robot_" + std::to_string(robot_id_);
     
@@ -136,16 +144,20 @@ void PathFollowerNode::calculate_and_move() {
                 double d = std::hypot(px - current_pos.x, py - current_pos.y);
                 
                 if (d > lookahead_dist) {
-                    target_pt = {px, py, 0.0f};
+                    const auto& q = pose_stamped.pose.orientation;
+                    float qw = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
+                    target_pt = {px, py, qw};
                     target_found = true;
                     break;
                 }
             }
             if (!target_found) {
+                const auto& q = last_path_->poses.back().pose.orientation;
+                float qw = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
                 target_pt = {
                     (float)last_path_->poses.back().pose.position.x * 1000.0f,
                     (float)last_path_->poses.back().pose.position.y * 1000.0f,
-                    0.0f
+                    qw
                 };
                 target_found = true;
             }
@@ -194,12 +206,23 @@ void PathFollowerNode::calculate_and_move() {
     // target_w_ aqui cede a rotação para quem realmente precisa dela nesse momento.
     double angle_err = 0.0;
     bool has_target_w = target_w_.has_value();
+    double desired_w = 0.0;
+    bool should_control_w = false;
+
     if (arrived) {
         cmd_data.angular_velocity = 0.0;
         target_w_.reset();
         has_target_w = false;
     } else if (has_target_w) {
-        angle_err = normalizeAngle(*target_w_ - current_pos.orientation);
+        desired_w = *target_w_;
+        should_control_w = true;
+    } else if (target_found) {
+        desired_w = target_pt.orientation;
+        should_control_w = true;
+    }
+
+    if (should_control_w) {
+        angle_err = normalizeAngle(desired_w - current_pos.orientation);
         if (std::abs(angle_err) < this->get_parameter("angle_tolerance").as_double()) {
             cmd_data.angular_velocity = 0.0;
         } else {
