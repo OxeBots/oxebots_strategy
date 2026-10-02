@@ -1,0 +1,81 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="Desafio1">
+        <Fallback>
+            
+            <!-- ============================================== -->
+            <!-- FASE DE EXECUÇÃO (Normal Free Kick)            -->
+            <!-- ============================================== -->
+            <Sequence>
+                <IsNormalFreeKick/>
+                
+                <Fallback>
+                    
+                    <!-- ROBÔ ID 1 -->
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <!-- Posiciona em (1650, 900) olhando para 90° (Y positivo) -->
+                        <GoToPoint robot_id="1" x="1650" y="900" face_x="1650" face_y="1900" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 2 -->
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <!-- Posiciona em (1850, 900) olhando para 90° (Y positivo) -->
+                        <GoToPoint robot_id="2" x="1850" y="900" face_x="1850" face_y="1900" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 3 -->
+                    <Sequence>
+                        <IsThisNodeID id="3"/>
+                        <!-- Posiciona em (2100, 300) olhando para 90° (Y positivo) -->
+                        <GoToPoint robot_id="3" x="2100" y="300" face_x="2100" face_y="1300" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                        </Repeat>
+                    </Sequence>
+                    
+                    <!-- DEMAIS ROBÔS (Ficam parados na base) -->
+                    <Repeat num_cycles="-1">
+                        <Sequence><Halt reason="assistindo"/><Sleep msec="100"/></Sequence>
+                    </Repeat>
+
+                </Fallback>
+            </Sequence>
+
+            <!-- ============================================== -->
+            <!-- FASE DE PREPARAÇÃO (Comando STOP = 1)          -->
+            <!-- ============================================== -->
+            <Sequence>
+                <CheckGCCommand expected="1"/>
+                <Fallback>
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <GoToPoint robot_id="1" x="1650" y="900" face_x="1650" face_y="1900" tolerance="50.0"/>
+                    </Sequence>
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <GoToPoint robot_id="2" x="1850" y="900" face_x="1850" face_y="1900" tolerance="50.0"/>
+                    </Sequence>
+                    <Sequence>
+                        <IsThisNodeID id="3"/>
+                        <GoToPoint robot_id="3" x="2100" y="300" face_x="2100" face_y="1300" tolerance="50.0"/>
+                    </Sequence>
+                </Fallback>
+            </Sequence>
+
+            <!-- ============================================== -->
+            <!-- ESTADO INATIVO                                 -->
+            <!-- ============================================== -->
+            <Sequence>
+                <Halt reason="aguardando_juiz"/>
+            </Sequence>
+
+        </Fallback>
+    </BehaviorTree>
+</root>

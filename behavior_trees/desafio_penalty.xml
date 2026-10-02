@@ -1,0 +1,87 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="DesafioPenalty">
+        <Fallback>
+            
+            <!-- ============================================== -->
+            <!-- FASE DE EXECUÇÃO (Comando Ativo)               -->
+            <!-- ============================================== -->
+            <Sequence>
+                <IsNormalFreeKick/> 
+                
+                <Fallback>
+                    
+                    <!-- ROBÔ ID 0 (POSIÇÃO SUPERIOR) -->
+                    <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <!-- Trava no destino final para manter a posição ativamente -->
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="310" y="800" face_x="-690" face_y="800" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 1 (BATEDOR - Contornando a Bola) -->
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <!-- Waypoint: passa por cima da bola -->
+                        <GoToPoint robot_id="1" x="-750" y="600" face_x="-250" face_y="0" tolerance="100.0"/>
+                        <!-- Trava no destino final: impede a árvore de resetar e voltar pro waypoint -->
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="1" x="-250" y="0" face_x="-1250" face_y="0" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 2 (POSIÇÃO INFERIOR) -->
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <!-- Trava no destino final para manter a posição ativamente -->
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="2" x="310" y="-800" face_x="-690" face_y="-800" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                    
+                    <!-- DEMAIS ROBÔS ESTÁTICOS -->
+                    <Repeat num_cycles="-1">
+                        <Sequence><Halt reason="aguardando"/><Sleep msec="100"/></Sequence>
+                    </Repeat>
+
+                </Fallback>
+            </Sequence>
+
+            <!-- ============================================== -->
+            <!-- FASE DE PREPARAÇÃO (Comando STOP = 1)          -->
+            <!-- ============================================== -->
+            <Sequence>
+                <CheckGCCommand expected="1"/>
+                <Fallback>
+                    <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="310" y="800" face_x="-690" face_y="800" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <GoToPoint robot_id="1" x="-750" y="600" face_x="-250" face_y="0" tolerance="100.0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="1" x="-250" y="0" face_x="-1250" face_y="0" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="2" x="310" y="-800" face_x="-690" face_y="-800" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                </Fallback>
+            </Sequence>
+
+            <!-- ============================================== -->
+            <!-- ESTADO INATIVO                                 -->
+            <!-- ============================================== -->
+            <Sequence>
+                <Halt reason="aguardando_juiz"/>
+            </Sequence>
+
+        </Fallback>
+    </BehaviorTree>
+</root>
