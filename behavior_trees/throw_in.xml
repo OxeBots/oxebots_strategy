@@ -1,52 +1,44 @@
 <root BTCPP_format="4">
-  <BehaviorTree ID="CornerTree">
-    <Fallback name="CornerRoles">
+  <BehaviorTree ID="ThrowInTree">
+    <Fallback name="ThrowInRoles">
         
-        <!-- 1. COBRADOR DO ESCANTEIO (Atacante) -->
+        <!-- 1. COBRADOR DO LATERAL (Atacante) -->
         <Sequence name="Kicker">
             <IsMyRole role="attacker"/>
             
             <UpdateBallPosition robot_id="{robot_id}"
                                 ball_x="{ball_x}" ball_y="{ball_y}"
                                 pre_kick_x="{pkx}" pre_kick_y="{pky}"
-                                is_ready_to_kick="{is_ready}"
+                                is_ready_to_kick="{dummy_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
             
-            <!-- A MÁGICA: Uma Sequence comum (não reativa). 
-                 Ela força o passo 1 a terminar com sucesso antes de ir pro passo 2! -->
+            <!-- A MÁGICA: Sequence garante que o alinhamento termine antes de chutar -->
             <Sequence name="AlignAndKick">
                 
                 <!-- PASSO 1: Vai até o ponto de pré-chute (trás da bola) -->
                 <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="50.0"/>
                 
-                <!-- PASSO 2: Quando chegar, a Sequence desce pra cá, avança e chuta! -->
+                <!-- PASSO 2: Acelera para a bola e cruza na hora do impacto! -->
                 <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
                     <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="30.0"/>
                     <Sequence>
                         <RetryUntilSuccessful num_attempts="-1">
                             <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
                         </RetryUntilSuccessful>
-                        <KickBall robot_id="{robot_id}" kick_speed="6.0"/>
+                        <KickBall robot_id="{robot_id}" kick_speed="5.0"/>
                     </Sequence>
                 </Parallel>
 
             </Sequence>
         </Sequence>
 
-        <!-- 2. HOMEM SURPRESA NA ÁREA (Zagueiro) -->
+        <!-- 2. RECEBEDOR / COBERTURA (Zagueiro) -->
         <Sequence name="Receiver">
             <IsMyRole role="defender"/>
-            
-            <UpdateBallPosition robot_id="{robot_id}"
-                                ball_x="{ball_x}" ball_y="{ball_y}"
-                                pre_kick_x="{dummy_pkx}" pre_kick_y="{dummy_pky}"
-                                is_ready_to_kick="{dummy_ready}"
-                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
-            
-            <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="0.0" tolerance="80.0"/>
+            <GoToPoint robot_id="{robot_id}" x="500.0" y="0.0" tolerance="80.0"/>
         </Sequence>
 
-        <Halt reason="waiting_corner_kick"/>
+        <Halt reason="waiting_throw_in"/>
     </Fallback>
   </BehaviorTree>
 </root>

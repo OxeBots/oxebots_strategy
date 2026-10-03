@@ -1,92 +1,102 @@
 <root main_tree_to_execute="MainTree" BTCPP_format="4">
-
+  
   <BehaviorTree ID="MainTree">
     <ReactiveFallback name="MasterStrategy">
-
-      <!-- 1. BOTÃO DE PARAR (STOP - Comando 1) -->
-      <Sequence name="StopBranch">
-        <CheckGCCommand expected="1"/>
-        <Halt reason="gc"/>
+      
+      <!-- ======================================================== -->
+      <!-- 1. INTERRUPÇÕES DE EMERGÊNCIA                            -->
+      <!-- ======================================================== -->
+      <Sequence name="HaltBranch">
+          <CheckGCCommand expected="0"/>
+          <SubTree ID="HaltSubTree" _autoremap="true" /> 
       </Sequence>
 
-      <!-- 2. GOLEIRO (Apenas Robô 0) -->
+      <Sequence name="StopBranch">
+          <CheckGCCommand expected="1"/>
+          <SubTree ID="StopSubTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ======================================================== -->
+      <!-- 2. BOLAS PARADAS (A NOSSO FAVOR - AMARELO)               -->
+      <!-- ======================================================== -->
+      <Sequence name="KickOffBranch">
+          <CheckGCCommand expected="4"/>
+          <SubTree ID="KickOffTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="PenaltyBranch">
+          <CheckGCCommand expected="6"/>
+          <SubTree ID="PenaltyTree" _autoremap="true" /> 
+      </Sequence>
+
+      <!-- NOSSAS FALTAS: Decididas inteligentemente pelo C++! -->
+      <Sequence name="CornerBranch">
+          <IsValueTrue value="{is_corner_kick}"/>
+          <SubTree ID="CornerTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="ThrowInBranch">
+          <IsValueTrue value="{is_kick_in}"/>
+          <SubTree ID="ThrowInTree" _autoremap="true" /> 
+      </Sequence>
+
+      <Sequence name="FreeKickBranch">
+          <IsValueTrue value="{is_free_kick}"/>
+          <SubTree ID="FreeKickTree" _autoremap="true" /> 
+      </Sequence>
+
+<!-- ======================================================== -->
+      <!-- 3. BOLAS PARADAS (OPONENTE - MANTER 50CM DE DISTÂNCIA)   -->
+      <!-- ======================================================== -->
+      <Sequence name="OpponentSetPieceBranch">
+          <IsValueTrue value="{is_opponent_foul}"/>
+          <SubTree ID="OppSetPieceTree" _autoremap="true" /> 
+      </Sequence>
+      <!-- ======================================================== -->
+      <!-- 4. JOGO ROLANDO (NORMAL_START 2, FORCE_START 3 ou -1)    -->
+      <!-- ======================================================== -->
+
       <ReactiveSequence name="GoalkeeperRole">
         <IsRobotId robot_id="0" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
-        <!-- RetryUntilSuccessful, não Repeat: uma falha em qualquer etapa de ChaseAndKick deve
-             recalcular a rota do zero (CalculateInterception roda de novo logo abaixo) no
-             próximo tick, não cair num Halt que trava o robô no lugar. -->
-        <RetryUntilSuccessful num_attempts="-1">
+        <Repeat num_cycles="-1">
           <ReactiveSequence name="AttackerLogicLoop">
+            <!-- Atualiza bola em TEMPO REAL (Tick contínuo) -->
             <UpdateBallPosition robot_id="{robot_id}"
-                                ball_x="{ball_x}" ball_y="{ball_y}"
-                                pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                                ball_x="{ball_x}" ball_y="{ball_y}" 
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
                                 is_ready_to_kick="{is_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-
+            
             <CalculateInterception robot_id="{robot_id}"
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
                                    intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
-                                   intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
-                                   intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
                                    is_ready_to_kick="{is_ready_pred}" />
-
+            
             <ReactiveFallback name="AttackLogicActions">
-              <!-- Ataque em duas fases: sem dribbler, precisa chegar já alinhado antes de se
-                   aproximar, senão o contato vira "empurrar de lado" em vez de um chute limpo. -->
-              <Sequence name="ChaseAndKick">
-                <!-- Fase 1: vai até o ponto de pré-chute (~400mm atrás da bola, linha bola-gol),
-                     via D*. x/y usam intercept_pk_safe, não intercept_pk direto: quando o robô
-                     está do lado errado da bola, aponta pra um waypoint de contorno lateral em
-                     vez do pré-chute direto, porque o D* sozinho só desvia da bola como
-                     obstáculo, sem noção de lado (ver calculate_interception_node.cpp).
-                     ball_contact_threshold_mm força replanejamento completo se o robô encostar
-                     na bola sem querer. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
-                           ball_contact_threshold_mm="150.0" />
-
-                <!-- Fase 2: laço único de aproximação+chute — testa a cada tick se já pode
-                     chutar; se não, continua perseguindo o ponto de captura mirando na bola real
-                     via face_x/face_y. tolerance="0.0": nunca retorna SUCCESS de propósito, só
-                     mantém o robô perseguindo/mirando; quem encerra é o IsBallClose+KickBall do
-                     outro ramo. int_cap_x/y e ball_x/y são recalculados a cada tick, então o alvo
-                     já se corrige sozinho se a bola se mover. -->
-                <RetryUntilSuccessful num_attempts="-1">
-                  <ReactiveFallback name="ApproachAndKick">
-                    <Sequence>
-                      <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
-                      <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
-                    </Sequence>
-                    <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
-                               face_x="{ball_x}" face_y="{ball_y}"
-                               tolerance="0.0" planner="straight_line" />
-                  </ReactiveFallback>
-                </RetryUntilSuccessful>
-
-                <!-- Recuo pós-chute: sem isso, o loop reinicia imediatamente e recaptura a bola
-                     (ainda perto do robô) em vez de deixá-la rolar livre após o chute. -->
-                <Delay delay_msec="600">
-                  <AlwaysSuccess/>
-                </Delay>
-              </Sequence>
+              <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                <GoToPoint robot_id="{robot_id}" x="{int_ball_x}" y="{int_ball_y}" tolerance="50.0" />
+                <Sequence>
+                  <RetryUntilSuccessful num_attempts="-1">
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="180.0"/>
+                  </RetryUntilSuccessful>
+                  <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+                </Sequence>
+              </Parallel>
             </ReactiveFallback>
           </ReactiveSequence>
-        </RetryUntilSuccessful>
+        </Repeat>
       </ReactiveSequence>
 
-      <!-- 3. DEFESA (Robô 1 - Lógica vinda da branch defender) -->
       <SubTree ID="DefenderTree" _autoremap="true" />
 
-      <!-- 4. RESERVAS (Outros robôs ficam parados) -->
       <Halt reason="idle"/>
 
     </ReactiveFallback>
   </BehaviorTree>
-
 </root>

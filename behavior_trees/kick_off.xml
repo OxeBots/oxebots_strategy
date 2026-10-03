@@ -1,0 +1,51 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="KickOffTree">
+    <Fallback name="KickOffRoles">
+        
+        <!-- 1. GOLEIRO -->
+        <Sequence name="GoalKeeperRole">
+            <IsRobotId robot_id="0"/>
+            <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+        </Sequence>
+
+        <!-- 2. COBRADOR (Único permitido no círculo central) -->
+        <Sequence name="Kicker">
+            <IsMyRole role="attacker"/>
+
+            <UpdateBallPosition robot_id="{robot_id}"
+                                ball_x="{ball_x}" ball_y="{ball_y}"
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                                is_ready_to_kick="{dummy_ready}"
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+            
+            <Sequence name="AlignAndKickOff">
+                <!-- Fase 1: Entra no círculo central sem tocar na bola -->
+                <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="150.0"/>
+                
+                <!-- Fase 2: Trava de segurança da Regra 5.3.2 -->
+                <ReactiveSequence name="WaitForWhistle">
+                    <CheckGCCommand expected="2"/> <!-- APITO: NORMAL START -->
+
+                    <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
+                        <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="30.0"/>
+                        <Sequence>
+                            <RetryUntilSuccessful num_attempts="-1">
+                                <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
+                            </RetryUntilSuccessful>
+                            <KickBall robot_id="{robot_id}" kick_speed="4.5"/>
+                        </Sequence>
+                    </Parallel>
+                </ReactiveSequence>
+            </Sequence>
+        </Sequence>
+
+        <!-- 3. RESTO DO TIME (Devem ficar no próprio campo de defesa) -->
+        <Sequence name="FieldPlayers">
+            <IsMyRole role="defender"/>
+            <GoToPoint robot_id="{robot_id}" x="-1000.0" y="0.0" tolerance="80.0"/>
+        </Sequence>
+
+        <Halt reason="waiting_kick_off"/>
+    </Fallback>
+  </BehaviorTree>
+</root>

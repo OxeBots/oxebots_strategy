@@ -1,0 +1,54 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="OppSetPieceTree">
+    <Fallback name="OppSetPieceRoles">
+
+        <!-- 1. GOLEIRO: Lógica padrão de defesa, fica na linha do gol -->
+        <Sequence name="GoalkeeperDefend">
+            <IsRobotId robot_id="0"/>
+            <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+        </Sequence>
+
+        <!-- 2. ZAGUEIRO: Protege a entrada da área para bloquear chutes -->
+        <Sequence name="DefenderWall">
+            <IsMyRole role="defender"/>
+            <UpdateBallPosition robot_id="{robot_id}" 
+                                ball_x="{ball_x}" ball_y="{ball_y}" 
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                is_ready_to_kick="{is_ready}" 
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+            
+            <!-- FALLBACK TÁTICO: Fuga de segurança vs Posição Tática -->
+            <Fallback name="DefenderSafety">
+                <Sequence>
+                    <!-- Se o oponente colocar a bola a menos de 600mm do nosso zagueiro, ele foge para não levar falta -->
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="600.0"/>
+                    <KeepDistance robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" distance="650.0"/>
+                </Sequence>
+                <!-- Posição Tática: Fica plantado na entrada da nossa área defensiva (X = -1500) -->
+                <GoToPoint robot_id="{robot_id}" x="-1500.0" y="0.0" tolerance="50.0"/>
+            </Fallback>
+        </Sequence>
+
+        <!-- 3. ATACANTE: Fica recuado marcando a linha de passe -->
+        <Sequence name="AttackerMarking">
+            <IsMyRole role="attacker"/>
+            <UpdateBallPosition robot_id="{robot_id}" 
+                                ball_x="{ball_x}" ball_y="{ball_y}" 
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}" 
+                                is_ready_to_kick="{is_ready}" 
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
+            
+            <Fallback name="AttackerSafety">
+                <Sequence>
+                    <!-- Mesma trava de segurança dos 50cm -->
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="600.0"/>
+                    <KeepDistance robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" distance="650.0"/>
+                </Sequence>
+                <!-- Posição Tática: Recua para o nosso campo acompanhando a altura da bola (Y = ball_y) -->
+                <GoToPoint robot_id="{robot_id}" x="-500.0" y="{ball_y}" tolerance="80.0"/>
+            </Fallback>
+        </Sequence>
+
+    </Fallback>
+  </BehaviorTree>
+</root>
