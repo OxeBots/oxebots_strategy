@@ -6,38 +6,37 @@
             <!-- FASE DE EXECUÇÃO (Comando Ativo)               -->
             <!-- ============================================== -->
             <Sequence>
-                <IsFreeKick/>
+                <!-- Trocado para o nó reconhecido pelo C++ para evitar crash -->
+                <IsNormalFreeKick/> 
                 
                 <Fallback>
                     
+                    <!-- ROBÔ ID 0 -->
+                    <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <GoToPoint robot_id="0" x="-1200" y="1420" face_x="1000" face_y="-1300" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="-1850" y="1420" face_x="-1850" face_y="420" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+
                     <!-- ROBÔ ID 1 -->
                     <Sequence>
                         <IsThisNodeID id="1"/>
-                        <GoToPoint robot_id="1" x="-1850" y="1420" face_x="-1850" face_y="1520" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                            <GoToPoint robot_id="1" x="150" y="700" face_x="-850" face_y="700" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
 
-                    <!-- ROBÔ ID 2 -->
+                    <!-- ROBÔ ID 2 (Corrigido do ID 3 inexistente para o ID 2) -->
                     <Sequence>
                         <IsThisNodeID id="2"/>
-                        <GoToPoint robot_id="2" x="150" y="700" face_x="250" face_y="700" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
-                        </Repeat>
-                    </Sequence>
-
-                    <!-- ROBÔ ID 3 -->
-                    <Sequence>
-                        <IsThisNodeID id="3"/>
-                        <GoToPoint robot_id="3" x="-590" y="-600" face_x="-490" face_y="-600" tolerance="50.0"/>
-                        <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                            <GoToPoint robot_id="2" x="-590" y="-600" face_x="-1590" face_y="-600" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
                     
-                    <!-- DEMAIS ROBÔS (Ficam parados) -->
+                    <!-- DEMAIS ROBÔS ESTÁTICOS -->
                     <Repeat num_cycles="-1">
                         <Sequence><Halt reason="assistindo"/><Sleep msec="100"/></Sequence>
                     </Repeat>
@@ -52,16 +51,22 @@
                 <CheckGCCommand expected="1"/>
                 <Fallback>
                     <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="-1850" y="1420" face_x="-1850" face_y="1520" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                    <Sequence>
                         <IsThisNodeID id="1"/>
-                        <GoToPoint robot_id="1" x="-1850" y="1420" face_x="-1850" face_y="1520" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="1" x="150" y="700" face_x="250" face_y="700" tolerance="50.0"/>
+                        </Repeat>
                     </Sequence>
                     <Sequence>
                         <IsThisNodeID id="2"/>
-                        <GoToPoint robot_id="2" x="150" y="700" face_x="250" face_y="700" tolerance="50.0"/>
-                    </Sequence>
-                    <Sequence>
-                        <IsThisNodeID id="3"/>
-                        <GoToPoint robot_id="3" x="-590" y="-600" face_x="-490" face_y="-600" tolerance="50.0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="2" x="-590" y="-600" face_x="-490" face_y="-600" tolerance="50.0"/>
+                        </Repeat>
                     </Sequence>
                 </Fallback>
             </Sequence>
