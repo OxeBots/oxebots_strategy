@@ -66,8 +66,7 @@
                      seguinte com CalculateInterceptionNode recalculando os pontos a partir da
                      posição real e atual da bola, e o D* replanejando do zero. NÃO usar esse
                      limite na Fase 2 abaixo: lá, chegar perto da bola é o objetivo. -->
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0"
-                           ball_contact_threshold_mm="150.0" />
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_x}" y="{int_pk_y}" tolerance="120.0" />
 
                 <!-- Fase 2: já alinhado atrás da bola, avança reto até o ponto de captura (bem
                      mais perto, int_cap_x/y). planner="straight_line" porque, chegando desta

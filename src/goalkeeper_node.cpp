@@ -1,5 +1,5 @@
-#include "oxebots_strategy/goalkeeper_node.h"
 #include <cmath>
+#include "oxebots_strategy/goalkeeper_node.h"
 #include <algorithm> 
 
 namespace {

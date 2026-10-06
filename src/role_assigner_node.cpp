@@ -13,6 +13,7 @@ public:
   {
     // Parâmetros configuráveis
     this->declare_parameter<int>("goalkeeper_id", 0);
+    this->declare_parameter<int>("team_size", 3);
     this->declare_parameter<double>("w1", 2.0);           // Peso para distância (Aumentado para priorizar quem está perto)
     this->declare_parameter<double>("w2", 1.0);           // Peso para alinhamento cinético
     this->declare_parameter<double>("hysteresis", 2.5);   // Vantagem de custo necessária para roubar o papel
@@ -20,6 +21,7 @@ public:
     this->declare_parameter<bool>("is_yellow_team", false);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
+    team_size_ = this->get_parameter("team_size").as_int();
     w1_ = this->get_parameter("w1").as_double();
     w2_ = this->get_parameter("w2").as_double();
     hysteresis_ = this->get_parameter("hysteresis").as_double();
@@ -32,8 +34,8 @@ public:
       "game_data", 10, std::bind(&RoleAssignerNode::game_callback, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Role Assigner ZJUNlict iniciado.");
-    RCLCPP_INFO(this->get_logger(), "Goleiro ID: %d, w1: %.2f, w2: %.2f, Amarelo: %s", 
-                goalkeeper_id_, w1_, w2_, this->get_parameter("is_yellow_team").as_bool() ? "Sim" : "Não");
+    RCLCPP_INFO(this->get_logger(), "Goleiro ID: %d, Tamanho do Time: %d, w1: %.2f, w2: %.2f, Amarelo: %s", 
+                goalkeeper_id_, team_size_, w1_, w2_, this->get_parameter("is_yellow_team").as_bool() ? "Sim" : "Não");
   }
 
 private:
@@ -63,6 +65,7 @@ private:
     for (const auto & robot : msg->robots.allies) {
       uint32_t id = robot.id;
       if (static_cast<int>(id) == goalkeeper_id_) continue;
+      if (team_size_ > 0 && static_cast<int>(id) >= team_size_) continue;
 
       Vector2D r_pos = {robot.x, robot.y};
       
@@ -165,6 +168,7 @@ private:
   }
 
   int goalkeeper_id_;
+  int team_size_;
   double w1_, w2_, hysteresis_, time_hysteresis_;
   uint32_t last_attacker_id_ = 999;
   
