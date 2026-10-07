@@ -3,7 +3,7 @@
     <Fallback name="ThrowInRoles">
         
         <!-- 1. COBRADOR DO LATERAL (Atacante) -->
-        <Sequence name="Kicker">
+        <ReactiveSequence name="Kicker">
             <IsMyRole role="attacker"/>
             
             <UpdateBallPosition robot_id="{robot_id}"
@@ -25,18 +25,18 @@
                         <RetryUntilSuccessful num_attempts="-1">
                             <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
                         </RetryUntilSuccessful>
-                        <KickBall robot_id="{robot_id}" kick_speed="5.0"/>
+                        <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
                     </Sequence>
                 </Parallel>
 
             </Sequence>
-        </Sequence>
+        </ReactiveSequence>
 
         <!-- 2. RECEBEDOR / COBERTURA (Zagueiro) -->
-        <Sequence name="Receiver">
+        <ReactiveSequence name="Receiver">
             <IsMyRole role="defender"/>
             <GoToPoint robot_id="{robot_id}" x="500.0" y="0.0" tolerance="80.0"/>
-        </Sequence>
+        </ReactiveSequence>
 
         <Halt reason="waiting_throw_in"/>
     </Fallback>

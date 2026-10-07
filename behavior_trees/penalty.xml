@@ -6,7 +6,7 @@
             <!-- ========================================== -->
             <!-- 1. ATACANTE (O Cobrador do Pênalti)        -->
             <!-- ========================================== -->
-            <Sequence name="AttackerPenalty">
+            <ReactiveSequence name="AttackerPenalty">
                 <IsMyRole role="attacker"/>
                 <ReactiveFallback name="AttackerPenaltyLogic">
                     
@@ -25,8 +25,7 @@
                                 <RetryUntilSuccessful num_attempts="-1">
                                     <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
                                 </RetryUntilSuccessful>
-                                <!-- Velocidade máxima do pênalti pode chegar até 8.0 m/s dependendo das regras locais -->
-                                <KickBall robot_id="{robot_id}" kick_speed="7.5"/>
+                                <KickBall robot_id="{robot_id}" kick_speed="3"/>
                             </Sequence>
                         </Parallel>
                     </Sequence>
@@ -43,7 +42,7 @@
                         <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="20.0"/>
                     </Sequence>
                 </ReactiveFallback>
-            </Sequence>
+            </ReactiveSequence>
 
             <!-- ========================================== -->
             <!-- 2. GOLEIRO (Fica na nossa meta)            -->

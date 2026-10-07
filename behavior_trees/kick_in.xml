@@ -4,7 +4,7 @@
     <Fallback name="KickInRoles">
         
         <!-- 1. COBRADOR (Atacante) -->
-        <Sequence name="Kicker">
+        <ReactiveSequence name="Kicker">
             <IsMyRole role="attacker"/>
             <!-- Vai até a bola -->
             <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="40.0"/>
@@ -12,8 +12,8 @@
             <PrecisionKick robot_id="{robot_id}" 
                            target_x="{opponent_goal_x}" 
                            target_y="0.0" 
-                           kick_speed="5.0"/>
-        </Sequence>
+                           kick_speed="3.0"/>
+        </ReactiveSequence>
 
         <!-- 2. RECEBEDOR / COBERTURA (Zagueiro) -->
         <Sequence name="Receiver">

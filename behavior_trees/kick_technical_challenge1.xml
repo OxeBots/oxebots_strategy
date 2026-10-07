@@ -4,7 +4,7 @@
             <!-- ============================================== -->
             <!-- FASE DE EXECUÇÃO (Normal Free Kick)            -->
             <!-- ============================================== -->
-            <Sequence>
+            <ReactiveSequence>
                 <IsNormalFreeKick/>
                 
                 <Fallback>
@@ -114,12 +114,12 @@
                     </Repeat>
 
                 </Fallback>
-            </Sequence>
+            </ReactiveSequence>
 
             <!-- ============================================== -->
             <!-- FASE DE PREPARAÇÃO (STOP Command = 1)          -->
             <!-- ============================================== -->
-            <Sequence>
+            <ReactiveSequence>
                 <CheckGCCommand expected="1"/>
                 <Fallback>
                     <Sequence>
@@ -132,7 +132,7 @@
                         <GoToPoint robot_id="2" x="-1200" y="600" face_x="-2175" face_y="340" tolerance="50.0"/>
                     </Sequence>
                 </Fallback>
-            </Sequence>
+            </ReactiveSequence>
 
             <!-- ============================================== -->
             <!-- ESTADO INATIVO (HALT = 0 ou outros)            -->

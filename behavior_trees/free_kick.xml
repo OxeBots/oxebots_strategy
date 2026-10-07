@@ -9,7 +9,7 @@
             </Sequence>
 
             <!-- 2. COBRADOR (Atacante) -->
-            <Sequence name="KickerRole">
+            <ReactiveSequence name="KickerRole">
                 <IsMyRole role="attacker"/>
                 
                 <UpdateBallPosition robot_id="{robot_id}"
@@ -31,12 +31,12 @@
                             <RetryUntilSuccessful num_attempts="-1">
                                 <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
                             </RetryUntilSuccessful>
-                            <KickBall robot_id="{robot_id}" kick_speed="7.5"/>
+                            <KickBall robot_id="{robot_id}" kick_speed="3"/>
                         </Sequence>
                     </Parallel>
 
                 </Sequence>
-            </Sequence>
+            </ReactiveSequence>
 
             <!-- 3. SUPORTE (Zagueiro): Defende respeitando a regra de distância -->
             <Sequence name="SupportRole">

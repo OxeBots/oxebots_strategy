@@ -1,8 +1,12 @@
 <root BTCPP_format="4">
-    <BehaviorTree ID="Desafio3">
+    <BehaviorTree ID="Desafio2">
         <Fallback>
             
-            <Sequence>
+            <!-- ============================================== -->
+            <!-- FASE DE EXECUÇÃO (Comando Ativo)               -->
+            <!-- ============================================== -->
+            <ReactiveSequence>
+                <!-- Trocado para o nó reconhecido pelo C++ para evitar crash -->
                 <IsNormalFreeKick/> 
                 
                 <Fallback>
@@ -10,29 +14,25 @@
                     <!-- ROBÔ ID 0 -->
                     <Sequence>
                         <IsThisNodeID id="0"/>
-                        <GoToPoint robot_id="0" x="-500" y="-1000" face_x="1000" face_y="-1300" tolerance="50.0"/>
+                        <GoToPoint robot_id="0" x="-1200" y="1420" face_x="1000" face_y="-1300" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="0" x="2100" y="0" face_x="1100" face_y="0" tolerance="50.0"/>
+                            <GoToPoint robot_id="0" x="-1850" y="1420" face_x="-1850" face_y="420" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
 
                     <!-- ROBÔ ID 1 -->
                     <Sequence>
                         <IsThisNodeID id="1"/>
-                        <!-- Contorna o centro por cima -->
-                        <GoToPoint robot_id="1" x="-700" y="1200" face_x="250" face_y="700" tolerance="50.0"/>
-                        <!-- Alvo final travado -->
                         <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="1" x="250" y="700" face_x="-750" face_y="700" tolerance="50.0"/>
+                            <GoToPoint robot_id="1" x="150" y="700" face_x="-850" face_y="700" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
 
-                    <!-- ROBÔ ID 2 -->
+                    <!-- ROBÔ ID 2 (Corrigido do ID 3 inexistente para o ID 2) -->
                     <Sequence>
                         <IsThisNodeID id="2"/>
-                        <GoToPoint robot_id="2" x="-100" y="800" face_x="250" face_y="0" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="2" x="250" y="0" face_x="-750" face_y="0" tolerance="50.0"/>
+                            <GoToPoint robot_id="2" x="-590" y="-600" face_x="-1590" face_y="-600" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
                     
@@ -42,8 +42,9 @@
                     </Repeat>
 
                 </Fallback>
-            </Sequence>
+            </ReactiveSequence>
 
+            <!-- ESTADO INATIVO -->
             <Sequence>
                 <Halt reason="aguardando_juiz"/>
             </Sequence>

@@ -1,6 +1,6 @@
 <root BTCPP_format="4">
   <BehaviorTree ID="OppSetPieceTree">
-    <Fallback name="OppSetPieceRoles">
+    <ReactiveFallback name="OppSetPieceRoles">
 
         <!-- 1. GOLEIRO: Lógica padrão de defesa, fica na linha do gol -->
         <Sequence name="GoalkeeperDefend">
@@ -49,6 +49,6 @@
             </Fallback>
         </Sequence>
 
-    </Fallback>
+    </ReactiveFallback>
   </BehaviorTree>
 </root>
