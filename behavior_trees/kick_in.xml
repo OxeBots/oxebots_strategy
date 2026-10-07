@@ -12,7 +12,7 @@
             <PrecisionKick robot_id="{robot_id}" 
                            target_x="{opponent_goal_x}" 
                            target_y="0.0" 
-                           kick_speed="5.0"/>
+                           kick_speed="3.0"/>
         </Sequence>
 
         <!-- 2. RECEBEDOR / COBERTURA (Zagueiro) -->

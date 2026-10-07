@@ -32,7 +32,7 @@
                             <RetryUntilSuccessful num_attempts="-1">
                                 <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
                             </RetryUntilSuccessful>
-                            <KickBall robot_id="{robot_id}" kick_speed="4.5"/>
+                            <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
                         </Sequence>
                     </Parallel>
                 </ReactiveSequence>
