@@ -85,6 +85,22 @@ target_include_directories(movement_calculation_node PUBLIC
 )
 
 add_executable(
+  trajectory_setpoint_node
+  src/trajectory_setpoint_node.cpp
+)
+
+ament_target_dependencies(
+  trajectory_setpoint_node
+  rclcpp
+  oxebots_interfaces
+)
+
+target_include_directories(trajectory_setpoint_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+add_executable(
   d_star_planner_node
   src/d_star_planner.cpp
 )
@@ -116,6 +132,7 @@ ament_target_dependencies(
 install(TARGETS
   strategy_node
   movement_calculation_node
+  trajectory_setpoint_node
   d_star_planner_node
   role_assigner_node
   DESTINATION lib/${PROJECT_NAME}
