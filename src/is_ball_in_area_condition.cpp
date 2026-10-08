@@ -3,9 +3,9 @@
 namespace oxebots_strategy
 {
 
-static constexpr double AREA_EXIT_MARGIN = 200.0;
-static constexpr double AREA_ENTRY_TOLERANCE = 100.0;
-static constexpr double GOAL_LINE_TOLERANCE = 100.0;
+static constexpr double AREA_EXIT_MARGIN = 30.0;
+static constexpr double AREA_ENTRY_TOLERANCE = 0.0;
+static constexpr double GOAL_LINE_TOLERANCE = 50.0;
 
 IsBallInAreaCondition::IsBallInAreaCondition(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
   : BT::ConditionNode(name, config), node_(node) {}
