@@ -4,12 +4,15 @@
 #include "behaviortree_cpp/behavior_tree.h"
 #include "rclcpp/rclcpp.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
+#include "oxebots_interfaces/msg/ball_prediction.hpp"
+#include <mutex>
 
 namespace oxebots_strategy
 {
 
 class GoalLineDefendNode : public BT::StatefulActionNode
 {
+  
 public:
   GoalLineDefendNode(const std::string & name, const BT::NodeConfig & config, rclcpp::Node::SharedPtr node_ptr);
 
@@ -20,12 +23,18 @@ public:
   void onHalted() override;
 
 private:
+  void ballPredictionCallback(const oxebots_interfaces::msg::BallPrediction::SharedPtr msg);
+
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::BallPrediction>::SharedPtr ball_pred_sub_;
 
   uint32_t robot_id_;
   double my_goal_x_;
   double last_target_y_ = -99999.0;
+
+  std::mutex data_mutex_;
+  oxebots_interfaces::msg::BallPrediction::SharedPtr last_ball_pred_;
 };
 
 } // namespace oxebots_strategy
