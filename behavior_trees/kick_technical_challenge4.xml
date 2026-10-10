@@ -1,0 +1,139 @@
+<root BTCPP_format="4">  
+    <BehaviorTree ID="Desafio4">  
+        <Fallback>
+            
+            <!-- ============================================== -->
+            <!-- FASE DE EXECUÇÃO (A SUA JOGADA ORIGINAL)       -->
+            <!-- ============================================== -->
+            <Sequence>  
+                <IsNormalFreeKick/>  
+                  
+                <Fallback>  
+                      
+                    <!-- ============================================== -->  
+                    <!-- ROBÔ 1 (O CRUZADOR / WINGER)                   -->  
+                    <!-- ============================================== -->  
+                    <Sequence>  
+                        <IsThisNodeID id="1"/>  
+                          
+                        <UpdateBallPosition robot_id="1" goal_x="-1100" goal_y="0"   
+                                            ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{pkx1}" pre_kick_y="{pky1}"   
+                                            is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>  
+                          
+                        <GoToPoint robot_id="1" x="{pkx1}" y="{pky1}" face_x="-1100" face_y="0" tolerance="50.0"/>  
+                          
+                        <RetryUntilSuccessful num_attempts="-1">  
+                            <ReactiveFallback>  
+                                <Sequence>  
+                                    <IsBallClose robot_id="1" distance_threshold="125.0" angle_threshold_deg="15.0"/>  
+                                    <KickBall robot_id="1" kick_speed="3.0"/>  
+                                </Sequence>  
+                                <Sequence>  
+                                    <UpdateBallPosition robot_id="1" goal_x="-1100" goal_y="0"   
+                                                        ball_x="{bx1}" ball_y="{by1}" pre_kick_x="{dummy_x1}" pre_kick_y="{dummy_y1}"   
+                                                        is_ready_to_kick="{dummy_ready1}" ball_in_enemy_half="{dummy_adv1}"/>  
+                                    <GoToPoint robot_id="1" x="{bx1}" y="{by1}" face_x="-1100" face_y="0" tolerance="0.0" planner="straight_line"/>  
+                                </Sequence>  
+                            </ReactiveFallback>  
+                        </RetryUntilSuccessful>  
+                          
+                        <Repeat num_cycles="-1">  
+                            <Sequence>  
+                                <Halt reason="cruzamento_concluido"/>  
+                                <Sleep msec="100"/>  
+                            </Sequence>  
+                        </Repeat>  
+                    </Sequence>  
+
+                    <!-- ============================================== -->  
+                    <!-- ROBÔ 2 (O ATACANTE DA GRANDE ÁREA)             -->  
+                    <!-- ============================================== -->  
+                    <Sequence>  
+                        <IsThisNodeID id="2"/>  
+                          
+                        <!-- FASE 1: QUARENTENA! Agora Reativa para não travar a memória da árvore -->  
+                        <RetryUntilSuccessful num_attempts="-1">  
+                            <ReactiveSequence>  
+                                <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}" is_ready_to_kick="{dummy_r}" ball_in_enemy_half="{dummy_a}"/>  
+                                <GoToPoint robot_id="2" x="-1100" y="0" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>  
+                            </ReactiveSequence>  
+                        </RetryUntilSuccessful>  
+                          
+                        <!-- FASE 2: RADAR LIGADO! Agora Reativo e corrigido para manter a base em -1100 -->  
+                        <RetryUntilSuccessful num_attempts="-1">  
+                            <ReactiveSequence>  
+                                <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0"   
+                                                    ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}"   
+                                                    is_ready_to_kick="{dummy_ready}" ball_in_enemy_half="{dummy_adv}"/>  
+                                <ReactiveFallback>  
+                                    <IsBallClose robot_id="2" distance_threshold="600.0"/>  
+                                    <Sequence>  
+                                        <GoToPoint robot_id="2" x="-1100" y="0" face_x="{bx2}" face_y="{by2}" tolerance="100.0"/>  
+                                        <IsValueTrue value="false"/>
+                                    </Sequence>  
+                                </ReactiveFallback>  
+                            </ReactiveSequence>  
+                        </RetryUntilSuccessful>  
+                          
+                        <!-- FASE 3: BOLA NA ÁREA! A sua jogada dinâmica 100% restaurada -->  
+                        <RetryUntilSuccessful num_attempts="-1">  
+                            <ReactiveFallback>  
+                                <Sequence>  
+                                    <IsBallClose robot_id="2" distance_threshold="125.0" angle_threshold_deg="15.0"/>  
+                                    <KickBall robot_id="2" kick_speed="3.0"/>  
+                                </Sequence>  
+                                <Sequence>  
+                                    <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0"   
+                                                        ball_x="{bx2}" ball_y="{by2}" pre_kick_x="{dummy_x2}" pre_kick_y="{dummy_y2}"   
+                                                        is_ready_to_kick="{dummy_ready2}" ball_in_enemy_half="{dummy_adv2}"/>  
+                                    <GoToPoint robot_id="2" x="{bx2}" y="{by2}" face_x="-2175" face_y="0" tolerance="0.0" planner="straight_line"/>  
+                                </Sequence>  
+                            </ReactiveFallback>  
+                        </RetryUntilSuccessful>  
+                          
+                        <Repeat num_cycles="-1">  
+                            <Sequence>  
+                                <Halt reason="gol_marcado"/>  
+                                <Sleep msec="100"/>  
+                            </Sequence>  
+                        </Repeat>  
+                    </Sequence>  
+                      
+                    <Repeat num_cycles="-1">  
+                        <Sequence>  
+                            <Halt reason="assistindo"/>  
+                            <Sleep msec="100"/>  
+                        </Sequence>  
+                    </Repeat>  
+
+                </Fallback>  
+            </Sequence> 
+
+            <!-- ============================================== -->
+            <!-- FASE DE PREPARAÇÃO (RESTRIÇÃO DO STOP)         -->
+            <!-- ============================================== -->
+            <Sequence>
+                <CheckGCCommand expected="1"/>
+                <Fallback>
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <UpdateBallPosition robot_id="1" goal_x="-1100" goal_y="0" ball_x="{bx1_prep}" ball_y="{by1_prep}" pre_kick_x="{pkx1_prep}" pre_kick_y="{pky1_prep}" is_ready_to_kick="{dr}" ball_in_enemy_half="{da}"/>
+                        <GoToPoint robot_id="1" x="{pkx1_prep}" y="{pky1_prep}" face_x="-1100" face_y="0" tolerance="50.0"/>
+                    </Sequence>
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <!-- Na preparação, ele já aguarda em -1100 rastreando a posição da bola -->
+                        <UpdateBallPosition robot_id="2" goal_x="-2175" goal_y="0" ball_x="{bx2_prep}" ball_y="{by2_prep}" pre_kick_x="{dummy_x}" pre_kick_y="{dummy_y}" is_ready_to_kick="{dummy_r}" ball_in_enemy_half="{dummy_a}"/> 
+                        <GoToPoint robot_id="2" x="-1100" y="0" face_x="{bx2_prep}" face_y="{by2_prep}" tolerance="50.0"/>
+                    </Sequence>
+                </Fallback>
+            </Sequence>
+
+            <!-- ESTADO INATIVO -->
+            <Sequence>
+                <Halt reason="aguardando_juiz"/>
+            </Sequence>
+
+        </Fallback>
+    </BehaviorTree>
+</root>
