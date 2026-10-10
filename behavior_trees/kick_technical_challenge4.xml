@@ -6,7 +6,7 @@
             <!-- FASE DE EXECUÇÃO (A SUA JOGADA ORIGINAL)       -->
             <!-- ============================================== -->
             <Sequence>  
-                <IsNormalFreeKick/>  
+                <CheckGCCommand expected="8"/>  
                   
                 <Fallback>  
                       

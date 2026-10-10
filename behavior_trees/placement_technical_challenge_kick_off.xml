@@ -3,16 +3,16 @@
         <Fallback>
             
             <Sequence>
-                <IsNormalFreeKick/> 
+                <CheckGCCommand expected="4"/> 
                 
                 <Fallback>
                     
                     <!-- ROBÔ ID 0 -->
                     <Sequence>
                         <IsThisNodeID id="0"/>
-                        <GoToPoint robot_id="0" x="-500" y="-1000" face_x="1000" face_y="-1300" tolerance="50.0"/>
+                        <GoToPoint robot_id="0" x="-500" y="-1000" face_x="1000" face_y="-1300" tolerance="50.0" ignore_area="true"/>
                         <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="0" x="2100" y="0" face_x="1100" face_y="0" tolerance="50.0"/>
+                            <GoToPoint robot_id="0" x="2100" y="0" face_x="1100" face_y="0" tolerance="50.0" ignore_area="true"/>
                         </Repeat>
                     </Sequence>
 

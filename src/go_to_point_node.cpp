@@ -81,6 +81,7 @@ BT::PortsList GoToPointNode::providedPorts() {
                  "valor antes de \"chegar\" ao alvo — força recalcular tudo do zero. Use só em "
                  "GoToPoints longe da bola de propósito (ex: Fase 1); NÃO em GoToPoints que "
                  "terminam perto dela de propósito (ex: Fase 2). Default -1.0 = desabilitado."),
+             BT::InputPort<bool>("ignore_area", false, "Se true, desativa restrições de área para este robô"),
              BT::InputPort<bool>("ball_side_check", false,
                  "Se true, o nó falha caso o robô esteja do lado ERRADO da bola (mesmo lado que o "
                  "gol adversário, \"na frente\" dela) — força recalcular tudo do zero. Só faz "
@@ -274,14 +275,19 @@ BT::NodeStatus GoToPointNode::onStart() {
 
     if (robot_id_ == 0) is_gk = true;
 
-    // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
-    clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+    bool ignore_area = false;
+    getInput<bool>("ignore_area", ignore_area);
 
-    // 2. Bloquear a própria área apenas se NÃO for o goleiro; se FOR goleiro, limitar a NÃO sair da área (sem margem)
-    if (!is_gk) {
-        clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
-    } else {
-        clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
+    if (!ignore_area) {
+        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
+        clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+
+        // 2. Bloquear a própria área apenas se NÃO for o goleiro
+        if (!is_gk) {
+            clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
+        } else {
+            clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
+        }
     }
 
     publishGoal();
@@ -312,16 +318,22 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
         if (robot_id_ == 0) is_gk = true;
 
-        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
-        clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+        bool ignore_area = false;
+        getInput<bool>("ignore_area", ignore_area);
 
-        // 2. Bloquear a própria área apenas se NÃO for o goleiro; se FOR goleiro, limitar a NÃO sair da área (sem margem)
-        if (!is_gk) {
-            clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
-        } else {
-            clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
+        // SÓ APLICA AS TRAVAS SE O XML NÃO MANDAR IGNORAR:
+        if (!ignore_area) {
+            // 1. Bloquear área adversária para TODOS os robôs
+            clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+
+            // 2. Bloquear a própria área
+            if (!is_gk) {
+                clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
+            } else {
+                clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
+            }
         }
-        
+
         // Republica o objetivo se a posição mudou o bastante (>2mm) ou se o alvo de orientação
         // (face_x/face_y) mudou sozinho mesmo com a posição parada.
         bool position_changed = std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0;
@@ -334,6 +346,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
         if (position_changed || orientation_changed) {
             publishGoal();
         }
+
     }
 
     // Pega a posição atual do robô para verificar se ele já chegou no destino
@@ -435,6 +448,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
             robot_id_, dist, tolerance, pos_ok ? "sim" : "nao",
             ori_err_rad * 180.0 / M_PI, ori_ok ? "sim" : "nao");
     }
+    
 
     // Continua executando até chegar no destino ou ser interrompido
     return BT::NodeStatus::RUNNING;

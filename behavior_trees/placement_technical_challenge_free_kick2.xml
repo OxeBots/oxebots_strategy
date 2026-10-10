@@ -6,38 +6,36 @@
             <!-- FASE DE EXECUÇÃO (Comando Ativo)               -->
             <!-- ============================================== -->
             <Sequence>
-                <IsFreeKick/>
+                <CheckGCCommand expected="8"/> 
                 
                 <Fallback>
                     
-                    <!-- ROBÔ ID 1 -->
+                    <!-- ROBÔ ID 0: Alvo (-1850, 1420) | Orientação 270° (Olhando para baixo) -->
+                    <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <GoToPoint robot_id="0" x="-1350" y="1420" face_x="-1850" face_y="420" tolerance="50.0" ignore_area="true"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="-1850" y="1420" face_x="-1850" face_y="420" tolerance="50.0" ignore_area="true"/>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 1: Alvo (150, 700) | Orientação 180° (Olhando para a esquerda) -->
                     <Sequence>
                         <IsThisNodeID id="1"/>
-                        <GoToPoint robot_id="1" x="-1850" y="1420" face_x="-1850" face_y="1520" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                            <GoToPoint robot_id="1" x="150" y="700" face_x="-850" face_y="700" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
 
-                    <!-- ROBÔ ID 2 -->
+                    <!-- ROBÔ ID 2: Alvo (-590, -600) | Orientação 180° (Olhando para a esquerda) -->
                     <Sequence>
                         <IsThisNodeID id="2"/>
-                        <GoToPoint robot_id="2" x="150" y="700" face_x="250" face_y="700" tolerance="50.0"/>
                         <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
-                        </Repeat>
-                    </Sequence>
-
-                    <!-- ROBÔ ID 3 -->
-                    <Sequence>
-                        <IsThisNodeID id="3"/>
-                        <GoToPoint robot_id="3" x="-590" y="-600" face_x="-490" face_y="-600" tolerance="50.0"/>
-                        <Repeat num_cycles="-1">
-                            <Sequence><Halt reason="posicionado"/><Sleep msec="100"/></Sequence>
+                            <GoToPoint robot_id="2" x="-590" y="-600" face_x="-1590" face_y="-600" tolerance="50.0"/>
                         </Repeat>
                     </Sequence>
                     
-                    <!-- DEMAIS ROBÔS (Ficam parados) -->
+                    <!-- DEMAIS ROBÔS ESTÁTICOS -->
                     <Repeat num_cycles="-1">
                         <Sequence><Halt reason="assistindo"/><Sleep msec="100"/></Sequence>
                     </Repeat>
@@ -45,26 +43,6 @@
                 </Fallback>
             </Sequence>
 
-            <!-- ============================================== -->
-            <!-- FASE DE PREPARAÇÃO (Comando STOP = 1)          -->
-            <!-- ============================================== -->
-            <Sequence>
-                <CheckGCCommand expected="1"/>
-                <Fallback>
-                    <Sequence>
-                        <IsThisNodeID id="1"/>
-                        <GoToPoint robot_id="1" x="-1850" y="1420" face_x="-1850" face_y="1520" tolerance="50.0"/>
-                    </Sequence>
-                    <Sequence>
-                        <IsThisNodeID id="2"/>
-                        <GoToPoint robot_id="2" x="150" y="700" face_x="250" face_y="700" tolerance="50.0"/>
-                    </Sequence>
-                    <Sequence>
-                        <IsThisNodeID id="3"/>
-                        <GoToPoint robot_id="3" x="-590" y="-600" face_x="-490" face_y="-600" tolerance="50.0"/>
-                    </Sequence>
-                </Fallback>
-            </Sequence>
 
             <!-- ESTADO INATIVO -->
             <Sequence>
