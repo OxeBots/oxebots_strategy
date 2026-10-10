@@ -48,34 +48,6 @@
             </Sequence>
 
             <!-- ============================================== -->
-            <!-- FASE DE PREPARAÇÃO (Comando STOP = 1)          -->
-            <!-- ============================================== -->
-            <Sequence>
-                <CheckGCCommand expected="1"/>
-                <Fallback>
-                    <Sequence>
-                        <IsThisNodeID id="0"/>
-                        <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="0" x="310" y="800" face_x="-690" face_y="800" tolerance="50.0"/>
-                        </Repeat>
-                    </Sequence>
-                    <Sequence>
-                        <IsThisNodeID id="1"/>
-                        <GoToPoint robot_id="1" x="-750" y="600" face_x="-250" face_y="0" tolerance="100.0"/>
-                        <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="1" x="-250" y="0" face_x="-1250" face_y="0" tolerance="50.0"/>
-                        </Repeat>
-                    </Sequence>
-                    <Sequence>
-                        <IsThisNodeID id="2"/>
-                        <Repeat num_cycles="-1">
-                            <GoToPoint robot_id="2" x="310" y="-800" face_x="-690" face_y="-800" tolerance="50.0"/>
-                        </Repeat>
-                    </Sequence>
-                </Fallback>
-            </Sequence>
-
-            <!-- ============================================== -->
             <!-- ESTADO INATIVO                                 -->
             <!-- ============================================== -->
             <Sequence>
