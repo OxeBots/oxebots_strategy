@@ -1,0 +1,142 @@
+<root main_tree_to_execute="MainTreeCarry" BTCPP_format="4">
+  <BehaviorTree ID="MainTreeCarry">
+    <ReactiveFallback name="MasterStrategy">
+      
+      <!-- 0. HALT: Parada Absoluta -->
+      <Sequence name="HaltBranch">
+        <CheckGCCommand expected="0"/>
+        <SubTree ID="HaltSubTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- 1. STOP: Aciona a árvore de stop (que usa o KeepDistance de 550mm) -->
+      <Sequence name="StopBranch">
+        <CheckGCCommand expected="1"/>
+        <SubTree ID="StopSubTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ========================================================= -->
+      <!-- NOSSA BOLA PARADA: KICK-OFF (Amarelo 4, Azul 5) -->
+      <Sequence name="OurKickOffBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
+        </Fallback>
+        <SubTree ID="KickOffTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
+      <Sequence name="OurPenaltyBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
+        </Fallback>
+        <SubTree ID="PenaltyTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- NOSSAS FALTAS / LATERAIS (Já resolvidas no C++) -->
+      <Sequence name="CornerBranch">
+          <IsValueTrue value="{is_corner_kick}"/>
+          <SubTree ID="CornerTree" _autoremap="true" />
+      </Sequence>
+      <Sequence name="ThrowInBranch">
+          <IsValueTrue value="{is_kick_in}"/>
+          <SubTree ID="ThrowInTree" _autoremap="true" />
+      </Sequence>
+      <Sequence name="FreeKickBranch">
+          <IsValueTrue value="{is_free_kick}"/>
+          <SubTree ID="FreeKickTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ========================================================= -->
+      <!-- BOLA PARADA DO ADVERSÁRIO: Usa o OppSetPieceTree para RECUAR -->
+      <Sequence name="OpponentSetPieceBranch">
+        <Fallback>
+          <!-- Kick-Off deles -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
+          <!-- Pênalti deles -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
+          <!-- Falta deles (Direta Amarelo 8, Direta Azul 9) -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="9"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="8"/></Sequence>
+          <!-- Fallback herdado do sistema anterior -->
+          <IsValueTrue value="{is_opponent_foul}"/>
+        </Fallback>
+        <SubTree ID="OppSetPieceTree" _autoremap="true" />
+      </Sequence>
+      <!-- ========================================================= -->
+
+      <!-- JOGO ROLANDO -->
+      <ReactiveSequence name="GoalkeeperRole">
+        <IsRobotId robot_id="0" />
+        <SubTree ID="GoalkeeperTree" _autoremap="true" />
+      </ReactiveSequence>
+
+      <ReactiveSequence name="AttackerRole">
+        <IsMyRole role="attacker" />
+        <RetryUntilSuccessful num_attempts="-1">
+          <ReactiveSequence name="AttackerLogicLoop">
+            <UpdateBallPosition robot_id="{robot_id}"
+                                ball_x="{ball_x}" ball_y="{ball_y}"
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                                is_ready_to_kick="{is_ready}"
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+            
+            <CalculateInterception robot_id="{robot_id}"
+                                   goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
+                                   carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
+                                   intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
+                                   intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                                   intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
+                                   intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
+                                   intercept_carry_x="{int_carry_x}" intercept_carry_y="{int_carry_y}"
+                                   intercept_carry_face_x="{int_carry_face_x}" intercept_carry_face_y="{int_carry_face_y}"
+                                   is_ready_to_kick="{is_ready_pred}" />
+            
+            <ReactiveFallback name="AttackLogicActions">
+              <Sequence name="ChaseAndKick">
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
+                           ball_contact_threshold_mm="150.0" />
+                
+                <ReactiveFallback name="ApproachAndKick">
+                  <Sequence name="Shoot">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                    <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
+                  </Sequence>
+                  
+                  <ReactiveSequence name="Realign">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
+                    <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" />
+                  </ReactiveSequence>
+                  
+                  <ReactiveSequence name="Carry">
+                    <IsBallInOurHalf ball_x="{ball_x}" />
+                    <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                  </ReactiveSequence>
+                </ReactiveFallback>
+                
+                <Delay delay_msec="600">
+                  <AlwaysSuccess/>
+                </Delay>
+              </Sequence>
+            </ReactiveFallback>
+          </ReactiveSequence>
+        </RetryUntilSuccessful>
+      </ReactiveSequence>
+
+      <SubTree ID="DefenderTree" _autoremap="true" />
+
+      <Halt reason="idle"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

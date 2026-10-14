@@ -15,6 +15,7 @@
 
 #include "oxebots_strategy/d_star_planner.h"
 
+#include <algorithm>
 #include <iomanip>
 
 namespace planning
@@ -481,7 +482,18 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     robot_id_ = safe_param("robot_id", 0).as_int();
     is_yellow_ = safe_param("is_yellow_team", false).as_bool();
     invert_sides_ = safe_param("invert_sides", false).as_bool();
-    double hz = safe_param("planning_rate_hz", 10.0).as_double();
+    planning_rate_hz_ = safe_param("planning_rate_hz", 10.0).as_double();
+    // Taxa usada só quando a bola está a close_ball_distance_m_ ou menos do robô: a defasagem
+    // entre "detectar contato" (na árvore, via GoToPointNode::ball_contact_threshold_mm) e o
+    // robô de fato mudar de rota é dominada pelo período deste timer — a 10Hz (100ms), o robô
+    // segue empurrando a bola por vários ciclos antes do D* sequer recalcular. Confirmado em log:
+    // robô e bola avançando juntos por 700ms-1s a ~60-70mm de distância constante, com o D*
+    // aprovando "Path found" o tempo todo (não é falha de planejamento, é lentidão de replanejar).
+    // Perto da bola, sobe pra 4x mais rápido (~40Hz/25ms por padrão) só nesse robô, sem competir
+    // com o controlador de velocidade (PathFollowerNode continua sendo o único a publicar
+    // /robot_commands, isso só faz o *caminho* que ele segue ficar mais atualizado).
+    planning_rate_hz_close_ = safe_param("planning_rate_hz_close", 40.0).as_double();
+    close_ball_distance_m_ = safe_param("close_ball_distance_m", 0.4).as_double();
 
     planning::PlannerConfig config;
     config.robot_safety_radius = safe_param("robot_safety_radius", 0.20).as_double();
@@ -489,12 +501,13 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     config.max_expansions = safe_param("max_expansions", 100000).as_int();
 
     ally_safety_radius_m_ = config.robot_safety_radius;
-    // Raio de inflação bem menor que o dos aliados: precisa ser menor que
-    // CalculateInterceptionNode::kCaptureDistanceMm (o ponto de captura do atacante fica logo
-    // atrás da bola), senão o próprio alvo do atacante cai dentro do obstáculo e o D* nunca
-    // encontra caminho até ele. Ainda assim, grande o suficiente para o D* desviar da bola em vez
-    // de atravessá-la ao se aproximar por outros ângulos.
-    ball_safety_radius_m_ = safe_param("ball_safety_radius", 0.08).as_double();
+    // Precisa cobrir raio do robô (~75mm) + raio da bola (~22mm) + margem, senão a borda do robô
+    // encosta na bola mesmo "contornando" pelo D* (confirmado no log: robô raspando a bola a
+    // 60-95mm de distância por vários segundos, com o planner reportando caminho válido o tempo
+    // todo). Ainda precisa ficar menor que CalculateInterceptionNode::kCaptureDistanceMm (o ponto
+    // de captura do atacante fica logo atrás da bola), senão o próprio alvo do atacante cai dentro
+    // do obstáculo e o D* nunca encontra caminho até ele.
+    ball_safety_radius_m_ = safe_param("ball_safety_radius", 0.15).as_double();
 
     planner_ = std::make_unique<planning::DStarPlanner>(0.05, config, this->get_logger());
 
@@ -518,6 +531,19 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     geometry_sub_ = create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
     "/field_geometry", qos, std::bind(&DStarPlannerNode::geometry_callback, this, std::placeholders::_1));
 
+    planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / planning_rate_hz_)),
+                                        std::bind(&DStarPlannerNode::plan_and_publish, this));
+}
+
+void DStarPlannerNode::updatePlanningRate(double ball_dist_m)
+{
+    bool should_be_fast = ball_dist_m < close_ball_distance_m_;
+    if (should_be_fast == fast_replan_active_)
+        return;  // já está na taxa certa, evita recriar o timer todo tick
+
+    fast_replan_active_ = should_be_fast;
+    double hz = should_be_fast ? planning_rate_hz_close_ : planning_rate_hz_;
+    planning_timer_->cancel();
     planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / hz)),
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
@@ -648,31 +674,92 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
     // bloquear o ponto de captura do atacante logo atrás dela.
     obstacles.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f, ball_safety_radius_m_});
 
+    // Guardado à parte (não só dentro do vetor de obstáculos do D*) porque plan_straight_line
+    // precisa da posição da bola para o desvio local, mesmo quando planner_type é straight_line
+    // e a grade de obstáculos do D* nem é consultada.
+    ball_x_ = msg->ball.x / 1000.0f;
+    ball_y_ = msg->ball.y / 1000.0f;
+
     if (planner_)
         planner_->setDynamicObstacles(obstacles);
+
+    updatePlanningRate(std::hypot(current_x_ - ball_x_, current_y_ - ball_y_));
 }
 
 void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& target)
 {
-    // Interpola pontos a cada 10cm entre a posição atual e o alvo, sem consultar a grade de
-    // obstáculos: nem a bola nem os aliados bloqueiam este caminho.
+    // Interpola pontos a cada 10cm entre a posição atual e o alvo. Não consulta a grade de
+    // obstáculos (aliados/área de penalidade continuam sem desvio aqui), mas insere um desvio
+    // lateral local ao redor da BOLA se ela tiver se movido para o meio do caminho: sem isso, se
+    // a bola sair da linha bola-gol assumida pela Fase 1 (tocada, ruído de predição) antes do fim
+    // da Fase 2, o robô atravessa ela em vez de contornar (relatado como "bate na bola andando de
+    // costas", já que a frente do robô mira o gol, não a bola).
     nav_msgs::msg::Path path;
     path.header = last_map_data_->header;
 
     double dx = target.x - current_x_;
     double dy = target.y - current_y_;
     double dist = std::hypot(dx, dy);
-    constexpr double kStepMeters = 0.10;
-    int steps = std::max(1, static_cast<int>(dist / kStepMeters));
 
-    for (int i = 0; i <= steps; ++i) {
-        double t = static_cast<double>(i) / static_cast<double>(steps);
-        geometry_msgs::msg::PoseStamped pose;
-        pose.header = path.header;
-        pose.pose.position.x = current_x_ + dx * t;
-        pose.pose.position.y = current_y_ + dy * t;
-        pose.pose.orientation.w = 1.0;
-        path.poses.push_back(pose);
+    double via_x = current_x_;
+    double via_y = current_y_;
+    bool has_via = false;
+
+    // Raio de segurança total (robô + bola + margem). Só se aplica ANTES do trecho final: o
+    // próprio alvo (int_cap_x/y) fica de propósito a ~115mm da bola (kCaptureDistanceMm), então
+    // fechar essa distância no fim é o objetivo, não um risco de colisão a evitar.
+    constexpr double kClearanceM = 0.20;
+
+    if (dist > 1e-6) {
+        double ux = dx / dist;
+        double uy = dy / dist;
+        double perp_x = -uy;
+        double perp_y = ux;
+
+        double bx = ball_x_ - current_x_;
+        double by = ball_y_ - current_y_;
+
+        double along = bx * ux + by * uy;              // projeção da bola sobre a reta
+        double safe_along_limit = dist - kClearanceM;   // não desvia perto do próprio alvo
+        double clamped_along = std::clamp(along, 0.0, dist);
+
+        double closest_x = current_x_ + ux * clamped_along;
+        double closest_y = current_y_ + uy * clamped_along;
+        double clearance_dist = std::hypot(ball_x_ - closest_x, ball_y_ - closest_y);
+
+        if (clamped_along < safe_along_limit && clearance_dist < kClearanceM) {
+            double side_perp = bx * perp_x + by * perp_y;  // deslocamento lateral (assinado) da bola
+            double side = (side_perp >= 0.0) ? -1.0 : 1.0; // empurra o via-point para o lado OPOSTO à bola
+            double push = kClearanceM - clearance_dist;
+            via_x = closest_x + perp_x * side * push;
+            via_y = closest_y + perp_y * side * push;
+            has_via = true;
+        }
+    }
+
+    constexpr double kStepMeters = 0.10;
+    auto append_segment = [&](double sx, double sy, double ex, double ey) {
+        double sdx = ex - sx;
+        double sdy = ey - sy;
+        double sdist = std::hypot(sdx, sdy);
+        int steps = std::max(1, static_cast<int>(sdist / kStepMeters));
+        int start_i = path.poses.empty() ? 0 : 1;  // evita duplicar o ponto de junção
+        for (int i = start_i; i <= steps; ++i) {
+            double t = static_cast<double>(i) / static_cast<double>(steps);
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header = path.header;
+            pose.pose.position.x = sx + sdx * t;
+            pose.pose.position.y = sy + sdy * t;
+            pose.pose.orientation.w = 1.0;
+            path.poses.push_back(pose);
+        }
+    };
+
+    if (has_via) {
+        append_segment(current_x_, current_y_, via_x, via_y);
+        append_segment(via_x, via_y, target.x, target.y);
+    } else {
+        append_segment(current_x_, current_y_, target.x, target.y);
     }
 
     path_pub_->publish(path);

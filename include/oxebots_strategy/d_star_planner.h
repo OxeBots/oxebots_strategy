@@ -342,11 +342,21 @@ class DStarPlannerNode : public rclcpp::Node
     void plan_and_publish();
 
     /**
-     * @brief Gera um caminho interpolado em linha reta até o alvo, ignorando a grade de
-     * obstáculos (bola/aliados incluídos). Usado quando planner_type == PLANNER_STRAIGHT_LINE,
-     * para a aproximação final do atacante até o ponto de captura logo atrás da bola — situação
-     * em que a bola, marcada como obstáculo dinâmico para o D*, ficaria "dentro" da própria
-     * margem de segurança do alvo e travaria o replanejamento incremental.
+     * @brief Troca a taxa do planning_timer_ entre normal (planning_rate_hz_) e rápida
+     * (planning_rate_hz_close_) conforme a distância robô-bola. Ver comentário completo em
+     * updatePlanningRate() na implementação.
+     */
+    void updatePlanningRate(double ball_dist_m);
+
+    /**
+     * @brief Gera um caminho em linha reta até o alvo (sem consultar a grade de obstáculos —
+     * a área de penalidade e os outros robôs continuam sem nenhum desvio aqui), usado quando
+     * planner_type == PLANNER_STRAIGHT_LINE para a aproximação final do atacante até o ponto de
+     * captura logo atrás da bola — situação em que a bola, marcada como obstáculo dinâmico para
+     * o D*, ficaria "dentro" da própria margem de segurança do alvo e travaria o replanejamento
+     * incremental. Ainda assim, insere um desvio lateral local se a própria bola (que pode ter se
+     * movido desde que o ponto de captura foi calculado) ficar no meio do caminho antes do trecho
+     * final de aproximação — ver clearance em plan_straight_line().
      */
     void plan_straight_line(const geometry_msgs::msg::Point& target);
 
@@ -367,9 +377,21 @@ class DStarPlannerNode : public rclcpp::Node
     std::optional<oxebots_interfaces::msg::RobotGoal::SharedPtr> target_goal_msg_;
     float current_x_ = 0.0f;
     float current_y_ = 0.0f;
+    float ball_x_ = 0.0f;
+    float ball_y_ = 0.0f;
     int robot_id_ = 0;
+    double planning_rate_hz_ = 10.0;
+    double planning_rate_hz_close_ = 10.0;
+    double close_ball_distance_m_ = 0.4;
+    bool fast_replan_active_ = false;
     double ally_safety_radius_m_ = 0.20;
-    double ball_safety_radius_m_ = 0.08;
+    // Raio (m) mantido livre ao redor do CENTRO da bola no grid do D*. Precisa cobrir raio do
+    // robô (~75mm) + raio da bola (~22mm) + margem, senão o D* aprova caminhos que passam perto
+    // o bastante do centro da bola para a borda do robô encostar nela mesmo "contornando" —
+    // confirmado no log: robô raspando a bola a 60-95mm de distância por >1s durante a Fase 1
+    // (D*), enquanto o planner reportava caminho válido o tempo todo. 0.15m ainda fica bem abaixo
+    // da distância normal do ponto de pré-chute à bola (~400mm), então não compromete a Fase 1.
+    double ball_safety_radius_m_ = 0.15;
     int consecutive_failures_ = 0;
     bool is_yellow_ = false;
     bool invert_sides_ = false;

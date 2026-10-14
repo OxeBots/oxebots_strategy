@@ -1,0 +1,41 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="KickOffTree">
+    <Fallback name="KickOffRoles">
+        
+        <!-- 1. GOLEIRO -->
+        <Sequence name="GoalKeeperRole">
+            <IsRobotId robot_id="0"/>
+            <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+        </Sequence>
+
+        <!-- 2. ATACANTE (No próprio campo aguardando o apito) -->
+        <Sequence name="Kicker">
+            <IsMyRole role="attacker"/>
+            <!-- O Inverter quebra o laço Repeat assim que o juiz apita o Normal Start (2) -->
+            <Repeat num_cycles="-1">
+                <ReactiveSequence>
+                    <Inverter>
+                        <CheckGCCommand expected="2"/>
+                    </Inverter>
+                    <GoToPoint robot_id="{robot_id}" x="350" y="0" tolerance="50.0"/>
+                </ReactiveSequence>
+            </Repeat>
+        </Sequence>
+
+        <!-- 3. DEFENSOR (No próprio campo acompanhando) -->
+        <Sequence name="FieldPlayers">
+            <IsMyRole role="defender"/>
+            <Repeat num_cycles="-1">
+                <ReactiveSequence>
+                    <Inverter>
+                        <CheckGCCommand expected="2"/>
+                    </Inverter>
+                    <GoToPoint robot_id="{robot_id}" x="600" y="600" tolerance="50.0"/>
+                </ReactiveSequence>
+            </Repeat>
+        </Sequence>
+
+        <Halt reason="waiting_kick_off"/>
+    </Fallback>
+  </BehaviorTree>
+</root>

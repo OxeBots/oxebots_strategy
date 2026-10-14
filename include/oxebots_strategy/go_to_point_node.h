@@ -28,6 +28,7 @@ public:
 
 private:
   void publishGoal();
+  double resolveFaceAngle();
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
   void geometryDataCallback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
   void publishMarkers();
@@ -44,6 +45,8 @@ private:
   unsigned int robot_id_;
   geometry_msgs::msg::Point target_pos_;
   double target_w_;
+  std::optional<rclcpp::Time> ball_contact_since_;
+  std::optional<rclcpp::Time> ball_wrong_side_since_;
 };
 
 } // namespace oxebots_strategy

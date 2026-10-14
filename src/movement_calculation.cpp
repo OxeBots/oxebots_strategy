@@ -61,11 +61,13 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
     if (msg->robot_id != robot_id_) return;
     std::lock_guard<std::mutex> lock(data_mutex_);
     target_goal_ = movement::Coordinate{
-        (float)(msg->pose.pose.position.x * 1000.0), 
-        (float)(msg->pose.pose.position.y * 1000.0)  
+        (float)(msg->pose.pose.position.x * 1000.0),
+        (float)(msg->pose.pose.position.y * 1000.0)
     };
     const auto& q = msg->pose.pose.orientation;
     target_w_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    target_planner_type_ = msg->planner_type;
+    disable_arrival_latch_ = msg->disable_arrival_latch;
 }
 
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -117,12 +119,27 @@ void PathFollowerNode::calculate_and_move() {
         effective_mode = last_override_msg_->mode;
     }
 
+    // Diagnóstico temporário: avisa sempre que o robô encostar (ou quase) na bola FORA do chute
+    // intencional (MODE_KICK) — raio do robô (~75mm) + raio da bola (~22mm) ~ 97mm de contato
+    // real. Ajuda a identificar em qual fase/estado exatamente a colisão relatada (bola atrás,
+    // robô não desvia) está acontecendo, já que não há nenhum outro marcador de contato no log.
+    if (effective_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK) {
+        double ball_dist = std::hypot(last_game_data_->ball.x - current_pos.x, last_game_data_->ball.y - current_pos.y);
+        if (ball_dist < 100.0) {
+            RCLCPP_WARN(this->get_logger(),
+                "Robô %d PERTO/ENCOSTANDO na bola fora do chute: dist=%.1fmm modo=%d heading=%.1fdeg "
+                "robot(%.1f,%.1f) ball(%.1f,%.1f)",
+                robot_id_, ball_dist, effective_mode, current_pos.orientation * 180.0 / M_PI,
+                current_pos.x, current_pos.y, last_game_data_->ball.x, last_game_data_->ball.y);
+        }
+    }
+
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
         publishHalt();
         return;
     }
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK) {
-        runKick();
+        runKick(current_pos);
         return;
     }
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_BALL ||
@@ -187,23 +204,17 @@ void PathFollowerNode::calculate_and_move() {
     double check_dist = target_goal_.has_value() ?
         std::hypot(target_goal_->x - current_pos.x, target_goal_->y - current_pos.y) : dist_to_target;
 
-    // 10mm: precisa ficar ABAIXO da menor tolerância usada em qualquer GoToPoint das árvores
-    // (20mm na fase 2 de master_strategy.xml, a aproximação final antes do chute). Estava em
-    // 40mm, maior que essa tolerância de 20mm — o robô era mandado parar (velocidade zerada)
-    // antes de conseguir satisfazer a própria condição de sucesso do GoToPoint (dist < 20mm),
-    // travando pra sempre alguns mm fora do alcance (confirmado no log: "dist=28.5" congelado
-    // por 8+ segundos, GoToPoint nunca retornando SUCCESS, robô parado na frente da bola).
+    // Abaixo desta distância o alvo é considerado "alcançado": zera velocidade e libera o
+    // controle angular (ver disable_arrival_latch_ abaixo). Precisa ficar abaixo de qualquer
+    // tolerância usada nas árvores de comportamento.
     constexpr double kArrivedDistanceMm = 10.0;
-    bool arrived = check_dist < kArrivedDistanceMm || dist_to_target < 0.001;
+    // Alvos publicados com tolerance<=0 (GoToPoint "nunca chega formalmente", ex: pontos de carga
+    // deliberadamente além da bola) nunca travam aqui mesmo cruzando os 10mm — ver RobotGoal.msg.
+    bool arrived = !disable_arrival_latch_ && (check_dist < kArrivedDistanceMm || dist_to_target < 0.001);
 
     // --- Controle Angular ---
-    // Uma vez que o robô "chegou" (arrived), este nó para de disputar autoridade angular: sem
-    // isso, target_w_ (calculado ao publicar o goal, geralmente virando para o gol) continuava
-    // sendo perseguido para sempre a cada tick, mesmo depois do GoToPoint já ter sucesso — e
-    // brigava pelo mesmo /robot_commands com o AlignToBallNode, que gira o robô para a bola REAL
-    // logo em seguida. Dois controladores de rotação com alvos diferentes disputando o mesmo
-    // tópico faziam o robô nunca convergir (visto no log: preso 44s sem nunca alinhar). Zerar
-    // target_w_ aqui cede a rotação para quem realmente precisa dela nesse momento.
+    // Ao "chegar", este nó solta a autoridade angular (target_w_.reset()) para não brigar pelo
+    // mesmo tópico /robot_commands com quem assumir a rotação em seguida.
     double angle_err = 0.0;
     bool has_target_w = target_w_.has_value();
     double desired_w = 0.0;
@@ -244,15 +255,10 @@ void PathFollowerNode::calculate_and_move() {
 
         double speed = std::min(max_lin, (dist_to_target / 1000.0) * p_lin);
 
-        // Prioriza alinhar antes de avançar, mas só perto do alvo final: com erro angular >= 90
-        // graus a velocidade linear vai a zero (gira no lugar); alinhado (erro ~0) mantém a
-        // velocidade cheia. Evita que o robô empurre/bata na bola fora de posição enquanto ainda
-        // está girando para encará-la. Longe do alvo (perseguindo a bola pelo campo) o robô ainda
-        // não precisa estar de frente para o gol, então corre em velocidade plena sem ser freado
-        // por essa checagem. Com o ataque em duas fases (master_strategy.xml), a "arrancada final"
-        // do ponto de pré-chute até o ponto de captura tem só ~270mm — um range de 400mm cobriria
-        // essa corrida inteira e deixaria o robô lento bem quando ele já devia estar alinhado e
-        // só precisa avançar reto. 100mm reduz o freio para só os últimos centímetros.
+        // Prioriza alinhar antes de avançar, mas só perto do alvo final: erro angular alto reduz
+        // a velocidade linear (gira mais no lugar), alinhado mantém velocidade cheia. Evita que o
+        // robô empurre/bata na bola fora de posição enquanto ainda gira para encará-la. Longe do
+        // alvo, corre em velocidade plena sem esse freio.
         constexpr double kAlignmentPriorityRangeMm = 100.0;
         if (has_target_w && check_dist < kAlignmentPriorityRangeMm) {
             double alignment_factor = std::max(0.0, std::cos(angle_err));
@@ -261,6 +267,33 @@ void PathFollowerNode::calculate_and_move() {
 
         cmd_data.x_velocity = vx * speed;
         cmd_data.y_velocity = vy * speed;
+    }
+
+    // Repulsão de contato — só na Fase 1 (D*), onde qualquer contato com a bola é acidental (na
+    // Fase 2/straight_line, chegar perto é o objetivo). Age no mesmo ciclo de 50ms em que o
+    // contato é detectado, sem esperar o roundtrip árvore→D*→path. Histerese (entra a 100mm, só
+    // desarma a 130mm) evita flapping na borda; complementa o ball_contact_threshold_mm do
+    // GoToPoint, que força um replanejamento completo se o contato persistir.
+    if (last_game_data_ && !arrived && target_planner_type_ == oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR) {
+        double bdx = current_pos.x - last_game_data_->ball.x;
+        double bdy = current_pos.y - last_game_data_->ball.y;
+        double ball_dist = std::hypot(bdx, bdy);
+        constexpr double kContactEnterMm = 100.0;
+        constexpr double kContactExitMm = 130.0;
+
+        if (contact_repulsion_active_) {
+            if (ball_dist > kContactExitMm) contact_repulsion_active_ = false;
+        } else if (ball_dist < kContactEnterMm) {
+            contact_repulsion_active_ = true;
+        }
+
+        if (contact_repulsion_active_ && ball_dist > 1e-3) {
+            double max_lin = this->get_parameter("max_linear_speed").as_double();
+            double repel_speed = max_lin * std::clamp(1.0 - ball_dist / kContactExitMm, 0.0, 1.0);
+            cmd_data.x_velocity = (bdx / ball_dist) * repel_speed;
+            cmd_data.y_velocity = (bdy / ball_dist) * repel_speed;
+            cmd_data.angular_velocity = 0.0;
+        }
     }
 
     cmd_msg->robots.push_back(cmd_data);
@@ -342,7 +375,7 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
 // janela, e então segura kKickCooldown antes de aceitar outro pedido — sem isso, um pedido de
 // chute que continue chegando (o leaf reenvia a cada tick enquanto RUNNING) dispararia de novo
 // instantaneamente, virando uma "metralhadora" que nunca solta a bola direito.
-void PathFollowerNode::runKick() {
+void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
     auto now = std::chrono::steady_clock::now();
 
     if (kick_phase_ == KickPhase::IDLE && now >= kick_cooldown_until_) {
@@ -357,8 +390,19 @@ void PathFollowerNode::runKick() {
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
             cmd_data.kick_speed = last_override_msg_->kick_speed;
-            cmd_data.x_velocity = 0.5; // avançar enquanto chuta, para garantir contato
-            cmd_data.y_velocity = 0.0;
+            // Avançar enquanto chuta, para garantir contato — na direção que o robô está
+            // REALMENTE olhando (current_pos.orientation), não em +X global fixo. RobotCmdData
+            // usa velocidades em referencial global (mesma convenção do resto deste arquivo, ver
+            // vx/vy do seguimento de caminho acima), então +X fixo só empurra "para frente" por
+            // coincidência quando o robô já está de frente pro +X — ou seja, só funciona pro time
+            // que ataca em direção a +X. Para o time que ataca em -X (opponent_goal_x negativo),
+            // empurrava para TRÁS do chute, cancelando o próprio avanço — o chute "completava"
+            // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
+            // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
+            // toda tentativa, exclusivo do time amarelo).
+            constexpr double kKickAdvanceSpeed = 0.5;
+            cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
+            cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0;
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));

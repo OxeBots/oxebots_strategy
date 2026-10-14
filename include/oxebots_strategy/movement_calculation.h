@@ -44,7 +44,7 @@ private:
     // (D*/linha reta + apontar para o gol) permanece inalterada, no corpo de calculate_and_move(),
     // e roda sempre que não há override ativo (modo NONE, incluindo por expiração de TTL).
     void runAlign(const movement::Coordinate& current_pos, uint8_t mode);
-    void runKick();
+    void runKick(const movement::Coordinate& current_pos);
     void publishHalt();
     void publishStatus(uint8_t active_mode, bool aligned);
 
@@ -61,6 +61,14 @@ private:
     std::optional<movement::Coordinate> target_goal_;
     nav_msgs::msg::Path::SharedPtr last_path_;
     std::optional<double> target_w_;
+    // Usado pela repulsão de contato (calculate_and_move()): só age na Fase 1 (D*), onde contato
+    // com a bola é acidental. Default DSTAR mantém a repulsão habilitada até o primeiro goal.
+    uint8_t target_planner_type_ = oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
+    // Espelha RobotGoal::disable_arrival_latch do último /robot_goal recebido — ver comentário no
+    // .msg.
+    bool disable_arrival_latch_ = false;
+    // Histerese da repulsão de contato: entra a kContactEnterMm, só desarma a kContactExitMm.
+    bool contact_repulsion_active_ = false;
 
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     int robot_id_ = 0;
