@@ -39,6 +39,7 @@
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
+#include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "ssl_league_msgs/msg/referee.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <algorithm>
@@ -81,6 +82,11 @@ public:
 
     gc_sub_ = this->create_subscription<ssl_league_msgs::msg::Referee>(
       this->get_parameter("gc_topic").as_string(), 10, std::bind(&StrategyNode::gc_callback, this, std::placeholders::_1));
+    
+    // Assina a geometria oficial do campo publicada pelo game_observer_node
+    geometry_sub_ = this->create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
+      "/field_geometry", rclcpp::QoS(1).transient_local().reliable(),
+      std::bind(&StrategyNode::geometry_callback, this, std::placeholders::_1));
 
     override_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>("/robot_motion_override", 10);
   }
@@ -232,14 +238,17 @@ public:
     rclcpp::Rate rate(rate_hz);
 
     while (rclcpp::ok()) {
-     if (has_data_) {
+     if (has_data_ && has_geometry_) {
         try {
           tree_.tickOnce();
         } catch (const std::exception& e) {
           RCLCPP_ERROR(this->get_logger(), "Erro ao executar tick: %s", e.what());
         }
       } else {
-        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Aguardando dados...");
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                             "Aguardando dados (game_data=%s, field_geometry=%s)...",
+                             has_data_.load() ? "ok" : "pendente",
+                             has_geometry_.load() ? "ok" : "pendente");
       }
       
       try {
@@ -258,21 +267,22 @@ private:
         effective_is_yellow = !is_yellow_;
     }
 
-    double my_goal_x = effective_is_yellow ? 2200.0 : -2200.0;
-    double opponent_goal_x = effective_is_yellow ? -2200.0 : 2200.0;
-    blackboard_->set("my_goal_x", my_goal_x);
-    blackboard_->set("opponent_goal_x", opponent_goal_x);
-    blackboard_->set("opponent_goal_y", 0.0);
     blackboard_->set("is_yellow", effective_is_yellow);
     blackboard_->set("attacker_id", attacker_id_);
     blackboard_->set("defender_id", defender_id_);
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
     blackboard_->set("is_goalkeeper", (robot_id_ == 0));
-    
-    // Dimensões padrão da área para evitar falhas nos nós
-    blackboard_->set("penalty_area_depth", 500.0);
-    blackboard_->set("penalty_area_width", 1350.0);
-    blackboard_->set("goal_width", 800.0);
+
+    // Inicializa as chaves de geometria no Blackboard (preenchidas automaticamente por /field_geometry antes do 1º tick)
+    blackboard_->set("my_goal_x", 0.0);
+    blackboard_->set("opponent_goal_x", 0.0);
+    blackboard_->set("opponent_goal_y", 0.0);
+    blackboard_->set("field_length", 0.0);
+    blackboard_->set("field_width", 0.0);
+    blackboard_->set("penalty_area_depth", 0.0);
+    blackboard_->set("penalty_area_width", 0.0);
+    blackboard_->set("goal_width", 0.0);
+    blackboard_->set("center_circle_radius", 0.0);
 
     blackboard_->set("gc_command", -1);
     blackboard_->set("gc_stage", -1);
@@ -398,6 +408,30 @@ private:
     }
   }
 
+  // Atualiza dinamicamente as dimensões do campo e coordenadas dos gols no Blackboard a partir da SSL-Vision
+  void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg)
+  {
+    bool effective_is_yellow = invert_sides_ ? !is_yellow_ : is_yellow_;
+
+    double field_length = static_cast<double>(msg->field.field_length);
+    double field_width = static_cast<double>(msg->field.field_width);
+    double goal_x = field_length / 2.0;
+
+    double my_goal_x = effective_is_yellow ? goal_x : -goal_x;
+    double opponent_goal_x = effective_is_yellow ? -goal_x : goal_x;
+
+    blackboard_->set("field_length", field_length);
+    blackboard_->set("field_width", field_width);
+    blackboard_->set("my_goal_x", my_goal_x);
+    blackboard_->set("opponent_goal_x", opponent_goal_x);
+    blackboard_->set("penalty_area_depth", static_cast<double>(msg->field.penalty_area_depth));
+    blackboard_->set("penalty_area_width", static_cast<double>(msg->field.penalty_area_width));
+    blackboard_->set("goal_width", static_cast<double>(msg->field.goal_width));
+    blackboard_->set("center_circle_radius", static_cast<double>(msg->field.center_circle_radius));
+
+    has_geometry_.store(true);
+  }
+
   bool is_yellow_;
   bool invert_sides_;
   int robot_id_;
@@ -411,6 +445,7 @@ private:
   rclcpp::Time last_ball_time_;
 
   std::atomic<bool> has_data_{false};
+  std::atomic<bool> has_geometry_{false};
   BT::BehaviorTreeFactory factory_;
   BT::Tree tree_;
   std::unique_ptr<BT::Groot2Publisher> publisher_;
@@ -418,6 +453,7 @@ private:
   rclcpp::Subscription<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_sub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_sub_;
   rclcpp::Subscription<ssl_league_msgs::msg::Referee>::SharedPtr gc_sub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_pub_;
 };
 

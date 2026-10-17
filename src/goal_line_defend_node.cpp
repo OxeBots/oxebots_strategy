@@ -5,7 +5,6 @@
 namespace oxebots_strategy
 {
 
-static constexpr double DEFAULT_GOAL_WIDTH = 1000.0;
 static constexpr double GOAL_LINE_OFFSET = 100.0;
 static constexpr double POSITION_UPDATE_THRESHOLD = 5.0;
 
@@ -30,9 +29,8 @@ BT::NodeStatus GoalLineDefendNode::onStart()
         robot_id_ = 0;
     }
 
-    auto blackboard = config().blackboard;
-    if (!blackboard->get("my_goal_x", my_goal_x_)) {
-        my_goal_x_ = (robot_id_ == 0) ? -2200.0 : 2200.0; // Default fallback
+    if (auto blackboard = config().blackboard) {
+        (void)blackboard->get("my_goal_x", my_goal_x_);
     }
 
     last_target_y_ = -99999.0;
@@ -44,10 +42,13 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     double ball_y;
     if (!getInput<double>("ball_y", ball_y)) return BT::NodeStatus::FAILURE;
 
-    double goal_width = DEFAULT_GOAL_WIDTH;
+    double goal_width = 0.0;
     auto blackboard = config().blackboard;
-    if (!blackboard->get("goal_width", goal_width)) {
-        // Fallback to DEFAULT_GOAL_WIDTH already set
+    if (!blackboard ||
+        !blackboard->get("my_goal_x", my_goal_x_) ||
+        !blackboard->get("goal_width", goal_width) ||
+        goal_width <= 0.0) {
+        return BT::NodeStatus::RUNNING;
     }
 
     double limit = goal_width / 2.0;

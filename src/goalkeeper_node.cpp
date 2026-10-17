@@ -25,15 +25,14 @@ GoalkeeperNode::GoalkeeperNode(const std::string & name, const BT::NodeConfig & 
       kick_speed_ = 3.0;
   }
 
-  // Obter my_goal_x e is_yellow do blackboard
-  auto blackboard = config.blackboard;
-  if (blackboard) {
-      if (!blackboard->get("my_goal_x", my_goal_x_)) {
-          my_goal_x_ = -2200.0;
-      }
-      if (!blackboard->get("is_yellow", is_yellow_team_)) {
-          is_yellow_team_ = false;
-      }
+  // Obter valores iniciais do Blackboard (atualizados continuamente por /field_geometry)
+  if (auto blackboard = config.blackboard) {
+      (void)blackboard->get("my_goal_x", my_goal_x_);
+      (void)blackboard->get("is_yellow", is_yellow_team_);
+      (void)blackboard->get("penalty_area_depth", penalty_area_depth_);
+      (void)blackboard->get("penalty_area_width", penalty_area_width_);
+      (void)blackboard->get("goal_width", goal_width_);
+      (void)blackboard->get("field_width", field_width_);
   }
 
   // Publisher para comandos de objetivo do robô (/robot_goal)
@@ -49,8 +48,8 @@ GoalkeeperNode::GoalkeeperNode(const std::string & name, const BT::NodeConfig & 
     "/game_data", 10, std::bind(&GoalkeeperNode::game_data_callback, this, std::placeholders::_1));
 
   RCLCPP_INFO(node_->get_logger(),
-              "GoalkeeperNode configurado para o robô %u. Meu gol em X: %.1f. Área fixa: 500mm em X e 1350mm em Y.",
-              robot_id_, my_goal_x_);
+              "GoalkeeperNode configurado para o robô %u (geometria dinâmica via Blackboard).",
+              robot_id_);
 }
 
 BT::PortsList GoalkeeperNode::providedPorts()
@@ -77,17 +76,17 @@ void GoalkeeperNode::game_data_callback(const oxebots_interfaces::msg::GameData:
 
 void GoalkeeperNode::clampInsidePenaltyArea(double & tx, double & ty, double margin_mm)
 {
-  // Dimensões fixas: 1350mm em Y (half_width = 675mm), 500mm em X
-  double half_width = PENALTY_AREA_WIDTH / 2.0;
+  // Limita a posição alvo às dimensões da pequena área recebidas via Blackboard
+  double half_width = penalty_area_width_ / 2.0;
   if (my_goal_x_ > 0) {
-    // Time amarelo (defendendo lado direito positivo)
-    double min_x = my_goal_x_ - PENALTY_AREA_DEPTH - margin_mm;
+    // Defendendo lado direito positivo
+    double min_x = my_goal_x_ - penalty_area_depth_ - margin_mm;
     double max_x = my_goal_x_;
     tx = std::clamp(tx, min_x, max_x);
   } else {
-    // Time azul (defendendo lado esquerdo negativo)
+    // Defendendo lado esquerdo negativo
     double min_x = my_goal_x_;
-    double max_x = my_goal_x_ + PENALTY_AREA_DEPTH + margin_mm;
+    double max_x = my_goal_x_ + penalty_area_depth_ + margin_mm;
     tx = std::clamp(tx, min_x, max_x);
   }
   double max_y = half_width + margin_mm;
@@ -96,17 +95,17 @@ void GoalkeeperNode::clampInsidePenaltyArea(double & tx, double & ty, double mar
 
 bool GoalkeeperNode::isBallInArea(double ball_x, double ball_y, double margin_mm)
 {
-  double half_width = PENALTY_AREA_WIDTH / 2.0;
+  double half_width = penalty_area_width_ / 2.0;
   double max_y = half_width + margin_mm;
   if (std::abs(ball_y) > max_y) return false;
 
   if (my_goal_x_ > 0) {
-    double min_x = my_goal_x_ - PENALTY_AREA_DEPTH - margin_mm;
+    double min_x = my_goal_x_ - penalty_area_depth_ - margin_mm;
     double max_x = my_goal_x_;
     return (ball_x >= min_x && ball_x <= max_x);
   } else {
     double min_x = my_goal_x_;
-    double max_x = my_goal_x_ + PENALTY_AREA_DEPTH + margin_mm;
+    double max_x = my_goal_x_ + penalty_area_depth_ + margin_mm;
     return (ball_x >= min_x && ball_x <= max_x);
   }
 }
@@ -166,6 +165,14 @@ BT::NodeStatus GoalkeeperNode::onStart()
 
   (void)getInput<double>("kick_speed", kick_speed_);
 
+  if (auto blackboard = config().blackboard) {
+    (void)blackboard->get("my_goal_x", my_goal_x_);
+    (void)blackboard->get("penalty_area_depth", penalty_area_depth_);
+    (void)blackboard->get("penalty_area_width", penalty_area_width_);
+    (void)blackboard->get("goal_width", goal_width_);
+    (void)blackboard->get("field_width", field_width_);
+  }
+
   last_target_x_ = -99999.0;
   last_target_y_ = -99999.0;
   last_target_w_ = -99999.0;
@@ -181,21 +188,33 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     return BT::NodeStatus::RUNNING;
   }
 
+  // Atualiza as dimensões do campo e da área a partir do Blackboard em cada tick
+  auto blackboard = config().blackboard;
+  if (!blackboard ||
+      !blackboard->get("my_goal_x", my_goal_x_) ||
+      !blackboard->get("penalty_area_depth", penalty_area_depth_) ||
+      !blackboard->get("penalty_area_width", penalty_area_width_) ||
+      !blackboard->get("goal_width", goal_width_) ||
+      !blackboard->get("field_width", field_width_) ||
+      penalty_area_depth_ <= 0.0 || penalty_area_width_ <= 0.0 || goal_width_ <= 0.0) {
+    return BT::NodeStatus::RUNNING;
+  }
+
   double ball_x = last_ball_pos_.x;
   double ball_y = last_ball_pos_.y;
   double rx = current_robot_data_.x;
   double ry = current_robot_data_.y;
   double ryaw = current_robot_data_.orientation;
 
-  // Sem margem de erro: estritamente dentro da área (500mm em X, 1350mm em Y)
+  // Sem margem extra: estritamente dentro das dimensões reais da área
   constexpr double kGkMarginMm = 0.0;
 
   bool ball_in_area = isBallInArea(ball_x, ball_y, kGkMarginMm);
 
   if (ball_in_area) {
-    // --- ESTADO 1: Bola na área (ou na margem de 30cm) -> Sair, ir até a bola e chutar para as laterais ---
-    // Alvo lateral para o chute (fora da área, de preferência para os lados)
-    double target_side_y = (ball_y >= 0.0) ? 2000.0 : -2000.0;
+    // --- ESTADO 1: Bola na área -> Sair, ir até a bola e afastar para as laterais ---
+    double lateral_y = (field_width_ / 2.0) + 500.0;
+    double target_side_y = (ball_y >= 0.0) ? lateral_y : -lateral_y;
     double target_side_x = 0.0; // Meio de campo
 
     double clear_angle = std::atan2(target_side_y - ball_y, target_side_x - ball_x);
@@ -241,7 +260,7 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     double offset_x = (my_goal_x_ > 0) ? -120.0 : 120.0;
     double target_x = my_goal_x_ + offset_x;
 
-    double limit_y = (GOAL_WIDTH / 2.0) - 50.0;
+    double limit_y = (goal_width_ / 2.0) - 50.0;
     double target_y = std::clamp(ball_y, -limit_y, limit_y);
 
     double target_w = std::atan2(ball_y - target_y, ball_x - target_x);

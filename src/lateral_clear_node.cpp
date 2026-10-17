@@ -6,7 +6,6 @@
 namespace oxebots_strategy
 {
 
-static constexpr double LATERAL_TARGET_Y = 2000.0;
 static constexpr double POS_UPDATE_THRESHOLD = 5.0;
 static constexpr double ANG_UPDATE_THRESHOLD = 0.05;
 
@@ -46,15 +45,30 @@ BT::NodeStatus LateralClearNode::onRunning()
         return BT::NodeStatus::FAILURE;
     }
 
+    auto bb = config().blackboard;
+    if (!bb) {
+        return BT::NodeStatus::FAILURE;
+    }
+
     double rx, ry, ryaw;
-    if (!config().blackboard->get("robot_x", rx) || 
-        !config().blackboard->get("robot_y", ry) || 
-        !config().blackboard->get("robot_yaw", ryaw)) {
+    if (!bb->get("robot_x", rx) || 
+        !bb->get("robot_y", ry) || 
+        !bb->get("robot_yaw", ryaw)) {
         return BT::NodeStatus::RUNNING; // Aguarda dados
     }
 
-    // Direção de chute lateral: se a bola está na metade de cima (y >= 0), chuta para lateral +Y, senão -Y
-    double target_side_y = (ball_y >= 0.0) ? LATERAL_TARGET_Y : -LATERAL_TARGET_Y;
+    double my_goal_x = 0.0, p_depth = 0.0, p_width = 0.0, field_width = 0.0;
+    if (!bb->get("my_goal_x", my_goal_x) ||
+        !bb->get("penalty_area_depth", p_depth) ||
+        !bb->get("penalty_area_width", p_width) ||
+        !bb->get("field_width", field_width) ||
+        p_depth <= 0.0 || p_width <= 0.0 || field_width <= 0.0) {
+        return BT::NodeStatus::RUNNING;
+    }
+
+    // Direção de chute lateral: aponta para a linha lateral correspondente (+Y ou -Y)
+    double lateral_target_y = (field_width / 2.0) + 500.0;
+    double target_side_y = (ball_y >= 0.0) ? lateral_target_y : -lateral_target_y;
     double target_w = std::atan2(target_side_y - ball_y, 0.0 - ball_x);
 
     double ux = std::cos(target_w);
@@ -64,14 +78,7 @@ BT::NodeStatus LateralClearNode::onRunning()
     double target_x = ball_x + ux * 50.0;
     double target_y = ball_y + uy * 50.0;
 
-    // Restringir à área de pênalti com margem de 30cm (300mm)
-    double my_goal_x = -2200.0, p_depth = 500.0, p_width = 1350.0;
-    auto bb = config().blackboard;
-    if (bb) {
-        (void)bb->get("my_goal_x", my_goal_x);
-        (void)bb->get("penalty_area_depth", p_depth);
-        (void)bb->get("penalty_area_width", p_width);
-    }
+    // Restringir estritamente às dimensões da área de pênalti recebidas via Blackboard
     double half_width = p_width / 2.0;
     constexpr double kGkMargin = 0.0;
 

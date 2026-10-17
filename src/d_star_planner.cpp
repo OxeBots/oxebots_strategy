@@ -550,19 +550,14 @@ void DStarPlannerNode::updatePlanningRate(double ball_dist_m)
 
 DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
 {
-    // Usamos a geometria recebida ou valores padrão (fallback) de 1.35m x 0.5m
-    double field_length = 4.4;
-    double penalty_depth = 0.5;
-    double penalty_width = 1.35;
+    double field_length = 0.0;
+    double penalty_depth = 0.0;
+    double penalty_width = 0.0;
 
     if (last_geometry_) {
         field_length = last_geometry_->field.field_length / 1000.0;
         penalty_depth = last_geometry_->field.penalty_area_depth / 1000.0;
         penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
-    } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-            "D* [Robô %d] Sem dados de geometria. Usando fallback da área: %.2fm x %.2fm",
-            robot_id_, penalty_width, penalty_depth);
     }
 
     bool effective_is_yellow = is_yellow_;
@@ -589,6 +584,13 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
 void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(node_mutex_);
+
+    if (!last_geometry_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+            "D* [Robô %d] Aguardando /field_geometry para aplicar limites de área no mapa...",
+            robot_id_);
+        return;
+    }
 
     // 1. Criamos uma cópia mutável do mapa para podermos "desenhar" nele
     // sem afetar os mapas dos robôs atacantes

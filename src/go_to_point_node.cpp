@@ -259,17 +259,19 @@ BT::NodeStatus GoToPointNode::onStart() {
     target_pos_.y = ty;
 
     // Limite de segurança dinâmico para o robô não entrar dentro da área do gol
-    double my_goal_x = 2200.0;
-    double opponent_goal_x = -2200.0;
+    double my_goal_x = 0.0;
+    double opponent_goal_x = 0.0;
+    double p_depth = 0.0;
+    double p_width = 0.0;
     bool is_gk = false;
-    const double p_depth = 500.0;  // 500mm em X
-    const double p_width = 1350.0; // 1350mm em Y
     double margin = 100.0; // mm
 
     auto blackboard = config().blackboard;
     if (blackboard) {
         (void)blackboard->get("my_goal_x", my_goal_x);
         (void)blackboard->get("opponent_goal_x", opponent_goal_x);
+        (void)blackboard->get("penalty_area_depth", p_depth);
+        (void)blackboard->get("penalty_area_width", p_width);
         (void)blackboard->get("is_goalkeeper", is_gk);
     }
 
@@ -278,7 +280,7 @@ BT::NodeStatus GoToPointNode::onStart() {
     bool ignore_area = false;
     getInput<bool>("ignore_area", ignore_area);
 
-    if (!ignore_area) {
+    if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
         // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
         clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
 
@@ -299,17 +301,19 @@ BT::NodeStatus GoToPointNode::onRunning() {
     // Verifica se as coordenadas do alvo mudaram no Blackboard durante a execução
     double tx, ty;
     if (getInput<double>("x", tx) && getInput<double>("y", ty)) {
-        double my_goal_x = 2200.0;
-        double opponent_goal_x = -2200.0;
+        double my_goal_x = 0.0;
+        double opponent_goal_x = 0.0;
+        double p_depth = 0.0;
+        double p_width = 0.0;
         bool is_gk = false;
-        const double p_depth = 500.0;  // 500mm em X
-        const double p_width = 1350.0; // 1350mm em Y
         double margin = 100.0; // mm
 
         auto blackboard = config().blackboard;
         if (blackboard) {
             (void)blackboard->get("my_goal_x", my_goal_x);
             (void)blackboard->get("opponent_goal_x", opponent_goal_x);
+            (void)blackboard->get("penalty_area_depth", p_depth);
+            (void)blackboard->get("penalty_area_width", p_width);
             (void)blackboard->get("is_goalkeeper", is_gk);
         }
 
@@ -322,7 +326,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
         getInput<bool>("ignore_area", ignore_area);
 
         // SÓ APLICA AS TRAVAS SE O XML NÃO MANDAR IGNORAR:
-        if (!ignore_area) {
+        if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
             // 1. Bloquear área adversária para TODOS os robôs
             clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
 
