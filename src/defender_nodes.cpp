@@ -16,13 +16,13 @@ double computeHeading(const Pose2D& from, const Pose2D& to)
     return std::atan2(to.y - from.y, to.x - from.x);
 }
 
-// Clampeia 'x' para manter o robô fora da pequena área.
-// Fórmula do limite: my_goal_x - copysign(depth, my_goal_x)
-//   Azul  (-2200, depth=700): limit = -1500  → x ∈ [-1500, +∞)
-//   Amarelo (+2200, depth=700): limit = +1500 → x ∈ (-∞, +1500]
+// Clampeia 'x' para manter o robô fora da pequena área (com margem de segurança de 200mm para o raio do robô).
+// Fórmula do limite: my_goal_x - copysign(depth + kDefenderAreaMarginMm, my_goal_x)
+constexpr double kDefenderAreaMarginMm = 200.0;
+
 double penaltyClamp(double x, double my_goal_x, double depth)
 {
-    const double limit = my_goal_x - std::copysign(depth, my_goal_x);
+    const double limit = my_goal_x - std::copysign(depth + kDefenderAreaMarginMm, my_goal_x);
     return (my_goal_x < 0.0) ? std::max(x, limit) : std::min(x, limit);
 }
 
@@ -154,8 +154,9 @@ BT::NodeStatus ShadowBall::tick()
     }
     getInput("follow_distance", follow_dist);
     getInput("predict_time",    predict_time);
-    if (!getInput("penalty_area_depth", penalty_depth) && config().blackboard) {
-        (void)config().blackboard->get("penalty_area_depth", penalty_depth);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
     }
     getInput("y_limit", y_limit);
 
@@ -168,8 +169,8 @@ BT::NodeStatus ShadowBall::tick()
     const double sign = (my_goal_x < 0.0) ? -1.0 : 1.0;
     double target_x   = pred_x + sign * follow_dist;
 
-    // 3. Borda interna da pequena área calculada a partir das dimensões dinâmicas
-    const double penalty_limit = my_goal_x - std::copysign(penalty_depth, my_goal_x);
+    // 3. Borda interna da pequena área calculada a partir das dimensões dinâmicas (com margem do robô)
+    const double penalty_limit = my_goal_x - std::copysign(penalty_depth + kDefenderAreaMarginMm, my_goal_x);
 
     // 4. Clamp: [pequena_área, meio-campo=-180 (para considerar uma margem de erro)]
     if (my_goal_x < 0.0) {
@@ -220,8 +221,9 @@ BT::NodeStatus MarkOpponent::tick()
         return BT::NodeStatus::FAILURE;
     }
     getInput("block_distance", block_dist);
-    if (!getInput("penalty_area_depth", penalty_depth) && config().blackboard) {
-        (void)config().blackboard->get("penalty_area_depth", penalty_depth);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
     }
     getInput("y_limit", y_limit);
 
@@ -233,7 +235,7 @@ BT::NodeStatus MarkOpponent::tick()
     if (dist < 1.0) {
         // Bola praticamente dentro do gol — posicionar na borda da pequena área
         Pose2D target{};
-        target.x     = my_goal_x - std::copysign(penalty_depth + 50.0, my_goal_x);
+        target.x     = my_goal_x - std::copysign(penalty_depth + kDefenderAreaMarginMm, my_goal_x);
         target.y     = 0.0;
         target.theta = computeHeading(target, ball);
         sendToController(target);
@@ -287,8 +289,9 @@ BT::NodeStatus GoToClamped::publishClamped()
     if (!getInput("x", x) || !getInput("y", y) || !getInput("my_goal_x", my_goal_x)) {
         return BT::NodeStatus::FAILURE;
     }
-    if (!getInput("penalty_area_depth", penalty_depth) && config().blackboard) {
-        (void)config().blackboard->get("penalty_area_depth", penalty_depth);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
     }
 
     // Limita o alvo X fora da pequena área com base na geometria dinâmica
@@ -296,9 +299,9 @@ BT::NodeStatus GoToClamped::publishClamped()
 
     // Orientação: apontar para o gol adversário (opponent_goal_x no Blackboard)
     double op_x = -my_goal_x, op_y = 0.0;
-    if (config().blackboard) {
-        (void)config().blackboard->get("opponent_goal_x", op_x);
-        (void)config().blackboard->get("opponent_goal_y", op_y);
+    if (root_bb) {
+        (void)root_bb->get("opponent_goal_x", op_x);
+        (void)root_bb->get("opponent_goal_y", op_y);
     }
     const double theta = std::atan2(op_y - y, op_x - x);
 

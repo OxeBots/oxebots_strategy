@@ -152,16 +152,6 @@ double DStarPlanner::calculateHeuristic(const GridCell & a, const GridCell & b) 
 
 double DStarPlanner::getSiteCost(const GridCell & u) const
 {
-    // CRÍTICO: Sempre tratar a vizinhança imediata do Início e do Alvo como navegável.
-    // Isso evita que o robô trave se o alvo (bola) for marcado como obstáculo 
-    // ou se o robô estiver ligeiramente dentro de uma zona de inflação.
-    if (start_cell_.has_value()) {
-        if (std::abs(u.x - start_cell_->x) <= 4 && std::abs(u.y - start_cell_->y) <= 4) return 1.0;
-    }
-    if (goal_cell_.has_value()) {
-        if (std::abs(u.x - goal_cell_->x) <= 8 && std::abs(u.y - goal_cell_->y) <= 8) return 1.0;
-    }
-
     if (!current_grid_)
         return std::numeric_limits<double>::infinity();
 
@@ -169,8 +159,28 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     if (u.x < 0 || u.y < 0 || u.x >= grid_width_ || u.y >= grid_height_)
         return std::numeric_limits<double>::infinity();
 
-    // Check Static Map
     int idx = u.y * grid_width_ + u.x;
+
+    // Parede de área de pênalti (valor 101): NUNCA pode ser ignorada pela vizinhança do alvo!
+    // Exceção apenas para a célula imediata do robô (dist <= 1) caso tenha escorregado na margem, para conseguir sair.
+    if (current_grid_->data[idx] > 100) {
+        if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 1 && std::abs(u.y - start_cell_->y) <= 1) {
+            return 10.0;
+        }
+        return std::numeric_limits<double>::infinity();
+    }
+
+    // CRÍTICO: Tratar a vizinhança imediata do Início e do Alvo como navegável contra obstáculos dinâmicos/inflação (100).
+    // Isso evita que o robô trave se o alvo (bola) for marcado como obstáculo 
+    // ou se o robô estiver ligeiramente dentro de uma zona de inflação de outro robô.
+    if (start_cell_.has_value()) {
+        if (std::abs(u.x - start_cell_->x) <= 4 && std::abs(u.y - start_cell_->y) <= 4) return 1.0;
+    }
+    if (goal_cell_.has_value()) {
+        if (std::abs(u.x - goal_cell_->x) <= 8 && std::abs(u.y - goal_cell_->y) <= 8) return 1.0;
+    }
+
+    // Check Static Map
     if (current_grid_->data[idx] >= config_.occupancy_threshold)
         return std::numeric_limits<double>::infinity();
 
@@ -581,19 +591,12 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
     return bounds;
 }
 
-void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+void DStarPlannerNode::applyMapWithPenaltyBounds(const nav_msgs::msg::OccupancyGrid::SharedPtr& msg)
 {
-    std::lock_guard<std::mutex> lock(node_mutex_);
-
-    if (!last_geometry_) {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-            "D* [Robô %d] Aguardando /field_geometry para aplicar limites de área no mapa...",
-            robot_id_);
-        return;
-    }
+    if (!msg || !last_geometry_) return;
 
     // 1. Criamos uma cópia mutável do mapa para podermos "desenhar" nele
-    // sem afetar os mapas dos robôs atacantes
+    // sem afetar os mapas dos outros robôs
     auto custom_map = std::make_shared<nav_msgs::msg::OccupancyGrid>(*msg);
 
     // 2. Criamos a Parede de Vidro, usando os mesmos limites de área usados em plan_and_publish.
@@ -626,8 +629,9 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
             bool in_negative_area = block_negative && (world_x < -safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
 
             if (in_positive_area || in_negative_area) {
-                // O peso 100 transforma o espaço vazio em um bloco de concreto impenetrável para o D*
-                custom_map->data[y * width + x] = 100; 
+                // O peso 101 diferencia a parede da área de pênalti da inflação comum de robôs (100),
+                // garantindo que getSiteCost nunca libere a área mesmo perto do goal_cell_.
+                custom_map->data[y * width + x] = 101; 
             }
         }
     }
@@ -639,10 +643,28 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
     }
 }
 
+void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(node_mutex_);
+    raw_map_data_ = msg;
+
+    if (!last_geometry_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+            "D* [Robô %d] Aguardando /field_geometry para aplicar limites de área no mapa...",
+            robot_id_);
+        return;
+    }
+
+    applyMapWithPenaltyBounds(raw_map_data_);
+}
+
 void DStarPlannerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(node_mutex_);
     last_geometry_ = msg;
+    if (raw_map_data_) {
+        applyMapWithPenaltyBounds(raw_map_data_);
+    }
 }
 
 void DStarPlannerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg)
@@ -786,27 +808,27 @@ void DStarPlannerNode::plan_and_publish()
     auto origin = last_map_data_->info.origin.position;
     auto target = target_goal_msg_.value()->pose.pose.position;
 
-    if (target_goal_msg_.value()->planner_type == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE) {
-        plan_straight_line(target);
-        return;
-    }
-
     // Mesmos limites de área usados para desenhar a parede no grid em map_callback.
     const auto bounds = computePenaltyAreaBounds();
 
-    // Margem de segurança para o raio do robô (ex: 9cm = 0.09m)
-    double margin = 0.09;
+    // Margem de segurança para o alvo ficar fora das células marcadas como 101 (0.09m + 0.06m de folga de resolução)
+    double target_margin = 0.15;
 
-    // Clampar o alvo fora da área positiva se bloqueada
-    if (bounds.block_positive && target.x > (bounds.penalty_x - margin) &&
-        (target.y > (bounds.penalty_y_min - margin) && target.y < (bounds.penalty_y_max + margin))) {
-        target.x = bounds.penalty_x - margin;
+    // Clampar o alvo fora da área positiva se bloqueada (inclusive para PLANNER_STRAIGHT_LINE)
+    if (bounds.block_positive && target.x > (bounds.penalty_x - target_margin) &&
+        (target.y > (bounds.penalty_y_min - target_margin) && target.y < (bounds.penalty_y_max + target_margin))) {
+        target.x = bounds.penalty_x - target_margin;
     }
 
-    // Clampar o alvo fora da área negativa se bloqueada
-    if (bounds.block_negative && target.x < (-bounds.penalty_x + margin) &&
-        (target.y > (bounds.penalty_y_min - margin) && target.y < (bounds.penalty_y_max + margin))) {
-        target.x = -bounds.penalty_x + margin;
+    // Clampar o alvo fora da área negativa se bloqueada (inclusive para PLANNER_STRAIGHT_LINE)
+    if (bounds.block_negative && target.x < (-bounds.penalty_x + target_margin) &&
+        (target.y > (bounds.penalty_y_min - target_margin) && target.y < (bounds.penalty_y_max + target_margin))) {
+        target.x = -bounds.penalty_x + target_margin;
+    }
+
+    if (target_goal_msg_.value()->planner_type == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE) {
+        plan_straight_line(target);
+        return;
     }
 
     // Convert world coordinates to grid coordinates

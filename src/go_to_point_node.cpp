@@ -122,8 +122,8 @@ double GoToPointNode::resolveFaceAngle() {
     }
 
     double op_x, op_y;
-    auto blackboard = config().blackboard;
-    if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+    auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (blackboard && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
         return std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
     }
     return 0.0;
@@ -170,13 +170,13 @@ void GoToPointNode::publishMarkers() {
     
     bool is_gk;
     uint32_t attacker_id, defender_id;
-    auto blackboard = config().blackboard;
+    auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
 
-    if (blackboard->get("is_goalkeeper", is_gk) && is_gk && robot_id_ == 0) {
+    if (blackboard && blackboard->get("is_goalkeeper", is_gk) && is_gk && robot_id_ == 0) {
         r = 0.1; g = 0.1; b = 0.1; role_name = "GK"; // Preto
-    } else if (blackboard->get("attacker_id", attacker_id) && robot_id_ == attacker_id) {
+    } else if (blackboard && blackboard->get("attacker_id", attacker_id) && robot_id_ == attacker_id) {
         r = 1.0; g = 0.5; b = 0.0; role_name = "ATT"; // Laranja
-    } else if (blackboard->get("defender_id", defender_id) && robot_id_ == defender_id) {
+    } else if (blackboard && blackboard->get("defender_id", defender_id) && robot_id_ == defender_id) {
         r = 0.0; g = 1.0; b = 0.0; role_name = "DEF"; // Verde
     }
 
@@ -242,7 +242,8 @@ BT::NodeStatus GoToPointNode::onStart() {
 
     // Obter o ID do robô desta instância (setado no blackboard pelo StrategyNode)
     uint32_t my_id;
-    if (config().blackboard->get("robot_id", my_id)) {
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (root_bb && root_bb->get("robot_id", my_id)) {
         if (input_id != my_id) {
             // Se o comando não é para este robô, retornamos SUCCESS imediatamente 
             // para não travar a árvore, mas não fazemos nada.
@@ -266,7 +267,7 @@ BT::NodeStatus GoToPointNode::onStart() {
     bool is_gk = false;
     double margin = 100.0; // mm
 
-    auto blackboard = config().blackboard;
+    auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (blackboard) {
         (void)blackboard->get("my_goal_x", my_goal_x);
         (void)blackboard->get("opponent_goal_x", opponent_goal_x);
@@ -308,7 +309,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
         bool is_gk = false;
         double margin = 100.0; // mm
 
-        auto blackboard = config().blackboard;
+        auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
         if (blackboard) {
             (void)blackboard->get("my_goal_x", my_goal_x);
             (void)blackboard->get("opponent_goal_x", opponent_goal_x);
@@ -393,9 +394,9 @@ BT::NodeStatus GoToPointNode::onRunning() {
         // Só importa perto da bola: longe, o robô ainda está em trânsito e pode cruzar
         // momentaneamente o eixo bola-gol sem que isso signifique nada de errado.
         constexpr double kSideCheckRangeMm = 600.0;
-        auto blackboard = config().blackboard;
+        auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
         double op_x, op_y;
-        if (ball_dist < kSideCheckRangeMm && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+        if (ball_dist < kSideCheckRangeMm && blackboard && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
             // a = vetor bola->robô, b = vetor bola->gol. Se o robô está corretamente atrás da
             // bola (do lado oposto ao gol), a e b apontam em direções opostas (dot < 0). Se o
             // robô está na frente (mesmo lado do gol), dot > 0.

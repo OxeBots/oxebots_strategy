@@ -29,7 +29,7 @@ BT::NodeStatus GoalLineDefendNode::onStart()
         robot_id_ = 0;
     }
 
-    if (auto blackboard = config().blackboard) {
+    if (auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr) {
         (void)blackboard->get("my_goal_x", my_goal_x_);
     }
 
@@ -43,7 +43,7 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     if (!getInput<double>("ball_y", ball_y)) return BT::NodeStatus::FAILURE;
 
     double goal_width = 0.0;
-    auto blackboard = config().blackboard;
+    auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (!blackboard ||
         !blackboard->get("my_goal_x", my_goal_x_) ||
         !blackboard->get("goal_width", goal_width) ||

@@ -165,12 +165,12 @@ BT::NodeStatus GoalkeeperNode::onStart()
 
   (void)getInput<double>("kick_speed", kick_speed_);
 
-  if (auto blackboard = config().blackboard) {
-    (void)blackboard->get("my_goal_x", my_goal_x_);
-    (void)blackboard->get("penalty_area_depth", penalty_area_depth_);
-    (void)blackboard->get("penalty_area_width", penalty_area_width_);
-    (void)blackboard->get("goal_width", goal_width_);
-    (void)blackboard->get("field_width", field_width_);
+  if (auto bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr) {
+    (void)bb->get("my_goal_x", my_goal_x_);
+    (void)bb->get("penalty_area_depth", penalty_area_depth_);
+    (void)bb->get("penalty_area_width", penalty_area_width_);
+    (void)bb->get("goal_width", goal_width_);
+    (void)bb->get("field_width", field_width_);
   }
 
   last_target_x_ = -99999.0;
@@ -188,8 +188,8 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     return BT::NodeStatus::RUNNING;
   }
 
-  // Atualiza as dimensões do campo e da área a partir do Blackboard em cada tick
-  auto blackboard = config().blackboard;
+  // Atualiza as dimensões do campo e da área a partir do rootBlackboard em cada tick (funciona dentro de SubTrees)
+  auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
   if (!blackboard ||
       !blackboard->get("my_goal_x", my_goal_x_) ||
       !blackboard->get("penalty_area_depth", penalty_area_depth_) ||

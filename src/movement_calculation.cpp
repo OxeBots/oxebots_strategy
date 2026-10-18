@@ -51,10 +51,89 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     override_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotMotionOverride>(
         "/robot_motion_override", 10, std::bind(&PathFollowerNode::override_callback, this, std::placeholders::_1));
 
+    // Assina a geometria oficial do campo para bloquear entrada na área de pênalti dinamicamente
+    geometry_sub_ = this->create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
+        "/field_geometry", rclcpp::QoS(1).transient_local().reliable(),
+        std::bind(&PathFollowerNode::geometry_callback, this, std::placeholders::_1));
+
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(50), std::bind(&PathFollowerNode::calculate_and_move, this));
     
     RCLCPP_INFO(this->get_logger(), "Seguidor de Caminho iniciado para o robô %d ouvindo %s/path", robot_id_, robot_prefix.c_str());
+}
+
+void PathFollowerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    last_geometry_ = msg;
+}
+
+void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy) {
+    if (!last_geometry_) return;
+
+    float field_length = static_cast<float>(last_geometry_->field.field_length);
+    float penalty_depth = static_cast<float>(last_geometry_->field.penalty_area_depth);
+    float penalty_width = static_cast<float>(last_geometry_->field.penalty_area_width);
+    if (field_length <= 0.0f || penalty_depth <= 0.0f || penalty_width <= 0.0f) return;
+
+    // Margem de segurança de 110mm (raio do robô 90mm + 20mm de tolerância)
+    constexpr float kMarginMm = 110.0f;
+    float area_x_limit = (field_length / 2.0f) - penalty_depth - kMarginMm;
+    float area_y_limit = (penalty_width / 2.0f) + kMarginMm;
+
+    float rx = current_pos.x;
+    float ry = current_pos.y;
+
+    bool block_positive = true;
+    bool block_negative = true;
+
+    if (robot_id_ == 0) {
+        // O goleiro pode entrar na própria área, mas não na adversária
+        if (rx > 0.0f) {
+            block_positive = false;
+        } else {
+            block_negative = false;
+        }
+    }
+
+    // 1. Bloqueia área positiva (X > area_x_limit, |Y| < area_y_limit)
+    if (block_positive) {
+        if (rx >= area_x_limit && std::abs(ry) < area_y_limit) {
+            if (vx > 0.0f) {
+                vx = 0.0f;
+            }
+            if (rx > (area_x_limit + 30.0f)) {
+                vx = -0.3f;
+            }
+        }
+        // Bloqueia entrada pelas laterais da área positiva (quando já está além do X da área e tenta entrar em Y)
+        if (rx > (area_x_limit + 20.0f) && std::abs(ry) < (area_y_limit + 40.0f) && std::abs(ry) >= (area_y_limit - 30.0f)) {
+            if (ry > 0.0f && vy < 0.0f) {
+                vy = 0.0f;
+            } else if (ry < 0.0f && vy > 0.0f) {
+                vy = 0.0f;
+            }
+        }
+    }
+
+    // 2. Bloqueia área negativa (X < -area_x_limit, |Y| < area_y_limit)
+    if (block_negative) {
+        if (rx <= -area_x_limit && std::abs(ry) < area_y_limit) {
+            if (vx < 0.0f) {
+                vx = 0.0f;
+            }
+            if (rx < -(area_x_limit + 30.0f)) {
+                vx = 0.3f;
+            }
+        }
+        // Bloqueia entrada pelas laterais da área negativa
+        if (rx < -(area_x_limit + 20.0f) && std::abs(ry) < (area_y_limit + 40.0f) && std::abs(ry) >= (area_y_limit - 30.0f)) {
+            if (ry > 0.0f && vy < 0.0f) {
+                vy = 0.0f;
+            } else if (ry < 0.0f && vy > 0.0f) {
+                vy = 0.0f;
+            }
+        }
+    }
 }
 
 void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg) {
@@ -296,6 +375,9 @@ void PathFollowerNode::calculate_and_move() {
         }
     }
 
+    // Trava de segurança de velocidade para impedir entrada na área de pênalti (baseada em /field_geometry)
+    clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
+
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
 }
@@ -404,6 +486,7 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0;
+            clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));
             publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);

@@ -45,7 +45,7 @@ BT::NodeStatus LateralClearNode::onRunning()
         return BT::NodeStatus::FAILURE;
     }
 
-    auto bb = config().blackboard;
+    auto bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (!bb) {
         return BT::NodeStatus::FAILURE;
     }

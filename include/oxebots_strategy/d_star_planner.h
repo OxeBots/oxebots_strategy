@@ -370,7 +370,9 @@ class DStarPlannerNode : public rclcpp::Node
 
     // Components
     std::unique_ptr<planning::DStarPlanner> planner_;
+    nav_msgs::msg::OccupancyGrid::SharedPtr raw_map_data_;
     nav_msgs::msg::OccupancyGrid::SharedPtr last_map_data_;
+    void applyMapWithPenaltyBounds(const nav_msgs::msg::OccupancyGrid::SharedPtr& msg);
     std::mutex node_mutex_;
 
     // State

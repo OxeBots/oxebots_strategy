@@ -7,6 +7,7 @@
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/robot_motion_status.hpp"
+#include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "nav_msgs/msg/path.hpp"
 
 #include <optional>
@@ -36,6 +37,8 @@ private:
     void goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg);
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
     void override_callback(const oxebots_interfaces::msg::RobotMotionOverride::SharedPtr msg);
+    void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
+    void clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy);
     void calculate_and_move();
 
     // Único dono de /robot_commands para este robô (ver comentário grande em calculate_and_move()
@@ -54,6 +57,7 @@ private:
     rclcpp::Subscription<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_sub_;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_sub_;
+    rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -71,6 +75,7 @@ private:
     bool contact_repulsion_active_ = false;
 
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
+    oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     int robot_id_ = 0;
     bool game_data_received_ = false;
 
