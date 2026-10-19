@@ -33,7 +33,6 @@ private:
   int robot_id_ = 0;
   double radio_publish_rate_hz_ = 15.0;
   double lookahead_safety_factor_ = 1.5;
-  double min_lookahead_mm_ = 50.0;
   double max_lookahead_mm_ = 1000.0;
 
   // Última pose/velocidade do Kalman para este robô — base da projeção e também o que vira
