@@ -23,6 +23,21 @@ void clampFromPenaltyArea(double& tx, double& ty, double goal_x, double depth, d
         }
     }
 }
+
+void clampInsidePenaltyArea(double& tx, double& ty, double goal_x, double depth, double width, double margin) {
+    double half_width = width / 2.0;
+    if (goal_x > 0) {
+        double min_x = goal_x - depth - margin;
+        double max_x = goal_x;
+        tx = std::clamp(tx, min_x, max_x);
+    } else {
+        double min_x = goal_x;
+        double max_x = goal_x + depth + margin;
+        tx = std::clamp(tx, min_x, max_x);
+    }
+    double max_y = half_width + margin;
+    ty = std::clamp(ty, -max_y, max_y);
+}
 }
 
 namespace oxebots_strategy {
@@ -53,20 +68,25 @@ BT::PortsList GoToPointNode::providedPorts() {
     return { BT::InputPort<unsigned int>("robot_id"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
+             BT::InputPort<double>("face_x", "Opcional: X do alvo de orientação (bola, companheiro, canto do "
+                 "gol...). Aceita literal ou remapeamento de blackboard, ex: \"{ball_x}\". Se omitido (junto "
+                 "com face_y), mantém o padrão de sempre olhar para o gol adversário."),
+             BT::InputPort<double>("face_y", "Opcional: Y do alvo de orientação. Ver face_x."),
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
              BT::InputPort<std::string>("planner", "dstar",
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
                  "\"straight_line\" (linha reta, ignora a grade de obstáculos)"),
              BT::InputPort<double>("ball_contact_threshold_mm", -1.0,
-                 "Se > 0, o nó falha (FAILURE) caso a bola AO VIVO chegue mais perto do robô do "
-                 "que esse valor antes de \"chegar\" ao alvo. Use só em GoToPoints longe da bola "
-                 "de propósito (ex: Fase 1, indo pro ponto de pré-chute): um contato ali é sempre "
-                 "acidental (bola se moveu, ruído), então a falha derruba a Sequence e força o "
-                 "ReactiveFallback a recalcular tudo do zero na posição atual da bola, em vez de "
-                 "continuar empurrando-a pelo caminho antigo. NÃO usar em GoToPoints que terminam "
-                 "perto da bola de propósito (ex: Fase 2, ponto de captura) — nesse caso, chegar "
-                 "perto é o objetivo, não um acidente. Default -1.0 = desabilitado (nenhum "
-                 "comportamento novo para quem já usa este nó sem setar essa porta).") };
+                 "Se > 0, o nó falha caso a bola AO VIVO chegue mais perto do robô do que esse "
+                 "valor antes de \"chegar\" ao alvo — força recalcular tudo do zero. Use só em "
+                 "GoToPoints longe da bola de propósito (ex: Fase 1); NÃO em GoToPoints que "
+                 "terminam perto dela de propósito (ex: Fase 2). Default -1.0 = desabilitado."),
+             BT::InputPort<bool>("ignore_area", false, "Se true, desativa restrições de área para este robô"),
+             BT::InputPort<bool>("ball_side_check", false,
+                 "Se true, o nó falha caso o robô esteja do lado ERRADO da bola (mesmo lado que o "
+                 "gol adversário, \"na frente\" dela) — força recalcular tudo do zero. Só faz "
+                 "sentido em alvos com um lado correto bem definido (ex: ponto de pré-chute, atrás "
+                 "da bola). Default false = desabilitado.") };
 }
 
 uint8_t GoToPointNode::plannerFromString(const std::string& planner) {
@@ -92,23 +112,26 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
     return std::nullopt;
 }
 
-// Publica a mensagem de RobotGoal com a posição e orientação desejadas
-void GoToPointNode::publishGoal() {
+// Resolve para onde o robô deve olhar ao chegar: usa face_x/face_y se a chamada (no XML) tiver
+// passado os dois; senão olha para o gol adversário. face_x/face_y aceitam remapeamento de
+// blackboard (ex: "{ball_x}").
+double GoToPointNode::resolveFaceAngle() {
+    double face_x, face_y;
+    if (getInput<double>("face_x", face_x) && getInput<double>("face_y", face_y)) {
+        return std::atan2(face_y - target_pos_.y, face_x - target_pos_.x);
+    }
+
     double op_x, op_y;
     auto blackboard = config().blackboard;
-
-    // Se a posição do gol adversário estiver no blackboard, faz o robô olhar para lá.
-    //
-    // NÃO trocar isto por "olhar pra bola": já foi tentado (porta face_ball, revertida). Perto
-    // do ponto de captura (~115mm da bola) essa conta é geometricamente instável — pequeno
-    // ruído na posição da bola vira oscilação grande de ângulo (sensibilidade do bearing ~
-    // 1/distância), e o robô ficava girando e de costas pra bola em vez de convergir. Olhar pro
-    // gol (~2-4m) é estável porque o mesmo ruído dá variação de ângulo desprezível.
     if (blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
-        target_w_ = std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
-    } else {
-        target_w_ = 0.0;
+        return std::atan2(op_y - target_pos_.y, op_x - target_pos_.x);
     }
+    return 0.0;
+}
+
+// Publica a mensagem de RobotGoal com a posição e orientação desejadas
+void GoToPointNode::publishGoal() {
+    target_w_ = resolveFaceAngle();
 
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
@@ -118,6 +141,12 @@ void GoToPointNode::publishGoal() {
     std::string planner = "dstar";
     getInput<std::string>("planner", planner);
     goal_msg->planner_type = plannerFromString(planner);
+
+    // tolerance<=0 = "nunca retorna SUCCESS" — nesse caso movement_calculation.cpp não trava o
+    // robô por proximidade do alvo (ver RobotGoal.msg).
+    double tolerance = -1.0;
+    getInput<double>("tolerance", tolerance);
+    goal_msg->disable_arrival_latch = (tolerance <= 0.0);
 
     // Converte de milímetros (padrão interno) para metros (padrão do ROS/RobotGoal)
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
@@ -206,6 +235,7 @@ void GoToPointNode::publishMarkers() {
 // Chamado uma vez quando o nó BT é ativado
 BT::NodeStatus GoToPointNode::onStart() {
     ball_contact_since_.reset();
+    ball_wrong_side_since_.reset();
 
     unsigned int input_id;
     if (!getInput<unsigned int>("robot_id", input_id)) return BT::NodeStatus::FAILURE;
@@ -232,8 +262,8 @@ BT::NodeStatus GoToPointNode::onStart() {
     double my_goal_x = 2200.0;
     double opponent_goal_x = -2200.0;
     bool is_gk = false;
-    double p_depth = 500.0;
-    double p_width = 1350.0;
+    const double p_depth = 500.0;  // 500mm em X
+    const double p_width = 1350.0; // 1350mm em Y
     double margin = 100.0; // mm
 
     auto blackboard = config().blackboard;
@@ -243,20 +273,21 @@ BT::NodeStatus GoToPointNode::onStart() {
         (void)blackboard->get("is_goalkeeper", is_gk);
     }
 
-    if (field_size_.has_value()) {
-        p_depth = field_size_->penalty_area_depth;
-        p_width = field_size_->penalty_area_width;
-        double half_len = field_size_->field_length / 2.0;
-        my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
-        opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
-    }
+    if (robot_id_ == 0) is_gk = true;
 
-    // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
-    clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+    bool ignore_area = false;
+    getInput<bool>("ignore_area", ignore_area);
 
-    // 2. Bloquear a própria área apenas se NÃO for o goleiro
-    if (!is_gk) {
-        clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
+    if (!ignore_area) {
+        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
+        clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+
+        // 2. Bloquear a própria área apenas se NÃO for o goleiro
+        if (!is_gk) {
+            clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
+        } else {
+            clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
+        }
     }
 
     publishGoal();
@@ -271,8 +302,8 @@ BT::NodeStatus GoToPointNode::onRunning() {
         double my_goal_x = 2200.0;
         double opponent_goal_x = -2200.0;
         bool is_gk = false;
-        double p_depth = 500.0;
-        double p_width = 1350.0;
+        const double p_depth = 500.0;  // 500mm em X
+        const double p_width = 1350.0; // 1350mm em Y
         double margin = 100.0; // mm
 
         auto blackboard = config().blackboard;
@@ -282,53 +313,54 @@ BT::NodeStatus GoToPointNode::onRunning() {
             (void)blackboard->get("is_goalkeeper", is_gk);
         }
 
-        if (field_size_.has_value()) {
-            p_depth = field_size_->penalty_area_depth;
-            p_width = field_size_->penalty_area_width;
-            double half_len = field_size_->field_length / 2.0;
-            my_goal_x = (my_goal_x > 0) ? half_len : -half_len;
-            opponent_goal_x = (opponent_goal_x > 0) ? half_len : -half_len;
-        }
-
         double clamped_x = tx;
         double clamped_y = ty;
 
-        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
-        clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+        if (robot_id_ == 0) is_gk = true;
 
-        // 2. Bloquear a própria área apenas se NÃO for o goleiro
-        if (!is_gk) {
-            clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
+        bool ignore_area = false;
+        getInput<bool>("ignore_area", ignore_area);
+
+        // SÓ APLICA AS TRAVAS SE O XML NÃO MANDAR IGNORAR:
+        if (!ignore_area) {
+            // 1. Bloquear área adversária para TODOS os robôs
+            clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+
+            // 2. Bloquear a própria área
+            if (!is_gk) {
+                clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
+            } else {
+                clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
+            }
         }
-        
-        // Se houver uma mudança significativa (> 2mm), publica um novo objetivo
-        if (std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0) {
+
+        // Republica o objetivo se a posição mudou o bastante (>2mm) ou se o alvo de orientação
+        // (face_x/face_y) mudou sozinho mesmo com a posição parada.
+        bool position_changed = std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0;
+        if (position_changed) {
             target_pos_.x = clamped_x;
             target_pos_.y = clamped_y;
+        }
+        double candidate_w = resolveFaceAngle();
+        bool orientation_changed = std::abs(normalizeAngle(candidate_w - target_w_)) > 0.02; // ~1.1 grau
+        if (position_changed || orientation_changed) {
             publishGoal();
         }
+
     }
 
     // Pega a posição atual do robô para verificar se ele já chegou no destino
     auto robot = getRobotData(robot_id_);
     if (!robot) return BT::NodeStatus::RUNNING;
 
-    // Gatilho de contato indevido com a bola (ver comentário da porta em providedPorts()): só
-    // ativo se ball_contact_threshold_mm > 0 for explicitamente passado (ex: Fase 1 em
-    // master_strategy.xml). Falhar aqui, em vez de tentar corrigir a velocidade no controlador,
-    // devolve a decisão pra árvore: a Sequence falha, o ReactiveFallback tenta de novo no próximo
-    // tick com CalculateInterceptionNode já tendo recalculado os pontos a partir da posição REAL
-    // e atual da bola — um replanejamento completo, não um ajuste de velocidade brigando com o
-    // GoToPoint por cima (foi tentado como repulsão de velocidade direto no controlador e
-    // resultou em oscilação: a bola no meio do caminho não empurra mais, mas o robô fica preso
-    // "indo e voltando" na borda do raio de contato, sem nunca de fato progredir).
+    // Gatilho de contato indevido com a bola (ver providedPorts()): falhar aqui devolve a decisão
+    // pra árvore — a Sequence falha e o ReactiveFallback recalcula tudo do zero na posição real e
+    // atual da bola, em vez de continuar empurrando pelo caminho antigo.
     double ball_contact_threshold = -1.0;
     getInput<double>("ball_contact_threshold_mm", ball_contact_threshold);
     if (ball_contact_threshold > 0.0 && last_game_data_) {
         double ball_dist = std::hypot(robot->x - last_game_data_->ball.x, robot->y - last_game_data_->ball.y);
-        // Debounce: exige contato sustentado (150ms) antes de abortar, não um único frame de
-        // ruído de visão/predição. Sem isso, um blip passageiro de posição da bola já derrubaria
-        // a Sequence inteira à toa.
+        // Debounce: exige contato sustentado (150ms), não um blip de ruído de visão/predição.
         constexpr double kSustainedContactSec = 0.15;
         if (ball_dist < ball_contact_threshold) {
             if (!ball_contact_since_.has_value()) {
@@ -342,6 +374,46 @@ BT::NodeStatus GoToPointNode::onRunning() {
             }
         } else {
             ball_contact_since_.reset();
+        }
+    }
+
+    // Gatilho de lado errado da bola (ver providedPorts()): mesma lógica de dot product usada em
+    // CalculateInterceptionNode::computeKickReadiness, aplicada continuamente em vez de só na
+    // checagem final de pronto-pra-chutar.
+    bool ball_side_check = false;
+    getInput<bool>("ball_side_check", ball_side_check);
+    if (ball_side_check && last_game_data_) {
+        double bx = last_game_data_->ball.x;
+        double by = last_game_data_->ball.y;
+        double ball_dist = std::hypot(robot->x - bx, robot->y - by);
+        // Só importa perto da bola: longe, o robô ainda está em trânsito e pode cruzar
+        // momentaneamente o eixo bola-gol sem que isso signifique nada de errado.
+        constexpr double kSideCheckRangeMm = 600.0;
+        auto blackboard = config().blackboard;
+        double op_x, op_y;
+        if (ball_dist < kSideCheckRangeMm && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
+            // a = vetor bola->robô, b = vetor bola->gol. Se o robô está corretamente atrás da
+            // bola (do lado oposto ao gol), a e b apontam em direções opostas (dot < 0). Se o
+            // robô está na frente (mesmo lado do gol), dot > 0.
+            double a_x = robot->x - bx, a_y = robot->y - by;
+            double b_x = op_x - bx, b_y = op_y - by;
+            double dot = a_x * b_x + a_y * b_y;
+            constexpr double kSustainedWrongSideSec = 0.15;
+            if (dot > 0.0) {
+                if (!ball_wrong_side_since_.has_value()) {
+                    ball_wrong_side_since_ = node_->now();
+                } else if ((node_->now() - *ball_wrong_side_since_).seconds() >= kSustainedWrongSideSec) {
+                    RCLCPP_WARN(node_->get_logger(),
+                        "Robô %d: do lado errado da bola durante GoToPoint (na frente dela, não atrás) — "
+                        "abortando para recalcular a rota do zero.", robot_id_);
+                    ball_wrong_side_since_.reset();
+                    return BT::NodeStatus::FAILURE;
+                }
+            } else {
+                ball_wrong_side_since_.reset();
+            }
+        } else {
+            ball_wrong_side_since_.reset();
         }
     }
 
@@ -376,6 +448,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
             robot_id_, dist, tolerance, pos_ok ? "sim" : "nao",
             ori_err_rad * 180.0 / M_PI, ori_ok ? "sim" : "nao");
     }
+    
 
     // Continua executando até chegar no destino ou ser interrompido
     return BT::NodeStatus::RUNNING;

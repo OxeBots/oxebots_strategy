@@ -22,6 +22,24 @@ public:
   // encostar já alinhado, sem mirar no centro exato da bola (evita colisão de frente).
   static constexpr double kCaptureDistanceMm = 115.0;
 
+  // Default da porta "carry_distance_mm" (ver providedPorts()): distância (mm) do "ponto de
+  // carga" (intercept_carry_x/y) até a bola, do lado do GOL — negativo, então o ponto fica além
+  // do centro da bola. O contato físico (~115mm, kCaptureDistanceMm) segura o robô bem antes de
+  // lá, mas como a velocidade em movement_calculation.cpp é proporcional à distância residual até
+  // o alvo, mirar além sustenta mais velocidade de empurrão pelo mesmo controlador proporcional.
+  static constexpr double kCarryDistanceMm = -120.0;
+
+  // Default da porta "carry_face_lookahead_mm": distância (mm) do "ponto de mira da carga"
+  // (intercept_carry_face_x/y) até a bola, do lado do gol — usado como face_x/face_y do GoToPoint
+  // ao carregar. Fica na mesma linha bola→gol que intercept_carry_x/y, recalculado a cada tick a
+  // partir da bola atual (evita zigue-zague de um alvo de orientação fixo/distante), mas longe o
+  // bastante da bola pra não ter instabilidade de bearing.
+  static constexpr double kCarryFaceLookaheadMm = 400.0;
+
+  // Deslocamento lateral (mm) do waypoint de contorno (intercept_pk_safe_x/y), usado só enquanto
+  // o robô está do lado errado da bola. Ver cálculo de intercept_pk_safe no .cpp.
+  static constexpr double kSwingLateralOffsetMm = 600.0;
+
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
   void onHalted() override;
@@ -39,6 +57,9 @@ private:
   oxebots_interfaces::msg::BallPrediction::SharedPtr last_ball_pred_;
   oxebots_interfaces::msg::RobotPrediction::SharedPtr last_robot_pred_;
   std::mutex data_mutex_;
+
+  // Histerese do waypoint de contorno: entra ao detectar lado errado, só desarma com folga real.
+  bool swing_active_ = false;
 };
 
 } // namespace oxebots_strategy
