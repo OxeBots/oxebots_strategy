@@ -43,6 +43,10 @@ add_executable(
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
   src/smother_save_node.cpp
+  src/calculate_kickoff_pose.cpp
+  src/aim_at.cpp
+  src/has_line_of_sight.cpp
+  src/keep_distance.cpp
 )
 
 ament_target_dependencies(

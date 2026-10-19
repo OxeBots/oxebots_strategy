@@ -1,28 +1,80 @@
 <root main_tree_to_execute="MainTreeCarry" BTCPP_format="4">
-
-  <!-- Extensão de master_strategy.xml: mesma árvore, mas a Fase 2 do ataque carrega a bola até
-       o meio-campo antes de chutar, em vez de chutar assim que estiver perto/alinhado. -->
   <BehaviorTree ID="MainTreeCarry">
     <ReactiveFallback name="MasterStrategy">
-
-      <!-- 1. BOTÃO DE PARAR (STOP - Comando 1) -->
-      <Sequence name="StopBranch">
-        <CheckGCCommand expected="1"/>
-        <Halt reason="gc"/>
+      
+      <!-- 0. HALT: Parada Absoluta -->
+      <Sequence name="HaltBranch">
+        <CheckGCCommand expected="0"/>
+        <SubTree ID="HaltSubTree" _autoremap="true" />
       </Sequence>
 
-      <!-- 2. GOLEIRO (Apenas Robô 0) -->
+      <!-- 1. STOP: Aciona a árvore de stop (que usa o KeepDistance de 550mm) -->
+      <Sequence name="StopBranch">
+        <CheckGCCommand expected="1"/>
+        <SubTree ID="StopSubTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ========================================================= -->
+      <!-- NOSSA BOLA PARADA: KICK-OFF (Amarelo 4, Azul 5) -->
+      <Sequence name="OurKickOffBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
+        </Fallback>
+        <SubTree ID="KickOffTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
+      <Sequence name="OurPenaltyBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
+        </Fallback>
+        <SubTree ID="PenaltyTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- NOSSAS FALTAS / LATERAIS (Já resolvidas no C++) -->
+      <Sequence name="CornerBranch">
+          <IsValueTrue value="{is_corner_kick}"/>
+          <SubTree ID="CornerTree" _autoremap="true" />
+      </Sequence>
+      <Sequence name="ThrowInBranch">
+          <IsValueTrue value="{is_kick_in}"/>
+          <SubTree ID="ThrowInTree" _autoremap="true" />
+      </Sequence>
+      <Sequence name="FreeKickBranch">
+          <IsValueTrue value="{is_free_kick}"/>
+          <SubTree ID="FreeKickTree" _autoremap="true" />
+      </Sequence>
+
+      <!-- ========================================================= -->
+      <!-- BOLA PARADA DO ADVERSÁRIO: Usa o OppSetPieceTree para RECUAR -->
+      <Sequence name="OpponentSetPieceBranch">
+        <Fallback>
+          <!-- Kick-Off deles -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
+          <!-- Pênalti deles -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
+          <!-- Falta deles (Direta Amarelo 8, Direta Azul 9) -->
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="9"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="8"/></Sequence>
+          <!-- Fallback herdado do sistema anterior -->
+          <IsValueTrue value="{is_opponent_foul}"/>
+        </Fallback>
+        <SubTree ID="OppSetPieceTree" _autoremap="true" />
+      </Sequence>
+      <!-- ========================================================= -->
+
+      <!-- JOGO ROLANDO -->
       <ReactiveSequence name="GoalkeeperRole">
         <IsRobotId robot_id="0" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- 3. JOGO / ATAQUE (Robô Atacante é o Dono da Bola em qualquer lugar) -->
       <ReactiveSequence name="AttackerRole">
         <IsMyRole role="attacker" />
-        <!-- RetryUntilSuccessful, não Repeat: uma falha em qualquer etapa de ChaseAndKick deve
-             recalcular a rota do zero (CalculateInterception roda de novo logo abaixo) no
-             próximo tick, não cair num Halt que trava o robô no lugar. -->
         <RetryUntilSuccessful num_attempts="-1">
           <ReactiveSequence name="AttackerLogicLoop">
             <UpdateBallPosition robot_id="{robot_id}"
@@ -30,7 +82,7 @@
                                 pre_kick_x="{pkx}" pre_kick_y="{pky}"
                                 is_ready_to_kick="{is_ready}"
                                 goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
-
+            
             <CalculateInterception robot_id="{robot_id}"
                                    goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
                                    carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
@@ -41,48 +93,12 @@
                                    intercept_carry_x="{int_carry_x}" intercept_carry_y="{int_carry_y}"
                                    intercept_carry_face_x="{int_carry_face_x}" intercept_carry_face_y="{int_carry_face_y}"
                                    is_ready_to_kick="{is_ready_pred}" />
-
+            
             <ReactiveFallback name="AttackLogicActions">
-              <!-- Ataque em duas fases: sem dribbler, precisa chegar já alinhado antes de se
-                   aproximar, senão o contato vira "empurrar de lado" em vez de um chute limpo. -->
               <Sequence name="ChaseAndKick">
-                <!-- Fase 1: vai até o ponto de pré-chute (~400mm atrás da bola, linha bola-gol),
-                     via D*. x/y usam intercept_pk_safe, não intercept_pk direto: quando o robô
-                     está do lado errado da bola, aponta pra um waypoint de contorno lateral em
-                     vez do pré-chute direto, porque o D* sozinho só desvia da bola como
-                     obstáculo, sem noção de lado (ver calculate_interception_node.cpp).
-                     ball_contact_threshold_mm força replanejamento se o robô encostar na bola sem
-                     querer. SEM ball_side_check aqui: intercept_pk_safe já corrige o lado a cada
-                     tick de forma contínua — ball_side_check (reativo, aborta e reinicia)
-                     brigava com essa correção, derrubando a Fase 1 antes dela ter tempo de mover
-                     o robô até o waypoint de contorno (confirmado em log: falha a cada ~180ms,
-                     robô sem sair do lugar). -->
                 <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
                            ball_contact_threshold_mm="150.0" />
-
-                <!-- Fase 2, três ramos. Tentei eliminar o Realign e só deixar a Fase 1 recuperar
-                     quando a bola já passou o meio-campo mas não está pronta pro chute — não
-                     funciona: a Fase 1 para no pré-chute (~400mm da bola, tolerance=120mm), longe
-                     demais pro alcance do Shoot (~140mm), e nada nesta árvore fecha essa distância
-                     final. Resultado: Fase 1 "termina" (já satisfeita, robô não se moveu), Fase 2
-                     falha na hora (Shoot longe demais, Carry com a bola já do lado errado),
-                     reinicia a Fase 1 (já satisfeita de novo) — loop apertado bem na distância do
-                     pré-chute, robô preso sem nunca chutar (confirmado em teste).
-
-                     Shoot: bola já no campo adversário, perto e alinhada — chuta.
-                     Realign: bola já no campo adversário mas ainda não alinhada — fecha essa
-                     distância final mirando em int_cap_x/y (perto da bola, ~115mm, NÃO além dela)
-                     olhando direto pra ela (face=ball_x/y), em vez de continuar empurrando através
-                     dela — para de fato de carregar em vez de curvar em movimento.
-                     Carry: bola ainda no nosso campo — empurra via int_carry_x/y, um ponto além
-                     da bola (do lado do gol) na linha bola→gol, que sustenta velocidade de
-                     empurrão via controle proporcional (kCarryDistanceMm). face_x/y usa
-                     int_carry_face_x/y (ponto à frente da bola na mesma linha) em vez da bola ou
-                     do gol direto, pra não ter zigue-zague nem instabilidade de bearing.
-
-                     Realign e Carry miram em alvos DIFERENTES e são gateados por condições
-                     complementares, então não competem pelo mesmo estado de ball_side_check (não
-                     recria o bug de mascaramento de duas instâncias no MESMO alvo). -->
+                
                 <ReactiveFallback name="ApproachAndKick">
                   <Sequence name="Shoot">
                     <Inverter>
@@ -91,25 +107,16 @@
                     <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="6.5"/>
                   </Sequence>
+                  
                   <ReactiveSequence name="Realign">
                     <Inverter>
                       <IsBallInOurHalf ball_x="{ball_x}" />
                     </Inverter>
-                    <!-- face_x/y usa int_carry_face_x/y (NÃO ball_x/y): mirar na própria bola,
-                         tão perto do alvo de posição, é instável — qualquer desvio lateral pequeno
-                         vira uma guinada angular grande (mesmo problema já visto no Carry, que por
-                         isso usa um ponto de mira longe/estável na mesma linha em vez da bola ou
-                         do gol direto). int_cap_x/y e int_carry_x/y ficam na mesma linha bola→gol,
-                         então o mesmo ponto de mira serve pros dois.
-
-                         SEM ball_side_check aqui: nesse alcance apertado, ruído pequeno de posição
-                         já basta pra inverter o sinal do produto escalar por um instante mesmo com
-                         o robô fisicamente correto, disparando falso positivo e abortando pra Fase
-                         1 à toa. -->
                     <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
                                face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
                                tolerance="0.0" planner="straight_line" />
                   </ReactiveSequence>
+                  
                   <ReactiveSequence name="Carry">
                     <IsBallInOurHalf ball_x="{ball_x}" />
                     <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
@@ -117,9 +124,7 @@
                                tolerance="0.0" planner="straight_line" ball_side_check="true" />
                   </ReactiveSequence>
                 </ReactiveFallback>
-
-                <!-- Recuo pós-chute: sem isso, o loop reinicia imediatamente e recaptura a bola
-                     (ainda perto do robô) em vez de deixá-la rolar livre após o chute. -->
+                
                 <Delay delay_msec="600">
                   <AlwaysSuccess/>
                 </Delay>
@@ -129,13 +134,9 @@
         </RetryUntilSuccessful>
       </ReactiveSequence>
 
-      <!-- 3. DEFESA (Robô 1 - Lógica vinda da branch defender) -->
       <SubTree ID="DefenderTree" _autoremap="true" />
 
-      <!-- 4. RESERVAS (Outros robôs ficam parados) -->
       <Halt reason="idle"/>
-
     </ReactiveFallback>
   </BehaviorTree>
-
 </root>
