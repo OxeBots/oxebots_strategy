@@ -24,13 +24,12 @@
                        </ReactiveSequence>
 
                        <!-- 2. Bola no nosso campo: Defender linha do gol -->
-                       <ReactiveSequence name="State2_BallInOurHalf">
-                           <IsBallInOurHalf ball_x="{ball_x}" />
-                           <GoalLineDefend robot_id="{robot_id}" ball_y="{ball_y}" />
-                       </ReactiveSequence>
+                       
+                        <GoalLineDefend robot_id="{robot_id}" ball_y="{ball_y}" />
+                       
                        
                        <!-- 3. Comportamento Padrão: Bissetriz -->
-                       <PositionBisector robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" goal_width="800.0" />
+                       
 
                    </ReactiveFallback>
                </Sequence>

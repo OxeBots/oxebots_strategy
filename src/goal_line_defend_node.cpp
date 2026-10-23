@@ -95,7 +95,8 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     if (std::abs(target_y - last_target_y_) > POSITION_UPDATE_THRESHOLD) {
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
-        goal_msg->pose.header.stamp = node_->now();
+        goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+        goal_msg->pose.header.stamp = node_ -> now();
         goal_msg->pose.header.frame_id = "map";
         
         double offset_x = (my_goal_x_ > 0) ? -GOAL_LINE_OFFSET : GOAL_LINE_OFFSET;
