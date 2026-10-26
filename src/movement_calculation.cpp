@@ -4,14 +4,30 @@
 
 namespace {
 double normalizeAngle(double angle) {
+    if (!std::isfinite(angle)) return 0.0;
     while (angle > M_PI) angle -= 2.0 * M_PI;
     while (angle < -M_PI) angle += 2.0 * M_PI;
     return angle;
 }
 double normalizeAngleDeg(double angle) {
+    if (!std::isfinite(angle)) return 0.0;
     while (angle > 180.0) angle -= 360.0;
     while (angle < -180.0) angle += 360.0;
     return angle;
+}
+bool sanitizeCmd(oxebots_interfaces::msg::RobotCmdData& cmd) {
+    bool had_non_finite = false;
+    auto fix = [&had_non_finite](float& v) {
+        if (!std::isfinite(v)) {
+            v = 0.0f;
+            had_non_finite = true;
+        }
+    };
+    fix(cmd.x_velocity);
+    fix(cmd.y_velocity);
+    fix(cmd.angular_velocity);
+    fix(cmd.kick_speed);
+    return had_non_finite;
 }
 }
 
@@ -325,6 +341,9 @@ void PathFollowerNode::calculate_and_move() {
     if (arrived) {
         cmd_data.x_velocity = 0.0;
         cmd_data.y_velocity = 0.0;
+    } else if (dist_to_target < 1e-3) {
+        cmd_data.x_velocity = 0.0;
+        cmd_data.y_velocity = 0.0;
     } else {
         double p_lin = this->get_parameter("p_gain_linear").as_double();
         double max_lin = this->get_parameter("max_linear_speed").as_double();
@@ -377,6 +396,11 @@ void PathFollowerNode::calculate_and_move() {
 
     // Trava de segurança de velocidade para impedir entrada na área de pênalti (baseada em /field_geometry)
     clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
+
+    if (sanitizeCmd(cmd_data)) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "Robô %d: comando continha NaN/Inf em calculate_and_move e foi zerado.", robot_id_);
+    }
 
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
@@ -434,6 +458,10 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
             offset_rad * last_override_msg_->p_gain,
             -last_override_msg_->max_angular_speed, last_override_msg_->max_angular_speed);
     }
+    if (sanitizeCmd(cmd_data)) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "Robô %d: comando continha NaN/Inf em runAlign e foi zerado.", robot_id_);
+    }
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
 
@@ -487,6 +515,10 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0;
             clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
+            if (sanitizeCmd(cmd_data)) {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                    "Robô %d: comando continha NaN/Inf em runKick e foi zerado.", robot_id_);
+            }
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));
             publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
