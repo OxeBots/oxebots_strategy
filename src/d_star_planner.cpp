@@ -162,33 +162,87 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     int idx = u.y * grid_width_ + u.x;
 
     // Parede de área de pênalti (valor 101): NUNCA pode ser ignorada pela vizinhança do alvo!
-    // Exceção apenas para a célula imediata do robô (dist <= 1) caso tenha escorregado na margem, para conseguir sair.
+    // Exceção apenas para a vizinhança imediata do robô (dist <= 3 células = 15cm) com custo alto,
+    // caso o robô tenha escorregado ou sido repelido pela bola para dentro da margem, para conseguir sair.
     if (current_grid_->data[idx] > 100) {
-        if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 1 && std::abs(u.y - start_cell_->y) <= 1) {
-            return 10.0;
+        if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 3 && std::abs(u.y - start_cell_->y) <= 3) {
+            return 25.0;
         }
         return std::numeric_limits<double>::infinity();
     }
 
-    // CRÍTICO: Tratar a vizinhança imediata do Início e do Alvo como navegável contra obstáculos dinâmicos/inflação (100).
-    // Isso evita que o robô trave se o alvo (bola) for marcado como obstáculo 
-    // ou se o robô estiver ligeiramente dentro de uma zona de inflação de outro robô.
-    if (start_cell_.has_value()) {
-        if (std::abs(u.x - start_cell_->x) <= 4 && std::abs(u.y - start_cell_->y) <= 4) return 1.0;
+    // Célula exata (<= 1) do início ou do alvo sempre navegável para evitar travar na partida/chegada.
+    if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 1 && std::abs(u.y - start_cell_->y) <= 1) {
+        return 1.0;
     }
-    if (goal_cell_.has_value()) {
-        if (std::abs(u.x - goal_cell_->x) <= 8 && std::abs(u.y - goal_cell_->y) <= 8) return 1.0;
+    if (goal_cell_.has_value() && std::abs(u.x - goal_cell_->x) <= 1 && std::abs(u.y - goal_cell_->y) <= 1) {
+        return 1.0;
+    }
+
+    // Check Dynamic Obstacles (bola e aliados) ANTES de liberar a inflação estática do próprio robô:
+    // anteriormente, liberar <= 8 células (400mm!) ao redor de goal_cell_ apagava inteiramente o
+    // obstáculo da bola (já que o ponto de pré-chute fica a 400mm da bola), fazendo o D* planejar
+    // linha reta por cima da bola em vez de dar a volta!
+    if (dynamic_obstacle_map_[idx])
+        return relax_obstacles_ ? 30.0 : std::numeric_limits<double>::infinity();
+
+    // Ignorar a inflação do próprio robô no mapa estático (/map marca o próprio robô com 3 células)
+    if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 3 && std::abs(u.y - start_cell_->y) <= 3) {
+        return 1.0;
+    }
+    if (goal_cell_.has_value() && std::abs(u.x - goal_cell_->x) <= 2 && std::abs(u.y - goal_cell_->y) <= 2) {
+        return 1.0;
     }
 
     // Check Static Map
     if (current_grid_->data[idx] >= config_.occupancy_threshold)
-        return std::numeric_limits<double>::infinity();
-
-    // Check Dynamic Obstacles (O(1) lookup)
-    if (dynamic_obstacle_map_[idx])
-        return std::numeric_limits<double>::infinity();
+        return relax_obstacles_ ? 30.0 : std::numeric_limits<double>::infinity();
 
     return 1.0;  // Traversable
+}
+
+GridCell DStarPlanner::findNearestValidGoal(const GridCell & goal) const
+{
+    if (!current_grid_ || grid_width_ <= 0 || grid_height_ <= 0)
+        return goal;
+
+    GridCell clamped = {
+        std::clamp(goal.x, 0, grid_width_ - 1),
+        std::clamp(goal.y, 0, grid_height_ - 1)
+    };
+
+    auto is_valid_goal_cell = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= grid_width_ || y >= grid_height_)
+            return false;
+        int idx = y * grid_width_ + x;
+        return current_grid_->data[idx] <= 100;
+    };
+
+    if (is_valid_goal_cell(clamped.x, clamped.y))
+        return clamped;
+
+    GridCell best = clamped;
+    double best_dist_sq = std::numeric_limits<double>::infinity();
+    for (int r = 1; r <= 15; ++r) {
+        for (int dy = -r; dy <= r; ++dy) {
+            for (int dx = -r; dx <= r; ++dx) {
+                if (std::abs(dx) != r && std::abs(dy) != r)
+                    continue;
+                int nx = clamped.x + dx;
+                int ny = clamped.y + dy;
+                if (is_valid_goal_cell(nx, ny)) {
+                    double d2 = static_cast<double>(dx * dx + dy * dy);
+                    if (d2 < best_dist_sq) {
+                        best_dist_sq = d2;
+                        best = {nx, ny};
+                    }
+                }
+            }
+        }
+        if (std::isfinite(best_dist_sq))
+            return best;
+    }
+    return clamped;
 }
 
 double DStarPlanner::getTraversalCost(DStarNode * n1, DStarNode * n2) const
@@ -611,8 +665,8 @@ void DStarPlannerNode::applyMapWithPenaltyBounds(const nav_msgs::msg::OccupancyG
     bool block_positive = bounds.block_positive;
     bool block_negative = bounds.block_negative;
 
-    // Adiciona a margem de segurança do robô (ex: 9cm = 0.09m) para as rodas não pisarem na linha
-    double margin = 0.09;
+    // Sem margem extra: a própria linha da área é o limitador
+    double margin = 0.0;
     double safe_penalty_x = bounds.penalty_x - margin;
     double safe_y_min = bounds.penalty_y_min - margin;
     double safe_y_max = bounds.penalty_y_max + margin;
@@ -811,19 +865,47 @@ void DStarPlannerNode::plan_and_publish()
     // Mesmos limites de área usados para desenhar a parede no grid em map_callback.
     const auto bounds = computePenaltyAreaBounds();
 
-    // Margem de segurança para o alvo ficar fora das células marcadas como 101 (0.09m + 0.06m de folga de resolução)
-    double target_margin = 0.15;
+    // Sem margem extra: a própria linha da área é o limitador
+    double target_margin = 0.0;
 
-    // Clampar o alvo fora da área positiva se bloqueada (inclusive para PLANNER_STRAIGHT_LINE)
-    if (bounds.block_positive && target.x > (bounds.penalty_x - target_margin) &&
-        (target.y > (bounds.penalty_y_min - target_margin) && target.y < (bounds.penalty_y_max + target_margin))) {
-        target.x = bounds.penalty_x - target_margin;
+    // Clampar o alvo fora da área positiva se bloqueada (inclusive para PLANNER_STRAIGHT_LINE),
+    // ejetando pela menor penetração (X na frente da área, Y nas laterais da área).
+    if (bounds.block_positive) {
+        double front_x = bounds.penalty_x - target_margin;
+        double y_min = bounds.penalty_y_min - target_margin;
+        double y_max = bounds.penalty_y_max + target_margin;
+        if (target.x > front_x && target.y > y_min && target.y < y_max) {
+            double pen_x = target.x - front_x;
+            double dist_ymin = target.y - y_min;
+            double dist_ymax = y_max - target.y;
+            double pen_y = std::min(dist_ymin, dist_ymax);
+            bool ball_on_side = (ball_x_ > bounds.penalty_x && std::abs(ball_y_) >= bounds.penalty_y_max * 0.9);
+            if (pen_y < pen_x || ball_on_side) {
+                target.y = (dist_ymin < dist_ymax) ? y_min : y_max;
+            } else {
+                target.x = front_x;
+            }
+        }
     }
 
-    // Clampar o alvo fora da área negativa se bloqueada (inclusive para PLANNER_STRAIGHT_LINE)
-    if (bounds.block_negative && target.x < (-bounds.penalty_x + target_margin) &&
-        (target.y > (bounds.penalty_y_min - target_margin) && target.y < (bounds.penalty_y_max + target_margin))) {
-        target.x = -bounds.penalty_x + target_margin;
+    // Clampar o alvo fora da área negativa se bloqueada (inclusive para PLANNER_STRAIGHT_LINE),
+    // ejetando pela menor penetração (X na frente da área, Y nas laterais da área).
+    if (bounds.block_negative) {
+        double front_x = -bounds.penalty_x + target_margin;
+        double y_min = bounds.penalty_y_min - target_margin;
+        double y_max = bounds.penalty_y_max + target_margin;
+        if (target.x < front_x && target.y > y_min && target.y < y_max) {
+            double pen_x = front_x - target.x;
+            double dist_ymin = target.y - y_min;
+            double dist_ymax = y_max - target.y;
+            double pen_y = std::min(dist_ymin, dist_ymax);
+            bool ball_on_side = (ball_x_ < -bounds.penalty_x && std::abs(ball_y_) >= bounds.penalty_y_max * 0.9);
+            if (pen_y < pen_x || ball_on_side) {
+                target.y = (dist_ymin < dist_ymax) ? y_min : y_max;
+            } else {
+                target.x = front_x;
+            }
+        }
     }
 
     if (target_goal_msg_.value()->planner_type == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE) {
@@ -831,43 +913,59 @@ void DStarPlannerNode::plan_and_publish()
         return;
     }
 
-    // Convert world coordinates to grid coordinates
+    // Convert world coordinates to grid coordinates and ensure goal is not inside a 101 cell
     auto s = planner_->worldToGrid(current_x_, current_y_, origin.x, origin.y);
-    auto g = planner_->worldToGrid(target.x, target.y, origin.x, origin.y);
+    auto g = planner_->findNearestValidGoal(planner_->worldToGrid(target.x, target.y, origin.x, origin.y));
+
+    auto run_full_plan = [&]() -> bool {
+        planner_->setRelaxObstacles(false);
+        planner_->initialize(s, g);
+        if (planner_->plan() == planning::PlannerStatus::SUCCESS) {
+            return true;
+        }
+        // Fallback: se o corredor ao redor da área estiver estrangulado pela inflação da bola/aliados,
+        // relaxa a inflação dinâmica para custo alto (mantendo a área 101 estritamente proibida!)
+        // para contornar sem travar com path not found.
+        planner_->setRelaxObstacles(true);
+        planner_->initialize(s, g);
+        bool ok = (planner_->plan() == planning::PlannerStatus::SUCCESS);
+        planner_->setRelaxObstacles(false);
+        return ok;
+    };
 
     auto cur_goal = planner_->getGoal();
-    if (!cur_goal || *cur_goal != g)
+    if (!cur_goal || *cur_goal != g || !last_plan_ok_)
     {
-        // New goal received: full re-initialization
-        planner_->initialize(s, g);
-        if (planner_->plan() != planning::PlannerStatus::SUCCESS)
+        // New goal received or previous plan failed: full re-initialization
+        if (!run_full_plan())
         {
-            // Publish empty path on failure to stop the robot
+            last_plan_ok_ = false;
             nav_msgs::msg::Path empty_path;
             empty_path.header.stamp = now();
             empty_path.header.frame_id = "map";
             path_pub_->publish(empty_path);
             return;
         }
+        last_plan_ok_ = true;
     }
     else
     {
-        // Check if we are already close enough to the goal (within 5cm)
-        double dx = current_x_ - target.x;
-        double dy = current_y_ - target.y;
-        if (std::sqrt(dx*dx + dy*dy) < 0.05) {
-            nav_msgs::msg::Path empty_path;
-            empty_path.header.stamp = now();
-            empty_path.header.frame_id = "map";
-            path_pub_->publish(empty_path);
-            target_goal_msg_ = std::nullopt; // Clear goal after reaching it
-            return;
-        }
-        // Same goal: incremental replanning based on map updates
+        // Same goal: incremental replanning based on map updates.
+        // Não publica empty_path aos 5cm: o PathFollowerNode precisa manter a pose final ativa
+        // enquanto termina de alinhar a orientação (target_w_) exigida pelo GoToPointNode.
         planner_->updateMapAndReplan(s);
     }
 
     auto path = planner_->reconstructPath(s, origin.x, origin.y);
+    if (path.poses.empty()) {
+        // Se o replanejamento incremental não conseguiu reconstruir o caminho, força um plano completo
+        if (run_full_plan()) {
+            last_plan_ok_ = true;
+            path = planner_->reconstructPath(s, origin.x, origin.y);
+        } else {
+            last_plan_ok_ = false;
+        }
+    }
     path.header = last_map_data_->header;
     path_pub_->publish(path);
     if (rviz_path_pub_) {

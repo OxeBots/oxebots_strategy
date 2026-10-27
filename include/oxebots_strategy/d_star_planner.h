@@ -229,6 +229,8 @@ class DStarPlanner
     geometry_msgs::msg::PoseStamped gridToWorld(const GridCell & gc, double origin_x, double origin_y) const;
 
     std::optional<GridCell> getGoal() const { return goal_cell_; }
+    GridCell findNearestValidGoal(const GridCell & goal) const;
+    void setRelaxObstacles(bool relax) { relax_obstacles_ = relax; }
     const PlannerMetrics & getMetrics() const { return metrics_; }
     void resetMetrics() { metrics_.reset(); }
 
@@ -296,6 +298,7 @@ class DStarPlanner
     std::priority_queue<OpenListEntry, std::vector<OpenListEntry>, std::greater<OpenListEntry>> open_list_;
     std::optional<GridCell> start_cell_;
     std::optional<GridCell> goal_cell_;
+    bool relax_obstacles_ = false;
     mutable std::mutex data_mutex_;
 };
 
@@ -395,6 +398,7 @@ class DStarPlannerNode : public rclcpp::Node
     // da distância normal do ponto de pré-chute à bola (~400mm), então não compromete a Fase 1.
     double ball_safety_radius_m_ = 0.15;
     int consecutive_failures_ = 0;
+    bool last_plan_ok_ = false;
     bool is_yellow_ = false;
     bool invert_sides_ = false;
 };

@@ -74,6 +74,12 @@ private:
     // Histerese da repulsão de contato: entra a kContactEnterMm, só desarma a kContactExitMm.
     bool contact_repulsion_active_ = false;
 
+    // Estado para termo derivativo (amortecimento D) do controle angular (evita overshoot/oscilação de yaw)
+    bool has_prev_orientation_ = false;
+    double prev_orientation_ = 0.0;
+    double filtered_omega_ = 0.0;
+    std::chrono::steady_clock::time_point prev_control_time_;
+
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     int robot_id_ = 0;

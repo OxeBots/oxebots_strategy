@@ -11,15 +11,30 @@ double normalizeAngle(double angle) {
 
 void clampFromPenaltyArea(double& tx, double& ty, double goal_x, double depth, double width, double margin) {
     double half_width = width / 2.0;
+    double y_limit = half_width + margin;
+    if (std::abs(ty) >= y_limit) return;
+
     if (goal_x > 0) {
-        double area_left = goal_x - depth;
-        if (tx > (area_left - margin) && std::abs(ty) < (half_width + margin)) {
-            tx = area_left - margin;
+        double x_limit = goal_x - depth - margin;
+        if (tx > x_limit) {
+            double pen_x = tx - x_limit;
+            double pen_y = y_limit - std::abs(ty);
+            if (pen_y < pen_x) {
+                ty = (ty >= 0.0) ? y_limit : -y_limit;
+            } else {
+                tx = x_limit;
+            }
         }
     } else {
-        double area_right = goal_x + depth;
-        if (tx < (area_right + margin) && std::abs(ty) < (half_width + margin)) {
-            tx = area_right + margin;
+        double x_limit = goal_x + depth + margin;
+        if (tx < x_limit) {
+            double pen_x = x_limit - tx;
+            double pen_y = y_limit - std::abs(ty);
+            if (pen_y < pen_x) {
+                ty = (ty >= 0.0) ? y_limit : -y_limit;
+            } else {
+                tx = x_limit;
+            }
         }
     }
 }
@@ -265,7 +280,7 @@ BT::NodeStatus GoToPointNode::onStart() {
     double p_depth = 0.0;
     double p_width = 0.0;
     bool is_gk = false;
-    double margin = 100.0; // mm
+    double margin = 0.0; // mm (sem margem extra: a própria linha da área é o limitador)
 
     auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (blackboard) {
@@ -307,7 +322,7 @@ BT::NodeStatus GoToPointNode::onRunning() {
         double p_depth = 0.0;
         double p_width = 0.0;
         bool is_gk = false;
-        double margin = 100.0; // mm
+        double margin = 0.0; // mm (sem margem extra: a própria linha da área é o limitador)
 
         auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
         if (blackboard) {
@@ -339,15 +354,15 @@ BT::NodeStatus GoToPointNode::onRunning() {
             }
         }
 
-        // Republica o objetivo se a posição mudou o bastante (>2mm) ou se o alvo de orientação
-        // (face_x/face_y) mudou sozinho mesmo com a posição parada.
-        bool position_changed = std::abs(clamped_x - target_pos_.x) > 2.0 || std::abs(clamped_y - target_pos_.y) > 2.0;
+        // Republica o objetivo se a posição mudou o bastante (>5mm) ou se o alvo de orientação
+        // (face_x/face_y) mudou (>0.05 rad ~2.8 graus), filtrando micro-ruídos da visão/predição.
+        bool position_changed = std::abs(clamped_x - target_pos_.x) > 5.0 || std::abs(clamped_y - target_pos_.y) > 5.0;
         if (position_changed) {
             target_pos_.x = clamped_x;
             target_pos_.y = clamped_y;
         }
         double candidate_w = resolveFaceAngle();
-        bool orientation_changed = std::abs(normalizeAngle(candidate_w - target_w_)) > 0.02; // ~1.1 grau
+        bool orientation_changed = std::abs(normalizeAngle(candidate_w - target_w_)) > 0.05; // ~2.8 graus
         if (position_changed || orientation_changed) {
             publishGoal();
         }
@@ -395,11 +410,15 @@ BT::NodeStatus GoToPointNode::onRunning() {
         // momentaneamente o eixo bola-gol sem que isso signifique nada de errado.
         constexpr double kSideCheckRangeMm = 600.0;
         auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
-        double op_x, op_y;
-        if (ball_dist < kSideCheckRangeMm && blackboard && blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y)) {
-            // a = vetor bola->robô, b = vetor bola->gol. Se o robô está corretamente atrás da
-            // bola (do lado oposto ao gol), a e b apontam em direções opostas (dot < 0). Se o
-            // robô está na frente (mesmo lado do gol), dot > 0.
+        double op_x = 0.0, op_y = 0.0;
+        bool has_dir = getInput<double>("face_x", op_x) && getInput<double>("face_y", op_y);
+        if (!has_dir && blackboard) {
+            has_dir = blackboard->get("opponent_goal_x", op_x) && blackboard->get("opponent_goal_y", op_y);
+        }
+        if (ball_dist < kSideCheckRangeMm && has_dir) {
+            // a = vetor bola->robô, b = vetor bola->alvo de orientação (ou gol). Se o robô está
+            // corretamente atrás da bola (do lado oposto ao alvo), a e b apontam em direções
+            // opostas (dot < 0). Se o robô está na frente (mesmo lado do alvo), dot > 0.
             double a_x = robot->x - bx, a_y = robot->y - by;
             double b_x = op_x - bx, b_y = op_y - by;
             double dot = a_x * b_x + a_y * b_y;
