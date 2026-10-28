@@ -133,12 +133,26 @@ ament_target_dependencies(
   oxebots_interfaces
 )
 
+add_executable(
+  referee_state_node
+  src/referee_state_node.cpp
+)
+
+ament_target_dependencies(
+  referee_state_node
+  rclcpp
+  oxebots_interfaces
+  ssl_league_msgs
+  geometry_msgs
+)
+
 install(TARGETS
   strategy_node
   movement_calculation_node
   trajectory_setpoint_node
   d_star_planner_node
   role_assigner_node
+  referee_state_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
