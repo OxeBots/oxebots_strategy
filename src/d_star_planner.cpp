@@ -639,6 +639,12 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
         }
     }
 
+    // Margem de 8 cm (0.08 m) na área inimiga e 0 na área aliada (aplicável a ambos os lados)
+    constexpr double kAllyAreaMarginM = 0.0;
+    constexpr double kEnemyAreaMarginM = 0.08;
+    bounds.pos_margin = effective_is_yellow ? kAllyAreaMarginM : kEnemyAreaMarginM;
+    bounds.neg_margin = effective_is_yellow ? kEnemyAreaMarginM : kAllyAreaMarginM;
+
     bounds.penalty_x = (field_length / 2.0) - penalty_depth;
     bounds.penalty_y_min = -penalty_width / 2.0;
     bounds.penalty_y_max = penalty_width / 2.0;
@@ -665,11 +671,14 @@ void DStarPlannerNode::applyMapWithPenaltyBounds(const nav_msgs::msg::OccupancyG
     bool block_positive = bounds.block_positive;
     bool block_negative = bounds.block_negative;
 
-    // Sem margem extra: a própria linha da área é o limitador
-    double margin = 0.0;
-    double safe_penalty_x = bounds.penalty_x - margin;
-    double safe_y_min = bounds.penalty_y_min - margin;
-    double safe_y_max = bounds.penalty_y_max + margin;
+    // Limites com margem específica por lado (0 na área aliada, 8 cm na área inimiga)
+    double pos_safe_x = bounds.penalty_x - bounds.pos_margin;
+    double pos_safe_y_min = bounds.penalty_y_min - bounds.pos_margin;
+    double pos_safe_y_max = bounds.penalty_y_max + bounds.pos_margin;
+
+    double neg_safe_x = -bounds.penalty_x + bounds.neg_margin;
+    double neg_safe_y_min = bounds.penalty_y_min - bounds.neg_margin;
+    double neg_safe_y_max = bounds.penalty_y_max + bounds.neg_margin;
 
     // Varre absolutamente TODAS as células do mapa
     for (int y = 0; y < height; ++y) {
@@ -679,8 +688,8 @@ void DStarPlannerNode::applyMapWithPenaltyBounds(const nav_msgs::msg::OccupancyG
             double world_y = origin_y + (y * res);
 
             // Bloqueia as áreas de pênalti aplicáveis a este robô
-            bool in_positive_area = block_positive && (world_x > safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
-            bool in_negative_area = block_negative && (world_x < -safe_penalty_x && world_y > safe_y_min && world_y < safe_y_max);
+            bool in_positive_area = block_positive && (world_x > pos_safe_x && world_y > pos_safe_y_min && world_y < pos_safe_y_max);
+            bool in_negative_area = block_negative && (world_x < neg_safe_x && world_y > neg_safe_y_min && world_y < neg_safe_y_max);
 
             if (in_positive_area || in_negative_area) {
                 // O peso 101 diferencia a parede da área de pênalti da inflação comum de robôs (100),
@@ -865,15 +874,12 @@ void DStarPlannerNode::plan_and_publish()
     // Mesmos limites de área usados para desenhar a parede no grid em map_callback.
     const auto bounds = computePenaltyAreaBounds();
 
-    // Sem margem extra: a própria linha da área é o limitador
-    double target_margin = 0.0;
-
     // Clampar o alvo fora da área positiva se bloqueada (inclusive para PLANNER_STRAIGHT_LINE),
     // ejetando pela menor penetração (X na frente da área, Y nas laterais da área).
     if (bounds.block_positive) {
-        double front_x = bounds.penalty_x - target_margin;
-        double y_min = bounds.penalty_y_min - target_margin;
-        double y_max = bounds.penalty_y_max + target_margin;
+        double front_x = bounds.penalty_x - bounds.pos_margin;
+        double y_min = bounds.penalty_y_min - bounds.pos_margin;
+        double y_max = bounds.penalty_y_max + bounds.pos_margin;
         if (target.x > front_x && target.y > y_min && target.y < y_max) {
             double pen_x = target.x - front_x;
             double dist_ymin = target.y - y_min;
@@ -891,9 +897,9 @@ void DStarPlannerNode::plan_and_publish()
     // Clampar o alvo fora da área negativa se bloqueada (inclusive para PLANNER_STRAIGHT_LINE),
     // ejetando pela menor penetração (X na frente da área, Y nas laterais da área).
     if (bounds.block_negative) {
-        double front_x = -bounds.penalty_x + target_margin;
-        double y_min = bounds.penalty_y_min - target_margin;
-        double y_max = bounds.penalty_y_max + target_margin;
+        double front_x = -bounds.penalty_x + bounds.neg_margin;
+        double y_min = bounds.penalty_y_min - bounds.neg_margin;
+        double y_max = bounds.penalty_y_max + bounds.neg_margin;
         if (target.x < front_x && target.y > y_min && target.y < y_max) {
             double pen_x = front_x - target.x;
             double dist_ymin = target.y - y_min;

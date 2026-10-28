@@ -249,13 +249,15 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     (void)root_bb->get("field_width", field_width);
   }
 
-  // Margem zerada: a própria linha da área (penalty_area_depth e penalty_area_width/2) é o limitador.
-  constexpr double kAreaMarginMm = 0.0;
+  // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
+  constexpr double kAllyAreaMarginMm = 0.0;
+  constexpr double kEnemyAreaMarginMm = 80.0;
   const bool restrict_our_area = (robot_id != 0 && p_depth > 0.0 && p_width > 0.0 && std::abs(my_goal_x) > 1.0);
+  const bool restrict_opp_area = (p_depth > 0.0 && p_width > 0.0 && std::abs(goal_x) > 1.0);
   const double area_front_x = (my_goal_x < 0.0)
-      ? (my_goal_x + p_depth + kAreaMarginMm)
-      : (my_goal_x - p_depth - kAreaMarginMm);
-  const double area_side_y = (p_width / 2.0) + kAreaMarginMm;
+      ? (my_goal_x + p_depth + kAllyAreaMarginMm)
+      : (my_goal_x - p_depth - kAllyAreaMarginMm);
+  const double area_side_y = (p_width / 2.0) + kAllyAreaMarginMm;
 
   // Limita a bola predita dentro das dimensões do campo para evitar extrapolação para fora nas bordas/laterais
   if (field_length > 0.0 && field_width > 0.0) {
@@ -266,8 +268,9 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   }
 
   const double opp_area_front_x = (goal_x < 0.0)
-      ? (goal_x + p_depth + kAreaMarginMm)
-      : (goal_x - p_depth - kAreaMarginMm);
+      ? (goal_x + p_depth + kEnemyAreaMarginMm)
+      : (goal_x - p_depth - kEnemyAreaMarginMm);
+  const double opp_area_side_y = (p_width / 2.0) + kEnemyAreaMarginMm;
 
   auto is_inside_our_area = [&](double x, double y) -> bool {
     if (!restrict_our_area) return false;
@@ -276,9 +279,9 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   };
 
   auto is_inside_opp_area = [&](double x, double y) -> bool {
-    if (p_depth <= 0.0 || p_width <= 0.0 || std::abs(goal_x) <= 1.0) return false;
+    if (!restrict_opp_area) return false;
     bool in_x = (goal_x < 0.0) ? (x < opp_area_front_x) : (x > opp_area_front_x);
-    return in_x && (std::abs(y) < area_side_y);
+    return in_x && (std::abs(y) < opp_area_side_y);
   };
 
   auto clamp_out_our_area = [&](double& x, double& y, double ref_bx, double ref_by) {
@@ -292,6 +295,20 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
       y = sy * area_side_y;
     } else {
       x = area_front_x;
+    }
+  };
+
+  auto clamp_out_opp_area = [&](double& x, double& y, double ref_bx, double ref_by) {
+    if (!is_inside_opp_area(x, y)) return;
+    double pen_x = (goal_x < 0.0) ? (opp_area_front_x - x) : (x - opp_area_front_x);
+    double pen_y = opp_area_side_y - std::abs(y);
+    bool ball_on_side = ((goal_x < 0.0) ? (ref_bx < opp_area_front_x) : (ref_bx > opp_area_front_x)) &&
+                        (std::abs(ref_by) >= (p_width / 2.0) * 0.9);
+    if (pen_y < pen_x || ball_on_side) {
+      double sy = (std::abs(ref_by) > 1.0) ? ((ref_by >= 0.0) ? 1.0 : -1.0) : ((y >= 0.0) ? 1.0 : -1.0);
+      y = sy * opp_area_side_y;
+    } else {
+      x = opp_area_front_x;
     }
   };
 
@@ -358,6 +375,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     }
   }
 
+  clamp_out_opp_area(pk_x, pk_y, intercept_x, intercept_y);
   setOutput("intercept_pk_x", pk_x);
   setOutput("intercept_pk_y", pk_y);
 
@@ -422,6 +440,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
       pk_safe_y = std::clamp(pk_safe_y, -max_fy, max_fy);
     }
     clamp_out_our_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);
+    clamp_out_opp_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);
   }
   setOutput("intercept_pk_safe_x", pk_safe_x);
   setOutput("intercept_pk_safe_y", pk_safe_y);
@@ -435,6 +454,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     cap_x = intercept_x + (dx_g / dist_ball_goal) * kCaptureDistanceMm;
     cap_y = intercept_y + (dy_g / dist_ball_goal) * kCaptureDistanceMm;
     clamp_out_our_area(cap_x, cap_y, intercept_x, intercept_y);
+    clamp_out_opp_area(cap_x, cap_y, intercept_x, intercept_y);
   }
   setOutput("intercept_capture_x", cap_x);
   setOutput("intercept_capture_y", cap_y);
@@ -464,6 +484,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     carry_x = bx + (dx_g_raw / dist_ball_goal_raw) * carry_distance_mm;
     carry_y = by + (dy_g_raw / dist_ball_goal_raw) * carry_distance_mm;
     clamp_out_our_area(carry_x, carry_y, bx, by);
+    clamp_out_opp_area(carry_x, carry_y, bx, by);
     // Do lado do gol (sinal oposto). Usa distância mínima de 2500mm para que GoToPointNode::resolveFaceAngle
     // (atan2(face - target_pos_)) mantenha o ângulo da reta bola->alvo sem distorção angular quando
     // target_pos_ alterna entre pk_safe (deslocado 600mm) e pk.

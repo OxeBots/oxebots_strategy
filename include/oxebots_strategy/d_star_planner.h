@@ -330,6 +330,8 @@ class DStarPlannerNode : public rclcpp::Node
         double penalty_x = 0.0;      ///< Distância (m) do centro do campo até a borda da área.
         double penalty_y_min = 0.0;  ///< Limite Y inferior (m) da área.
         double penalty_y_max = 0.0;  ///< Limite Y superior (m) da área.
+        double pos_margin = 0.0;     ///< Margem extra (m) para a área do lado X positivo.
+        double neg_margin = 0.0;     ///< Margem extra (m) para a área do lado X negativo.
         bool block_positive = true;  ///< Bloquear a área do lado X positivo.
         bool block_negative = true;  ///< Bloquear a área do lado X negativo.
     };

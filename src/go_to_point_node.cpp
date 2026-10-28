@@ -280,7 +280,8 @@ BT::NodeStatus GoToPointNode::onStart() {
     double p_depth = 0.0;
     double p_width = 0.0;
     bool is_gk = false;
-    double margin = 0.0; // mm (sem margem extra: a própria linha da área é o limitador)
+    constexpr double kAllyAreaMarginMm = 0.0;   // sem margem extra na área aliada
+    constexpr double kEnemyAreaMarginMm = 80.0; // 8 cm na área inimiga
 
     auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (blackboard) {
@@ -297,12 +298,12 @@ BT::NodeStatus GoToPointNode::onStart() {
     getInput<bool>("ignore_area", ignore_area);
 
     if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
-        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro)
-        clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, margin);
+        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro) com margem de 8 cm
+        clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, kEnemyAreaMarginMm);
 
-        // 2. Bloquear a própria área apenas se NÃO for o goleiro
+        // 2. Bloquear a própria área apenas se NÃO for o goleiro (sem margem extra)
         if (!is_gk) {
-            clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, margin);
+            clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, kAllyAreaMarginMm);
         } else {
             clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
         }
@@ -322,7 +323,8 @@ BT::NodeStatus GoToPointNode::onRunning() {
         double p_depth = 0.0;
         double p_width = 0.0;
         bool is_gk = false;
-        double margin = 0.0; // mm (sem margem extra: a própria linha da área é o limitador)
+        constexpr double kAllyAreaMarginMm = 0.0;   // sem margem extra na área aliada
+        constexpr double kEnemyAreaMarginMm = 80.0; // 8 cm na área inimiga
 
         auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
         if (blackboard) {
@@ -343,12 +345,12 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
         // SÓ APLICA AS TRAVAS SE O XML NÃO MANDAR IGNORAR:
         if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
-            // 1. Bloquear área adversária para TODOS os robôs
-            clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, margin);
+            // 1. Bloquear área adversária para TODOS os robôs com margem de 8 cm
+            clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, kEnemyAreaMarginMm);
 
-            // 2. Bloquear a própria área
+            // 2. Bloquear a própria área (sem margem extra)
             if (!is_gk) {
-                clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, margin);
+                clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, kAllyAreaMarginMm);
             } else {
                 clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
             }

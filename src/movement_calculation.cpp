@@ -34,6 +34,10 @@ bool sanitizeCmd(oxebots_interfaces::msg::RobotCmdData& cmd) {
 PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
+    this->declare_parameter("is_yellow_team", false);
+    this->declare_parameter("invert_sides", false);
+    is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
+    invert_sides_ = this->get_parameter("invert_sides").as_bool();
     
     this->declare_parameter("max_linear_speed", 1.0);
     this->declare_parameter("p_gain_linear", 2.0);
@@ -88,10 +92,18 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
     float penalty_width = static_cast<float>(last_geometry_->field.penalty_area_width);
     if (field_length <= 0.0f || penalty_depth <= 0.0f || penalty_width <= 0.0f) return;
 
-    // Sem margem extra: a própria linha da área é o limitador
-    constexpr float kMarginMm = 0.0f;
-    float area_x_limit = (field_length / 2.0f) - penalty_depth - kMarginMm;
-    float area_y_limit = (penalty_width / 2.0f) + kMarginMm;
+    bool effective_is_yellow = invert_sides_ ? !is_yellow_team_ : is_yellow_team_;
+
+    // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
+    constexpr float kAllyMarginMm = 0.0f;
+    constexpr float kEnemyMarginMm = 80.0f;
+    float pos_margin = effective_is_yellow ? kAllyMarginMm : kEnemyMarginMm;
+    float neg_margin = effective_is_yellow ? kEnemyMarginMm : kAllyMarginMm;
+
+    float pos_area_x_limit = (field_length / 2.0f) - penalty_depth - pos_margin;
+    float pos_area_y_limit = (penalty_width / 2.0f) + pos_margin;
+    float neg_area_x_limit = (field_length / 2.0f) - penalty_depth - neg_margin;
+    float neg_area_y_limit = (penalty_width / 2.0f) + neg_margin;
 
     float rx = current_pos.x;
     float ry = current_pos.y;
@@ -101,19 +113,19 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
 
     if (robot_id_ == 0) {
         // O goleiro pode entrar na própria área, mas não na adversária
-        if (rx > 0.0f) {
+        if (effective_is_yellow) {
             block_positive = false;
         } else {
             block_negative = false;
         }
     }
 
-    // 1. Bloqueia área positiva (X > area_x_limit, |Y| < area_y_limit)
+    // 1. Bloqueia área positiva (X > pos_area_x_limit, |Y| < pos_area_y_limit)
     // Distingue entre a linha frontal (pen_x <= pen_y) e as linhas laterais (pen_y < pen_x)
     // para que um robô contornando pela lateral da área NUNCA tenha seu vx bloqueado/invertido!
-    if (block_positive && rx >= area_x_limit && std::abs(ry) < area_y_limit) {
-        float pen_x = rx - area_x_limit;
-        float pen_y = area_y_limit - std::abs(ry);
+    if (block_positive && rx >= pos_area_x_limit && std::abs(ry) < pos_area_y_limit) {
+        float pen_x = rx - pos_area_x_limit;
+        float pen_y = pos_area_y_limit - std::abs(ry);
         if (pen_y < pen_x) {
             // Na lateral da área positiva: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {
@@ -130,10 +142,10 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
         }
     }
 
-    // 2. Bloqueia área negativa (X < -area_x_limit, |Y| < area_y_limit)
-    if (block_negative && rx <= -area_x_limit && std::abs(ry) < area_y_limit) {
-        float pen_x = -area_x_limit - rx;
-        float pen_y = area_y_limit - std::abs(ry);
+    // 2. Bloqueia área negativa (X < -neg_area_x_limit, |Y| < neg_area_y_limit)
+    if (block_negative && rx <= -neg_area_x_limit && std::abs(ry) < neg_area_y_limit) {
+        float pen_x = -neg_area_x_limit - rx;
+        float pen_y = neg_area_y_limit - std::abs(ry);
         if (pen_y < pen_x) {
             // Na lateral da área negativa: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {

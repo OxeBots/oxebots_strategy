@@ -85,7 +85,8 @@ private:
     int robot_id_ = 0;
     bool game_data_received_ = false;
 
-    bool is_yellow_team_;
+    bool is_yellow_team_ = false;
+    bool invert_sides_ = false;
 
     // --- Estado do canal de override (Align/Kick/Halt) ---
     // Se nenhum override for recebido por kOverrideTtl, o modo efetivo cai para NONE sozinho:
