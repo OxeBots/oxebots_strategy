@@ -10,6 +10,34 @@ static constexpr double GOALKEEPER_LINE_DEPTH = 300.0;
 static constexpr double MIN_BALL_DIST_TO_LINE = 10.0;
 static constexpr double POSITION_UPDATE_THRESHOLD = 5.0;
 static constexpr double ROBOT_RADIUS = 90.0;
+static constexpr double AREA_DEPTH = 500.0;   
+static constexpr double AREA_WIDTH = 1350.0;  
+static constexpr double kMinShotSpeed = 500.0;
+static constexpr double kMaxImpactTime = 3.0; 
+
+static std::optional<std::pair<double, double>> entryPoint(
+    double bx, double by, double px, double py,
+    double xmin, double xmax, double ymin, double ymax)
+{
+    const double d[2]  = {px - bx, py - by};
+    const double o[2]  = {bx, by};
+    const double lo[2] = {xmin, ymin};
+    const double hi[2] = {xmax, ymax};
+    double t0 = 0.0, t1 = 1.0;
+    for (int i = 0; i < 2; ++i) {
+        if (std::abs(d[i]) < 1e-9) {
+            if (o[i] < lo[i] || o[i] > hi[i]) return std::nullopt;
+        } else {
+            double ta = (lo[i] - o[i]) / d[i];
+            double tb = (hi[i] - o[i]) / d[i];
+            if (ta > tb) std::swap(ta, tb);
+            t0 = std::max(t0, ta);
+            t1 = std::min(t1, tb);
+            if (t0 > t1) return std::nullopt;
+        }
+    }
+    return std::make_pair(bx + t0 * d[0], by + t0 * d[1]);
+}
 
 GoalLineDefendNode::GoalLineDefendNode(const std::string & name, const BT::NodeConfig & config, rclcpp::Node::SharedPtr node_ptr)
 : BT::StatefulActionNode(name, config), node_(node_ptr)
@@ -49,6 +77,7 @@ BT::NodeStatus GoalLineDefendNode::onStart()
     }
 
     last_target_y_ = -99999.0;
+    last_target_x_ = -99999.0;
     return BT::NodeStatus::RUNNING;
 }
 
@@ -62,42 +91,57 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     if (!blackboard->get("goal_width", goal_width)) {
         // Fallback to DEFAULT_GOAL_WIDTH already set
     }
-    const double half = goal_width/2.0;
-    const double dir = (my_goal_x_ < 0) ? 1.0 : -1.0;
+    const double half   = goal_width / 2.0;
+    const double dir    = (my_goal_x_ < 0) ? 1.0 : -1.0;   // +1 se o gol está à esquerda
     const double line_x = my_goal_x_ + dir * GOALKEEPER_LINE_DEPTH;
-    double target_y = ball_y;
-    const double ball_dist_to_line = dir * (ball_x - line_x);
-    const bool ball_in_front = dir * (ball_x - my_goal_x_) > 0.0;
-    if (ball_dist_to_line > MIN_BALL_DIST_TO_LINE && ball_in_front) {
-        const double ux = my_goal_x_ - ball_x;
-        const double n1 = std::hypot(ux, -half - ball_y);
-        const double n2 = std::hypot(ux,  half - ball_y);
-        const double bx = ux / n1 + ux / n2;
-        const double by = (-half - ball_y) / n1 + (half - ball_y) / n2;
-        target_y = ball_y + ((line_x - ball_x) / bx) * by;
+
+    // Retângulo da área (limites do alvo)
+    const double x_far = my_goal_x_ + dir * (AREA_DEPTH - ROBOT_RADIUS);
+    const double xmin  = std::min(my_goal_x_, x_far);
+    const double xmax  = std::max(my_goal_x_, x_far);
+    const double ylim  = AREA_WIDTH / 2.0 - ROBOT_RADIUS;
+
+    // 1. Posição base: ponto médio da corda bola->postes na borda da área
+    double target_x = line_x;
+    double target_y = std::clamp(ball_y, -half, half);
+
+    if (dir * (ball_x - my_goal_x_) > 0.0) {   // bola à frente do gol
+        auto e1 = entryPoint(ball_x, ball_y, my_goal_x_, -half, xmin, xmax, -ylim, ylim);
+        auto e2 = entryPoint(ball_x, ball_y, my_goal_x_,  half, xmin, xmax, -ylim, ylim);
+        if (e1 && e2) {
+            target_x = 0.5 * (e1->first  + e2->first);
+            target_y = 0.5 * (e1->second + e2->second);
+        } else {
+            // Retas não cruzam a área: segue a bola limitada à área
+            target_x = std::clamp(ball_x, xmin, xmax);
+            target_y = std::clamp(ball_y, -ylim, ylim);
+        }
     }
-    // Interceptação balística: quando o adversário chuta, prevê onde a bola cruzará a linha do gol
+
+    // 2. Interceptação balística (só se o chute for ao gol)
     oxebots_interfaces::msg::BallPrediction::SharedPtr pred;
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
         pred = last_ball_pred_;
     }
 
-     if (pred) {
-        const double dx_to_line = line_x - pred->x;
-        constexpr double kMinShotSpeed = 250.0;
-        if ((dx_to_line * pred->vx > 0.0) && std::abs(pred->vx) >= kMinShotSpeed) {
-            const double t_impact = dx_to_line / pred->vx;
-            if (t_impact > 0.0 && t_impact <= 3.0) {
-                target_y = pred->y + pred->vy * t_impact; // onde a bola cruza a LINHA DO GOLEIRO
-            }
+    if (pred && dir * pred->vx < 0.0 && std::abs(pred->vx) >= kMinShotSpeed &&
+        dir * (pred->x - my_goal_x_) > 0.0)
+    {
+        const double t_goal = (my_goal_x_ - pred->x) / pred->vx;   // tempo até o gol
+        const double y_goal = pred->y + pred->vy * t_goal;         // y onde cruza o gol
+        if (t_goal > 0.0 && t_goal <= kMaxImpactTime && std::abs(y_goal) <= half) {
+            const double t_line = std::max(0.0, (line_x - pred->x) / pred->vx);
+            target_x = line_x;
+            target_y = pred->y + pred->vy * t_line;   // y onde cruza a linha do goleiro
         }
     }
 
-       // ~90 mm na SSL
-    target_y = std::clamp(target_y, -half, half);
-    const double target_x = line_x;
-    if (std::abs(target_y - last_target_y_) > POSITION_UPDATE_THRESHOLD) {
+    // 3. Mantém o alvo dentro da área
+    target_x = std::clamp(target_x, xmin, xmax);
+    target_y = std::clamp(target_y, -ylim, ylim);
+
+    if (std::hypot(target_x - last_target_x_, target_y - last_target_y_) > POSITION_UPDATE_THRESHOLD) {
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
         goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
@@ -112,6 +156,7 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
 
         goal_pub_->publish(std::move(goal_msg));
         last_target_y_ = target_y;
+        last_target_x_ = target_x;
     }
 
     return BT::NodeStatus::RUNNING;

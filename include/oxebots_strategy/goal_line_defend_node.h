@@ -34,6 +34,7 @@ private:
   uint32_t robot_id_;
   double my_goal_x_;
   double last_target_y_ = -99999.0;
+  double last_target_x_ = -99999.0;
 };
 
 } // namespace oxebots_strategy
