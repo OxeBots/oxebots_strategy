@@ -14,22 +14,26 @@
                    <IsRobotId robot_id="0" />
                    <ReactiveFallback name="ReactiveGoalkeeper">
 
-                       <!-- 1. Bola dentro da área: Sair e chutar -->
+                       <!-- 1. Bola dentro da área: buscar a bola e chutar (passe para aliado livre ou afastar para a frente) -->
                        <ReactiveSequence name="State3_BallInArea">
                            <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
                            <Sequence name="ApproachAndKick">
-                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
-                               <KickBall robot_id="{robot_id}" kick_speed="3.0" />
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" kick_speed="{gk_kick_speed}" />
+                               <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
                            </Sequence>
                        </ReactiveSequence>
 
-                       <!-- 2. Bola no nosso campo: Defender linha do gol -->
-                       
-                        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
-                       
-                       
-                       <!-- 3. Comportamento Padrão: Bissetriz -->
-                       
+                       <!-- 2. Bola fora da área, mais perto do goleiro que de qualquer outro robô: sair, buscar e chutar -->
+                       <ReactiveSequence name="State2_BallClosestToGoalkeeper">
+                           <IsBallClosest robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
+                           <Sequence name="FetchAndKick">
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" allow_leave_area="true" kick_speed="{gk_kick_speed}" />
+                               <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
+                           </Sequence>
+                       </ReactiveSequence>
+
+                       <!-- 3. Demais casos: triangulação bola->postes e interceptação de chutes -->
+                       <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
 
                    </ReactiveFallback>
                </Sequence>
