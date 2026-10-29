@@ -22,8 +22,9 @@ BT::NodeStatus IsBallInAreaCondition::tick()
 
   if (!getInput<double>("ball_x", ball_x) || !getInput<double>("ball_y", ball_y)) return BT::NodeStatus::FAILURE;
   
-  auto blackboard = config().blackboard;
-  if (!blackboard->get("my_goal_x", my_goal_x) || 
+  auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+  if (!blackboard ||
+      !blackboard->get("my_goal_x", my_goal_x) || 
       !blackboard->get("penalty_area_depth", p_depth) ||
       !blackboard->get("penalty_area_width", p_width)) {
     return BT::NodeStatus::FAILURE;

@@ -16,13 +16,13 @@ double computeHeading(const Pose2D& from, const Pose2D& to)
     return std::atan2(to.y - from.y, to.x - from.x);
 }
 
-// Clampeia 'x' para manter o robô fora da pequena área.
-// Fórmula do limite: my_goal_x - copysign(depth, my_goal_x)
-//   Azul  (-2200, depth=700): limit = -1500  → x ∈ [-1500, +∞)
-//   Amarelo (+2200, depth=700): limit = +1500 → x ∈ (-∞, +1500]
+// Clampeia 'x' para manter o robô fora da pequena área (com margem de segurança de 200mm para o raio do robô).
+// Fórmula do limite: my_goal_x - copysign(depth + kDefenderAreaMarginMm, my_goal_x)
+constexpr double kDefenderAreaMarginMm = 200.0;
+
 double penaltyClamp(double x, double my_goal_x, double depth)
 {
-    const double limit = my_goal_x - std::copysign(depth, my_goal_x);
+    const double limit = my_goal_x - std::copysign(depth + kDefenderAreaMarginMm, my_goal_x);
     return (my_goal_x < 0.0) ? std::max(x, limit) : std::min(x, limit);
 }
 
@@ -131,7 +131,7 @@ BT::PortsList ShadowBall::providedPorts()
             "Distância fixa atrás da bola em direção ao próprio gol (mm)"),
         BT::InputPort<double>("predict_time", 0.3,
             "Horizonte de predição da trajetória da bola (s)"),
-        BT::InputPort<double>("penalty_area_depth", 500.0,
+        BT::InputPort<double>("penalty_area_depth",
             "Profundidade da pequena área a partir da linha de fundo (mm)"),
         BT::InputPort<double>("y_limit", 900.0,
             "Limite lateral do defensor em Y (mm)")
@@ -145,17 +145,20 @@ BT::NodeStatus ShadowBall::tick()
     double my_goal_x     = 0.0;
     double follow_dist   = 1200.0;
     double predict_time  = 0.3;
-    double penalty_depth = 500.0;
+    double penalty_depth = 0.0;
     double y_limit       = 900.0;
 
     if (!getInput("ball", ball) || !getInput("ball_vel", vel) ||
         !getInput("my_goal_x", my_goal_x)) {
         return BT::NodeStatus::FAILURE;
     }
-    getInput("follow_distance",    follow_dist);
-    getInput("predict_time",       predict_time);
-    getInput("penalty_area_depth", penalty_depth);
-    getInput("y_limit",            y_limit);
+    getInput("follow_distance", follow_dist);
+    getInput("predict_time",    predict_time);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
+    }
+    getInput("y_limit", y_limit);
 
     // 1. Prever posição futura da bola
     const double pred_x = ball.x + vel.x * predict_time;
@@ -166,10 +169,8 @@ BT::NodeStatus ShadowBall::tick()
     const double sign = (my_goal_x < 0.0) ? -1.0 : 1.0;
     double target_x   = pred_x + sign * follow_dist;
 
-    // 3. Borda interna da pequena área
-    //    Azul  (my_goal_x=-2200, depth=500): penalty_limit = -1700
-    //    Amarelo (my_goal_x=+2200, depth=500): penalty_limit = +1700
-    const double penalty_limit = my_goal_x - std::copysign(penalty_depth, my_goal_x);
+    // 3. Borda interna da pequena área calculada a partir das dimensões dinâmicas (com margem do robô)
+    const double penalty_limit = my_goal_x - std::copysign(penalty_depth + kDefenderAreaMarginMm, my_goal_x);
 
     // 4. Clamp: [pequena_área, meio-campo=-180 (para considerar uma margem de erro)]
     if (my_goal_x < 0.0) {
@@ -178,9 +179,20 @@ BT::NodeStatus ShadowBall::tick()
         target_x = std::clamp(target_x, 0.0, penalty_limit);
     }
 
+    double target_y = std::clamp(pred_y, -y_limit, y_limit);
+
+    // 5. Se a bola estiver próxima da nossa área (onde target_x bate no penalty_limit e o atacante
+    // precisa contornar a bola/área), desloca o defensor lateralmente para o lado oposto da bola
+    // para cobrir o rebote sem bloquear a rota do atacante nem travar os dois robôs juntos.
+    if (std::abs(pred_x - my_goal_x) < (penalty_depth + kDefenderAreaMarginMm + 700.0) &&
+        std::hypot(target_x - pred_x, target_y - pred_y) < 650.0) {
+        double shift_dir = (pred_y >= 0.0) ? -1.0 : 1.0;
+        target_y = std::clamp(pred_y + shift_dir * 700.0, -y_limit, y_limit);
+    }
+
     Pose2D target{};
     target.x     = target_x;
-    target.y     = std::clamp(pred_y, -y_limit, y_limit);
+    target.y     = target_y;
     target.theta = computeHeading(target, ball);
 
     sendToController(target);
@@ -201,7 +213,7 @@ BT::PortsList MarkOpponent::providedPorts()
         BT::InputPort<double>("my_goal_x"),
         BT::InputPort<double>("block_distance", 400.0,
             "Distância mínima do oponente ao longo da linha bola→gol (mm)"),
-        BT::InputPort<double>("penalty_area_depth", 500.0,
+        BT::InputPort<double>("penalty_area_depth",
             "Profundidade da pequena área a partir da linha de fundo (mm)"),
         BT::InputPort<double>("y_limit", 1200.0,
             "Limite lateral do defensor em Y (mm)")
@@ -213,15 +225,18 @@ BT::NodeStatus MarkOpponent::tick()
     Pose2D ball{};
     double my_goal_x     = 0.0;
     double block_dist    = 400.0;
-    double penalty_depth = 500.0;
+    double penalty_depth = 0.0;
     double y_limit       = 1200.0;
 
     if (!getInput("ball", ball) || !getInput("my_goal_x", my_goal_x)) {
         return BT::NodeStatus::FAILURE;
     }
-    getInput("block_distance",     block_dist);
-    getInput("penalty_area_depth", penalty_depth);
-    getInput("y_limit",            y_limit);
+    getInput("block_distance", block_dist);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
+    }
+    getInput("y_limit", y_limit);
 
     // 1. Vetor unitário da bola em direção ao centro do próprio gol
     const double dx   = my_goal_x - ball.x;
@@ -231,7 +246,7 @@ BT::NodeStatus MarkOpponent::tick()
     if (dist < 1.0) {
         // Bola praticamente dentro do gol — posicionar na borda da pequena área
         Pose2D target{};
-        target.x     = my_goal_x - std::copysign(penalty_depth + 50.0, my_goal_x);
+        target.x     = my_goal_x - std::copysign(penalty_depth + kDefenderAreaMarginMm, my_goal_x);
         target.y     = 0.0;
         target.theta = computeHeading(target, ball);
         sendToController(target);
@@ -243,7 +258,14 @@ BT::NodeStatus MarkOpponent::tick()
 
     // 2+3+4. Alvo com clamp de pequena área
     const double target_x = penaltyClamp(ball.x + ux * block_dist, my_goal_x, penalty_depth);
-    const double target_y = std::clamp(ball.y + uy * block_dist, -y_limit, y_limit);
+    double target_y = std::clamp(ball.y + uy * block_dist, -y_limit, y_limit);
+
+    // Se o clamp da área empurrou o defensor para muito perto da bola (onde o atacante já vai disputar),
+    // abre lateralmente para cobrir o outro lado do gol sem travar o corredor do atacante.
+    if (std::hypot(target_x - ball.x, target_y - ball.y) < 500.0) {
+        double shift_dir = (ball.y >= 0.0) ? -1.0 : 1.0;
+        target_y = std::clamp(ball.y + shift_dir * 650.0, -y_limit, y_limit);
+    }
 
     Pose2D target{};
     target.x     = target_x;
@@ -270,7 +292,7 @@ BT::PortsList GoToClamped::providedPorts()
             "Coordenada Y do alvo em mm (ex.: {ball_y})"),
         BT::InputPort<double>("my_goal_x",
             "X do proprio gol (usado para calcular a borda da pequena area)"),
-        BT::InputPort<double>("penalty_area_depth", 500.0,
+        BT::InputPort<double>("penalty_area_depth",
             "Profundidade da pequena area a partir da linha de fundo (mm)")
     };
 }
@@ -280,26 +302,24 @@ BT::NodeStatus GoToClamped::publishClamped()
     double x             = 0.0;
     double y             = 0.0;
     double my_goal_x     = 0.0;
-    double penalty_depth = 500.0;
+    double penalty_depth = 0.0;
 
     if (!getInput("x", x) || !getInput("y", y) || !getInput("my_goal_x", my_goal_x)) {
         return BT::NodeStatus::FAILURE;
     }
-    getInput("penalty_area_depth", penalty_depth);
+    auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+    if (!getInput("penalty_area_depth", penalty_depth) && root_bb) {
+        (void)root_bb->get("penalty_area_depth", penalty_depth);
+    }
 
-    // Mesma formula usada em ShadowBall e MarkOpponent (via penaltyClamp), e mesmo valor
-    // default (500mm) usado em GoToPointNode e no blackboard global (penalty_area_depth):
-    //   Azul  (my_goal_x=-2200, depth=500): limite = -1700
-    //   Amarelo (my_goal_x=+2200, depth=500): limite = +1700
+    // Limita o alvo X fora da pequena área com base na geometria dinâmica
     x = penaltyClamp(x, my_goal_x, penalty_depth);
 
-    // Orientacao: apontar para o gol adversario (opponent_goal_x no blackboard)
-    double op_x = 2200.0, op_y = 0.0;
-    if (!config().blackboard->get("opponent_goal_x", op_x)) {
-        // Fallback
-    }
-    if (!config().blackboard->get("opponent_goal_y", op_y)) {
-        // Fallback
+    // Orientação: apontar para o gol adversário (opponent_goal_x no Blackboard)
+    double op_x = -my_goal_x, op_y = 0.0;
+    if (root_bb) {
+        (void)root_bb->get("opponent_goal_x", op_x);
+        (void)root_bb->get("opponent_goal_y", op_y);
     }
     const double theta = std::atan2(op_y - y, op_x - x);
 

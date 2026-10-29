@@ -37,14 +37,15 @@ private:
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_subscription_;
 
   uint32_t robot_id_{0};
-  double my_goal_x_{2200.0};
+  double my_goal_x_{0.0};
   bool is_yellow_team_{false};
   double kick_speed_{3.0};
 
-  // Dimensões fixas da área: 500mm em X e 1350mm em Y
-  static constexpr double PENALTY_AREA_DEPTH = 500.0;
-  static constexpr double PENALTY_AREA_WIDTH = 1350.0;
-  static constexpr double GOAL_WIDTH = 800.0;
+  // Dimensões do campo e da área lidas dinamicamente do Blackboard (originadas de /field_geometry)
+  double penalty_area_depth_{0.0};
+  double penalty_area_width_{0.0};
+  double goal_width_{0.0};
+  double field_width_{0.0};
 
   oxebots_interfaces::msg::BallPosition last_ball_pos_;
   oxebots_interfaces::msg::RobotGameData current_robot_data_;

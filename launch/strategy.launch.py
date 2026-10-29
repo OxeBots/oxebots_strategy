@@ -46,6 +46,17 @@ def launch_setup(context, *args, **kwargs):
             executable="movement_calculation_node",
             name=f"path_follower_node_{robot_id}",
             output="screen",
+            parameters=[
+                config_file,
+                {"robot_id": robot_id},
+                {"invert_sides": invert_sides == "True"}
+            ],
+        )
+        trajectory_setpoint = Node(
+            package="oxebots_strategy",
+            executable="trajectory_setpoint_node",
+            name=f"trajectory_setpoint_node_{robot_id}",
+            output="screen",
             parameters=[config_file, {"robot_id": robot_id}],
         )
         strategy = Node(
@@ -56,7 +67,7 @@ def launch_setup(context, *args, **kwargs):
             parameters=strategy_parameters,
             cwd=strategy_pkg_share,
         )
-        return [planner, follower, strategy]
+        return [planner, follower, trajectory_setpoint, strategy]
 
     # Create nodes for robots 0, 1, and 2
     all_nodes = []

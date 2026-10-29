@@ -96,8 +96,9 @@
             
             <ReactiveFallback name="AttackLogicActions">
               <Sequence name="ChaseAndKick">
-                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}" tolerance="120.0"
-                           ball_contact_threshold_mm="150.0" />
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}"
+                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                           tolerance="120.0" ball_contact_threshold_mm="150.0" />
                 
                 <ReactiveFallback name="ApproachAndKick">
                   <Sequence name="Shoot">
