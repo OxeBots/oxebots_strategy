@@ -179,9 +179,20 @@ BT::NodeStatus ShadowBall::tick()
         target_x = std::clamp(target_x, 0.0, penalty_limit);
     }
 
+    double target_y = std::clamp(pred_y, -y_limit, y_limit);
+
+    // 5. Se a bola estiver próxima da nossa área (onde target_x bate no penalty_limit e o atacante
+    // precisa contornar a bola/área), desloca o defensor lateralmente para o lado oposto da bola
+    // para cobrir o rebote sem bloquear a rota do atacante nem travar os dois robôs juntos.
+    if (std::abs(pred_x - my_goal_x) < (penalty_depth + kDefenderAreaMarginMm + 700.0) &&
+        std::hypot(target_x - pred_x, target_y - pred_y) < 650.0) {
+        double shift_dir = (pred_y >= 0.0) ? -1.0 : 1.0;
+        target_y = std::clamp(pred_y + shift_dir * 700.0, -y_limit, y_limit);
+    }
+
     Pose2D target{};
     target.x     = target_x;
-    target.y     = std::clamp(pred_y, -y_limit, y_limit);
+    target.y     = target_y;
     target.theta = computeHeading(target, ball);
 
     sendToController(target);
@@ -247,7 +258,14 @@ BT::NodeStatus MarkOpponent::tick()
 
     // 2+3+4. Alvo com clamp de pequena área
     const double target_x = penaltyClamp(ball.x + ux * block_dist, my_goal_x, penalty_depth);
-    const double target_y = std::clamp(ball.y + uy * block_dist, -y_limit, y_limit);
+    double target_y = std::clamp(ball.y + uy * block_dist, -y_limit, y_limit);
+
+    // Se o clamp da área empurrou o defensor para muito perto da bola (onde o atacante já vai disputar),
+    // abre lateralmente para cobrir o outro lado do gol sem travar o corredor do atacante.
+    if (std::hypot(target_x - ball.x, target_y - ball.y) < 500.0) {
+        double shift_dir = (ball.y >= 0.0) ? -1.0 : 1.0;
+        target_y = std::clamp(ball.y + shift_dir * 650.0, -y_limit, y_limit);
+    }
 
     Pose2D target{};
     target.x     = target_x;

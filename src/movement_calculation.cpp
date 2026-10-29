@@ -4,35 +4,51 @@
 
 namespace {
 double normalizeAngle(double angle) {
+    if (!std::isfinite(angle)) return 0.0;
     while (angle > M_PI) angle -= 2.0 * M_PI;
     while (angle < -M_PI) angle += 2.0 * M_PI;
     return angle;
 }
 double normalizeAngleDeg(double angle) {
+    if (!std::isfinite(angle)) return 0.0;
     while (angle > 180.0) angle -= 360.0;
     while (angle < -180.0) angle += 360.0;
     return angle;
+}
+bool sanitizeCmd(oxebots_interfaces::msg::RobotCmdData& cmd) {
+    bool had_non_finite = false;
+    auto fix = [&had_non_finite](float& v) {
+        if (!std::isfinite(v)) {
+            v = 0.0f;
+            had_non_finite = true;
+        }
+    };
+    fix(cmd.x_velocity);
+    fix(cmd.y_velocity);
+    fix(cmd.angular_velocity);
+    fix(cmd.kick_speed);
+    return had_non_finite;
 }
 }
 
 PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
+    this->declare_parameter("is_yellow_team", false);
+    this->declare_parameter("invert_sides", false);
+    is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
+    invert_sides_ = this->get_parameter("invert_sides").as_bool();
     
     this->declare_parameter("max_linear_speed", 1.0);
     this->declare_parameter("p_gain_linear", 2.0);
-    this->declare_parameter("max_angular_speed", 4.0);
-    this->declare_parameter("p_gain_angular", 3.0);
-    this->declare_parameter("angle_tolerance", 0.1);
+    this->declare_parameter("max_angular_speed", 3.0);
+    this->declare_parameter("p_gain_angular", 2.2);
+    this->declare_parameter("d_gain_angular", 0.25);
+    this->declare_parameter("angle_tolerance", 0.04);
     // --- Distância de Lookahead (Pure Pursuit) ---
-    // Padrão calibrado: 100.0 mm (anteriormente 300.0 mm).
-    // Motivo do ajuste:
-    // - 300.0 mm causava corte excessivo de curvas (~80-100 mm de desvio radial interno),
-    //   podendo colidir com adversários ao contorná-los e reduzindo a fidelidade de rotas.
-    // - 100.0 mm equivale a 2 células do grid do D* (resolução de 50 mm em match_config.yaml),
-    //   filtrando o efeito escada da grade sem oscilar e garantindo contornos limpos.
-    // - Para testes analíticos de bancada/artigos com malha densa, pode ser reduzido até 45 mm via launch.
-    this->declare_parameter("lookahead_distance", 100.0); // mm
+    // Padrão calibrado: 140.0 mm (~2.8 células do grid do D* de 50 mm).
+    // Filtra o efeito escada da grade e evita correções agressivas de rota/zigue-zague sem cortar curvas.
+    this->declare_parameter("lookahead_distance", 140.0); // mm
 
     std::string robot_prefix = "/robot_" + std::to_string(robot_id_);
     
@@ -56,8 +72,9 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
         "/field_geometry", rclcpp::QoS(1).transient_local().reliable(),
         std::bind(&PathFollowerNode::geometry_callback, this, std::placeholders::_1));
 
+    // Loop de controle a 50 Hz (20ms) em vez de 20 Hz (50ms) para reduzir atraso de malha e overshoot angular
     timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(50), std::bind(&PathFollowerNode::calculate_and_move, this));
+        std::chrono::milliseconds(20), std::bind(&PathFollowerNode::calculate_and_move, this));
     
     RCLCPP_INFO(this->get_logger(), "Seguidor de Caminho iniciado para o robô %d ouvindo %s/path", robot_id_, robot_prefix.c_str());
 }
@@ -75,10 +92,18 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
     float penalty_width = static_cast<float>(last_geometry_->field.penalty_area_width);
     if (field_length <= 0.0f || penalty_depth <= 0.0f || penalty_width <= 0.0f) return;
 
-    // Margem de segurança de 110mm (raio do robô 90mm + 20mm de tolerância)
-    constexpr float kMarginMm = 110.0f;
-    float area_x_limit = (field_length / 2.0f) - penalty_depth - kMarginMm;
-    float area_y_limit = (penalty_width / 2.0f) + kMarginMm;
+    bool effective_is_yellow = invert_sides_ ? !is_yellow_team_ : is_yellow_team_;
+
+    // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
+    constexpr float kAllyMarginMm = 0.0f;
+    constexpr float kEnemyMarginMm = 80.0f;
+    float pos_margin = effective_is_yellow ? kAllyMarginMm : kEnemyMarginMm;
+    float neg_margin = effective_is_yellow ? kEnemyMarginMm : kAllyMarginMm;
+
+    float pos_area_x_limit = (field_length / 2.0f) - penalty_depth - pos_margin;
+    float pos_area_y_limit = (penalty_width / 2.0f) + pos_margin;
+    float neg_area_x_limit = (field_length / 2.0f) - penalty_depth - neg_margin;
+    float neg_area_y_limit = (penalty_width / 2.0f) + neg_margin;
 
     float rx = current_pos.x;
     float ry = current_pos.y;
@@ -88,50 +113,52 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
 
     if (robot_id_ == 0) {
         // O goleiro pode entrar na própria área, mas não na adversária
-        if (rx > 0.0f) {
+        if (effective_is_yellow) {
             block_positive = false;
         } else {
             block_negative = false;
         }
     }
 
-    // 1. Bloqueia área positiva (X > area_x_limit, |Y| < area_y_limit)
-    if (block_positive) {
-        if (rx >= area_x_limit && std::abs(ry) < area_y_limit) {
-            if (vx > 0.0f) {
-                vx = 0.0f;
+    // 1. Bloqueia área positiva (X > pos_area_x_limit, |Y| < pos_area_y_limit)
+    // Distingue entre a linha frontal (pen_x <= pen_y) e as linhas laterais (pen_y < pen_x)
+    // para que um robô contornando pela lateral da área NUNCA tenha seu vx bloqueado/invertido!
+    if (block_positive && rx >= pos_area_x_limit && std::abs(ry) < pos_area_y_limit) {
+        float pen_x = rx - pos_area_x_limit;
+        float pen_y = pos_area_y_limit - std::abs(ry);
+        if (pen_y < pen_x) {
+            // Na lateral da área positiva: bloqueia/empurra apenas em Y, deixando vx livre
+            if (ry >= 0.0f) {
+                if (vy < 0.0f) vy = 0.0f;
+                if (pen_y > 25.0f) vy = 0.3f;
+            } else {
+                if (vy > 0.0f) vy = 0.0f;
+                if (pen_y > 25.0f) vy = -0.3f;
             }
-            if (rx > (area_x_limit + 30.0f)) {
-                vx = -0.3f;
-            }
-        }
-        // Bloqueia entrada pelas laterais da área positiva (quando já está além do X da área e tenta entrar em Y)
-        if (rx > (area_x_limit + 20.0f) && std::abs(ry) < (area_y_limit + 40.0f) && std::abs(ry) >= (area_y_limit - 30.0f)) {
-            if (ry > 0.0f && vy < 0.0f) {
-                vy = 0.0f;
-            } else if (ry < 0.0f && vy > 0.0f) {
-                vy = 0.0f;
-            }
+        } else {
+            // Na frente da área positiva: bloqueia/empurra apenas em X, deixando vy livre
+            if (vx > 0.0f) vx = 0.0f;
+            if (pen_x > 30.0f) vx = -0.3f;
         }
     }
 
-    // 2. Bloqueia área negativa (X < -area_x_limit, |Y| < area_y_limit)
-    if (block_negative) {
-        if (rx <= -area_x_limit && std::abs(ry) < area_y_limit) {
-            if (vx < 0.0f) {
-                vx = 0.0f;
+    // 2. Bloqueia área negativa (X < -neg_area_x_limit, |Y| < neg_area_y_limit)
+    if (block_negative && rx <= -neg_area_x_limit && std::abs(ry) < neg_area_y_limit) {
+        float pen_x = -neg_area_x_limit - rx;
+        float pen_y = neg_area_y_limit - std::abs(ry);
+        if (pen_y < pen_x) {
+            // Na lateral da área negativa: bloqueia/empurra apenas em Y, deixando vx livre
+            if (ry >= 0.0f) {
+                if (vy < 0.0f) vy = 0.0f;
+                if (pen_y > 25.0f) vy = 0.3f;
+            } else {
+                if (vy > 0.0f) vy = 0.0f;
+                if (pen_y > 25.0f) vy = -0.3f;
             }
-            if (rx < -(area_x_limit + 30.0f)) {
-                vx = 0.3f;
-            }
-        }
-        // Bloqueia entrada pelas laterais da área negativa
-        if (rx < -(area_x_limit + 20.0f) && std::abs(ry) < (area_y_limit + 40.0f) && std::abs(ry) >= (area_y_limit - 30.0f)) {
-            if (ry > 0.0f && vy < 0.0f) {
-                vy = 0.0f;
-            } else if (ry < 0.0f && vy > 0.0f) {
-                vy = 0.0f;
-            }
+        } else {
+            // Na frente da área negativa: bloqueia/empurra apenas em X, deixando vy livre
+            if (vx < 0.0f) vx = 0.0f;
+            if (pen_x > 30.0f) vx = 0.3f;
         }
     }
 }
@@ -184,6 +211,20 @@ void PathFollowerNode::calculate_and_move() {
         }
     }
     if (!found_me) return;
+
+    // Estima velocidade angular filtrada (rad/s) para amortecimento derivativo (Kd) do controle de orientação
+    auto now_ctrl = std::chrono::steady_clock::now();
+    if (has_prev_orientation_) {
+        double dt = std::chrono::duration<double>(now_ctrl - prev_control_time_).count();
+        if (dt > 1e-3 && dt < 0.5) {
+            double raw_omega = normalizeAngle(current_pos.orientation - prev_orientation_) / dt;
+            filtered_omega_ = 0.6 * filtered_omega_ + 0.4 * raw_omega;
+        }
+    } else {
+        has_prev_orientation_ = true;
+    }
+    prev_orientation_ = current_pos.orientation;
+    prev_control_time_ = now_ctrl;
 
     // --- Canal de override (Align/Kick/Halt) ---
     // Único dono de /robot_commands para este robô: AlignToBallNode, KickBallNode e a ação Halt
@@ -291,15 +332,18 @@ void PathFollowerNode::calculate_and_move() {
     // deliberadamente além da bola) nunca travam aqui mesmo cruzando os 10mm — ver RobotGoal.msg.
     bool arrived = !disable_arrival_latch_ && (check_dist < kArrivedDistanceMm || dist_to_target < 0.001);
 
-    // --- Controle Angular ---
-    // Ao "chegar", este nó solta a autoridade angular (target_w_.reset()) para não brigar pelo
-    // mesmo tópico /robot_commands com quem assumir a rotação em seguida.
+    // --- Controle Angular (PD com amortecimento derivativo) ---
+    // Só solta a autoridade angular em `arrived` quando o alinhamento angular também já convergiu,
+    // evitando que o robô pare de girar a <10mm do ponto antes de atingir a orientação do GoToPoint.
     double angle_err = 0.0;
     bool has_target_w = target_w_.has_value();
     double desired_w = 0.0;
     bool should_control_w = false;
+    double angle_tol = this->get_parameter("angle_tolerance").as_double();
 
-    if (arrived) {
+    bool angle_arrived = !has_target_w || (std::abs(normalizeAngle(*target_w_ - current_pos.orientation)) < angle_tol);
+
+    if (arrived && angle_arrived) {
         cmd_data.angular_velocity = 0.0;
         target_w_.reset();
         has_target_w = false;
@@ -313,16 +357,21 @@ void PathFollowerNode::calculate_and_move() {
 
     if (should_control_w) {
         angle_err = normalizeAngle(desired_w - current_pos.orientation);
-        if (std::abs(angle_err) < this->get_parameter("angle_tolerance").as_double()) {
+        if (std::abs(angle_err) < angle_tol) {
             cmd_data.angular_velocity = 0.0;
         } else {
             double p_ang = this->get_parameter("p_gain_angular").as_double();
+            double d_ang = this->get_parameter("d_gain_angular").as_double();
             double max_ang = this->get_parameter("max_angular_speed").as_double();
-            cmd_data.angular_velocity = std::clamp(angle_err * p_ang, -max_ang, max_ang);
+            double pd_cmd = (angle_err * p_ang) - (filtered_omega_ * d_ang);
+            cmd_data.angular_velocity = std::clamp(pd_cmd, -max_ang, max_ang);
         }
     }
 
     if (arrived) {
+        cmd_data.x_velocity = 0.0;
+        cmd_data.y_velocity = 0.0;
+    } else if (dist_to_target < 1e-3) {
         cmd_data.x_velocity = 0.0;
         cmd_data.y_velocity = 0.0;
     } else {
@@ -378,6 +427,11 @@ void PathFollowerNode::calculate_and_move() {
     // Trava de segurança de velocidade para impedir entrada na área de pênalti (baseada em /field_geometry)
     clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
 
+    if (sanitizeCmd(cmd_data)) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "Robô %d: comando continha NaN/Inf em calculate_and_move e foi zerado.", robot_id_);
+    }
+
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
 }
@@ -430,9 +484,16 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
         cmd_data.angular_velocity = 0.0;
     } else {
         double offset_rad = offset_deg * M_PI / 180.0;
+        double d_ang = this->get_parameter("d_gain_angular").as_double();
+        double pd_cmd = (offset_rad * last_override_msg_->p_gain) - (filtered_omega_ * d_ang);
         cmd_data.angular_velocity = std::clamp(
-            offset_rad * last_override_msg_->p_gain,
-            -last_override_msg_->max_angular_speed, last_override_msg_->max_angular_speed);
+            pd_cmd,
+            -static_cast<double>(last_override_msg_->max_angular_speed),
+            static_cast<double>(last_override_msg_->max_angular_speed));
+    }
+    if (sanitizeCmd(cmd_data)) {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "Robô %d: comando continha NaN/Inf em runAlign e foi zerado.", robot_id_);
     }
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
@@ -487,6 +548,10 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0;
             clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
+            if (sanitizeCmd(cmd_data)) {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                    "Robô %d: comando continha NaN/Inf em runKick e foi zerado.", robot_id_);
+            }
             cmd_msg->robots.push_back(cmd_data);
             cmd_vel_pub_->publish(std::move(cmd_msg));
             publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
