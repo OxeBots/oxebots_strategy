@@ -4,6 +4,7 @@
 #include "behaviortree_cpp/bt_factory.h"
 #include "oxebots_strategy/movement_calculation.h"
 #include "oxebots_strategy/is_ball_in_our_half_condition.h"
+#include "oxebots_strategy/is_ball_in_area_condition.h"
 
 // ============================================================================
 // 1. Testes de Utilidades Cinemáticas (Movement Calculation)
@@ -178,4 +179,95 @@ TEST_F(IsBallInOurHalfConditionTest, FailsGracefullyWhenMissingBlackboardKeys)
     auto tree = factory.createTreeFromText(xml_tree, bb);
     // Deve retornar FAILURE sem falhas de segmentação nem exceções não tratadas
     EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::FAILURE);
+}
+
+// ============================================================================
+// 4. Teste Unitário de Folha: IsBallInAreaCondition (Segurança Regulamentar)
+// ============================================================================
+
+class IsBallInAreaConditionTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if (!rclcpp::ok()) {
+            rclcpp::init(0, nullptr);
+        }
+        node_ = std::make_shared<rclcpp::Node>("test_strategy_area_node");
+    }
+
+    void TearDown() override
+    {
+        node_.reset();
+    }
+
+    rclcpp::Node::SharedPtr node_;
+};
+
+TEST_F(IsBallInAreaConditionTest, BallInsideDefenseAreaBlueTeam)
+{
+    BT::BehaviorTreeFactory factory;
+    factory.registerBuilder<oxebots_strategy::IsBallInAreaCondition>(
+        "IsBallInArea",
+        [this](const std::string& name, const BT::NodeConfig& config) {
+            return std::make_unique<oxebots_strategy::IsBallInAreaCondition>(name, config, node_);
+        });
+
+    const std::string xml_tree =
+        R"(<root BTCPP_format="4">
+             <BehaviorTree ID="AreaTest">
+               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+             </BehaviorTree>
+           </root>)";
+
+    auto bb = BT::Blackboard::create();
+    bb->set("my_goal_x", -2250.0);
+    bb->set("penalty_area_depth", 800.0);
+    bb->set("penalty_area_width", 1600.0);
+
+    // Bola dentro da área de defesa azul (ex: X = -2000 mm, Y = 100 mm)
+    bb->set("ball_x", -2000.0);
+    bb->set("ball_y", 100.0);
+    auto tree_inside = factory.createTreeFromText(xml_tree, bb);
+    EXPECT_EQ(tree_inside.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    // Bola fora da área de defesa azul (ex: X = -1200 mm)
+    bb->set("ball_x", -1200.0);
+    bb->set("ball_y", 100.0);
+    auto tree_outside = factory.createTreeFromText(xml_tree, bb);
+    EXPECT_EQ(tree_outside.tickExactlyOnce(), BT::NodeStatus::FAILURE);
+}
+
+TEST_F(IsBallInAreaConditionTest, BallInsideDefenseAreaYellowTeam)
+{
+    BT::BehaviorTreeFactory factory;
+    factory.registerBuilder<oxebots_strategy::IsBallInAreaCondition>(
+        "IsBallInArea",
+        [this](const std::string& name, const BT::NodeConfig& config) {
+            return std::make_unique<oxebots_strategy::IsBallInAreaCondition>(name, config, node_);
+        });
+
+    const std::string xml_tree =
+        R"(<root BTCPP_format="4">
+             <BehaviorTree ID="AreaTest">
+               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+             </BehaviorTree>
+           </root>)";
+
+    auto bb = BT::Blackboard::create();
+    bb->set("my_goal_x", 2250.0);
+    bb->set("penalty_area_depth", 800.0);
+    bb->set("penalty_area_width", 1600.0);
+
+    // Bola dentro da área de defesa amarela (ex: X = +2000 mm, Y = -200 mm)
+    bb->set("ball_x", 2000.0);
+    bb->set("ball_y", -200.0);
+    auto tree_inside = factory.createTreeFromText(xml_tree, bb);
+    EXPECT_EQ(tree_inside.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    // Bola fora da largura da área de defesa (ex: Y = 1000 mm > 800 mm meia-largura)
+    bb->set("ball_x", 2000.0);
+    bb->set("ball_y", 1000.0);
+    auto tree_outside = factory.createTreeFromText(xml_tree, bb);
+    EXPECT_EQ(tree_outside.tickExactlyOnce(), BT::NodeStatus::FAILURE);
 }

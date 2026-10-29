@@ -23,6 +23,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_strategy
     test/test_strategy.cpp
     src/is_ball_in_our_half_condition.cpp
+    src/is_ball_in_area_condition.cpp
   )
   ament_target_dependencies(test_strategy
     rclcpp
