@@ -19,6 +19,23 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_strategy
+    test/test_strategy.cpp
+    src/is_ball_in_our_half_condition.cpp
+  )
+  ament_target_dependencies(test_strategy
+    rclcpp
+    oxebots_interfaces
+    behaviortree_cpp
+    geometry_msgs
+    nav_msgs
+  )
+  target_include_directories(test_strategy PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
