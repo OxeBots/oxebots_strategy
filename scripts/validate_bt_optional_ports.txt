@@ -1,0 +1,7 @@
+# Portas de entrada SEM valor padrão que o nó trata como opcionais (têm fallback no C++).
+# O validador (R4) não exige estas portas no XML. Formato: Nó.porta  # motivo
+# Portas cuja descrição contém "Opcional" já são reconhecidas sozinhas.
+ShadowBall.penalty_area_depth   # cai para a blackboard raiz (defender_nodes.cpp)
+MarkOpponent.penalty_area_depth # idem
+GoToClamped.penalty_area_depth  # idem
+Halt.reason                     # sem a porta, usa "pelo GC" (strategy_node.cpp)
