@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -39,12 +40,14 @@ public:
         this->declare_parameter<bool>("is_yellow_team", false);
         this->declare_parameter<std::string>("gc_topic", "/gc_multicast_bridge/referee_messages");
         this->declare_parameter<std::string>("ball_topic", "ball_data");
+        this->declare_parameter<double>("stale_timeout_ms", 500.0);
         this->declare_parameter<double>("ball_moved_mm", 50.0);
         this->declare_parameter<double>("kick_timeout_s", 10.0);
         this->declare_parameter<double>("stop_speed_mps", 0.75);
         this->declare_parameter<double>("play_speed_mps", 1.5);
 
         is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
+        stale_timeout_ms_ = this->get_parameter("stale_timeout_ms").as_double();
         ball_moved_mm_ = this->get_parameter("ball_moved_mm").as_double();
         kick_timeout_s_ = this->get_parameter("kick_timeout_s").as_double();
         stop_speed_mps_ = this->get_parameter("stop_speed_mps").as_double();
@@ -66,15 +69,21 @@ public:
         initDefaultState();
         publishState();
 
+        stale_timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(100),
+            std::bind(&RefereeStateNode::staleTimerCallback, this));
+
         RCLCPP_INFO(
             this->get_logger(),
-            "referee_state_node iniciado (is_yellow_team=%s, gc_topic=%s).",
-            is_yellow_team_ ? "true" : "false", gc_topic.c_str());
+            "referee_state_node iniciado (is_yellow_team=%s, gc_topic=%s, stale_timeout_ms=%.0f).",
+            is_yellow_team_ ? "true" : "false", gc_topic.c_str(), stale_timeout_ms_);
     }
 
 private:
     void initDefaultState()
     {
+        state_.header.stamp.sec = 0;
+        state_.header.stamp.nanosec = 0U;
         state_.command_counter = 0;
         state_.command = Referee::COMMAND_HALT;
         state_.phase = GameState::PHASE_HALT;
@@ -112,14 +121,25 @@ private:
         }
 
         const bool is_new_command = (!has_received_gc_ || msg->command_counter > last_command_counter_);
+        const bool was_stale = state_.stale;
+        const auto now = this->now();
         has_received_gc_ = true;
         last_command_counter_ = msg->command_counter;
+        last_gc_rx_time_ = now;
 
-        state_.header.stamp = this->now();
+        state_.header.stamp = now;
         state_.command_counter = msg->command_counter;
         state_.command = msg->command;
         state_.stage = msg->stage;
         state_.stale = false;
+
+        if (was_stale && !is_new_command)
+        {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Comunicacao com o GC restabelecida (counter=%u, cmd=%u).",
+                state_.command_counter, state_.command);
+        }
 
         // 5. Resolver o lado do campo a partir de blue_team_on_positive_half e is_yellow_team
         if (!msg->blue_team_on_positive_half.empty())
@@ -460,9 +480,33 @@ private:
                 moved_mm, timed_out ? "sim" : "nao");
             state_.phase = GameState::PHASE_RUN;
             state_.we_favored = false;
-            state_.header.stamp = this->now();
             clearRestartTracking();
             updateDerivedLimits();
+            publishState();
+        }
+    }
+
+    // 6. Marcar o estado como velho (temporizador de 100 ms)
+    void staleTimerCallback()
+    {
+        if (!has_received_gc_ || !last_gc_rx_time_.has_value())
+        {
+            state_.stale = true;
+            publishState();
+            return;
+        }
+
+        const double gc_age_ms = (this->now() - *last_gc_rx_time_).seconds() * 1000.0;
+        if (gc_age_ms > stale_timeout_ms_)
+        {
+            if (!state_.stale)
+            {
+                RCLCPP_WARN(
+                    this->get_logger(),
+                    "GC stale detectado (gc_age=%.0f ms > %.0f ms).",
+                    gc_age_ms, stale_timeout_ms_);
+            }
+            state_.stale = true;
             publishState();
         }
     }
@@ -473,6 +517,7 @@ private:
     }
 
     bool is_yellow_team_{false};
+    double stale_timeout_ms_{500.0};
     double ball_moved_mm_{50.0};
     double kick_timeout_s_{10.0};
     double stop_speed_mps_{0.75};
@@ -480,6 +525,7 @@ private:
 
     bool has_received_gc_{false};
     uint32_t last_command_counter_{0};
+    std::optional<rclcpp::Time> last_gc_rx_time_;
 
     std::optional<std::pair<double, double>> last_ball_pos_;
     std::optional<std::pair<double, double>> restart_ball_origin_;
@@ -490,6 +536,7 @@ private:
     rclcpp::Publisher<GameState>::SharedPtr state_pub_;
     rclcpp::Subscription<Referee>::SharedPtr gc_sub_;
     rclcpp::Subscription<BallPosition>::SharedPtr ball_sub_;
+    rclcpp::TimerBase::SharedPtr stale_timer_;
 };
 
 int main(int argc, char ** argv)
