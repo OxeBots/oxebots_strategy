@@ -5,7 +5,7 @@
             <!-- FASE DE EXECUÇÃO (Normal Free Kick)            -->
             <!-- ============================================== -->
             <Sequence>
-                <CheckGCCommand expected="8"/>
+                <IsNormalFreeKick/>
                 
                 <Fallback>
                     
