@@ -37,6 +37,20 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  ament_add_gtest(test_referee_state_node
+    test/test_referee_state_node.cpp
+  )
+  ament_target_dependencies(test_referee_state_node
+    rclcpp
+    oxebots_interfaces
+    ssl_league_msgs
+    geometry_msgs
+  )
+  target_include_directories(test_referee_state_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
