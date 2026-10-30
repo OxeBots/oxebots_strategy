@@ -16,6 +16,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 if(BUILD_TESTING)
@@ -47,6 +48,8 @@ add_executable(
   src/aim_at.cpp
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
 )
 
 ament_target_dependencies(
@@ -58,6 +61,7 @@ ament_target_dependencies(
   ament_index_cpp
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
 )
 
@@ -80,6 +84,7 @@ ament_target_dependencies(
   nav_msgs
   visualization_msgs
   sensor_msgs
+  std_msgs
   tf2_ros
 )
 

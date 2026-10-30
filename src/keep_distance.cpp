@@ -10,12 +10,12 @@ KeepDistance::KeepDistance(const std::string& name, const BT::NodeConfig& config
 BT::PortsList KeepDistance::providedPorts()
 {
     return {
-        BT::InputPort<unsigned int>("robot_id", "ID do robô"),
-        BT::InputPort<double>("distance", "Distância mínima a manter (ex: 500.0)"),
-        BT::InputPort<double>("ball_x", "Posição X da bola"),
-        BT::InputPort<double>("ball_y", "Posição Y da bola"),
-        BT::InputPort<double>("robot_x", "Posição X do robô"),
-        BT::InputPort<double>("robot_y", "Posição Y do robô"),
+        BT::InputPort<unsigned int>("robot_id", "{robot_id}", "ID do robô"),
+        BT::InputPort<double>("distance", 550.0, "Distância mínima a manter (ex: 500.0)"),
+        BT::InputPort<double>("ball_x", "{ball_x}", "Posição X da bola"),
+        BT::InputPort<double>("ball_y", "{ball_y}", "Posição Y da bola"),
+        BT::InputPort<double>("robot_x", "{robot_x}", "Posição X do robô"),
+        BT::InputPort<double>("robot_y", "{robot_y}", "Posição Y do robô"),
         BT::OutputPort<double>("target_x", "Coordenada X para onde recuar"),
         BT::OutputPort<double>("target_y", "Coordenada Y para onde recuar")
     };

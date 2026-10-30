@@ -36,6 +36,8 @@
 #include "oxebots_strategy/keep_distance.hpp"
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/has_line_of_sight.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
@@ -125,6 +127,8 @@ public:
       factory_.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
       factory_.registerNodeType<oxebots_strategy::AimAt>("AimAt");
       factory_.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
+      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");

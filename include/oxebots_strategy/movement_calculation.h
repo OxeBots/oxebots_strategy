@@ -7,8 +7,10 @@
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/robot_motion_status.hpp"
+#include "oxebots_interfaces/msg/game_state.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "std_msgs/msg/float32.hpp"
 
 #include <optional>
 #include <vector>
@@ -38,8 +40,15 @@ private:
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
     void override_callback(const oxebots_interfaces::msg::RobotMotionOverride::SharedPtr msg);
     void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
+    void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg);
+    void motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg);
     void clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy);
     void calculate_and_move();
+
+    // SafetyGate (Capítulo 17.5): 4 verificações independentes sobre o comando final
+    // Centraliza o envio para /robot_commands garantindo HALT, teto de velocidade, watchdog e limite de chute.
+    void applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cmd, uint8_t& active_mode);
+    void publishCommand(oxebots_interfaces::msg::RobotCmdData cmd_data, uint8_t active_mode, bool aligned);
 
     // Único dono de /robot_commands para este robô (ver comentário grande em calculate_and_move()
     // sobre por que AlignToBall/KickBall/Halt pararam de publicar lá diretamente). Estes três
@@ -58,6 +67,8 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
+    rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr motion_limit_sub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -71,15 +82,25 @@ private:
     // Espelha RobotGoal::disable_arrival_latch do último /robot_goal recebido — ver comentário no
     // .msg.
     bool disable_arrival_latch_ = false;
+    float target_max_speed_ = 0.0f;
+    float motion_limit_mps_ = 0.0f;
     // Histerese da repulsão de contato: entra a kContactEnterMm, só desarma a kContactExitMm.
     bool contact_repulsion_active_ = false;
 
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
+    oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
     int robot_id_ = 0;
     bool game_data_received_ = false;
 
     bool is_yellow_team_;
+
+    // --- SafetyGate: Watchdog de 500 ms (Capítulo 17.5) ---
+    // Se nenhum /robot_goal nem /robot_motion_override for recebido por mais de kWatchdogTimeout,
+    // o controlador zera velocidades e chute e informa MODE_HALT no status.
+    static constexpr std::chrono::milliseconds kWatchdogTimeout{500};
+    std::chrono::steady_clock::time_point last_intent_time_;
+    bool has_received_intent_ = false;
 
     // --- Estado do canal de override (Align/Kick/Halt) ---
     // Se nenhum override for recebido por kOverrideTtl, o modo efetivo cai para NONE sozinho:

@@ -1,4 +1,5 @@
 #include "oxebots_strategy/precision_kick_node.h"
+#include <algorithm>
 #include <cmath>
 
 namespace oxebots_strategy
@@ -7,121 +8,117 @@ namespace oxebots_strategy
 PrecisionKickNode::PrecisionKickNode(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
   : BT::StatefulActionNode(name, config), node_(node)
 {
-  auto cmd_qos = rclcpp::QoS(rclcpp::KeepLast(1));
-  cmd_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", cmd_qos);
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1));
+  override_pub_ = node_->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>("/robot_motion_override", qos);
+  status_sub_ = node_->create_subscription<oxebots_interfaces::msg::RobotMotionStatus>(
+    "/robot_motion_status", 10, std::bind(&PrecisionKickNode::statusCallback, this, std::placeholders::_1));
+}
+
+void PrecisionKickNode::statusCallback(const oxebots_interfaces::msg::RobotMotionStatus::SharedPtr msg)
+{
+  if (msg->robot_id != robot_id_) return;
+  last_status_ = msg;
 }
 
 BT::PortsList PrecisionKickNode::providedPorts()
 {
-  return { BT::InputPort<unsigned int>("robot_id", "ID do robo"),
+  return { BT::InputPort<unsigned int>("robot_id", "{robot_id}", "ID do robo"),
            BT::InputPort<double>("target_x", "X do alvo"),
            BT::InputPort<double>("target_y", "Y do alvo"),
-           BT::InputPort<double>("kick_speed", 3.5, "Velocidade do chute") };
+           BT::InputPort<double>("kick_speed", 3.0, "Velocidade do chute (m/s, limitada a <= 3.0)") };
 }
 
 BT::NodeStatus PrecisionKickNode::onStart()
 {
-  kick_triggered_ = false;
-  start_time_ = std::chrono::steady_clock::now();
-  return BT::NodeStatus::RUNNING;
+  if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
+
+  aligned_latched_ = false;
+  baseline_kick_count_ = (last_status_ && last_status_->robot_id == robot_id_) ? last_status_->kick_fire_count : 0;
+
+  return step();
 }
 
 BT::NodeStatus PrecisionKickNode::onRunning()
 {
-  unsigned int robot_id;
-  double target_x, target_y, kick_speed;
-  double rx, ry, ryaw, bx, by;
+  return step();
+}
 
-  // Obter entradas
-  if (!getInput<unsigned int>("robot_id", robot_id)) return BT::NodeStatus::FAILURE;
+BT::NodeStatus PrecisionKickNode::step()
+{
+  if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
+
+  double target_x, target_y, kick_speed = 3.0;
   if (!getInput<double>("target_x", target_x)) return BT::NodeStatus::FAILURE;
   if (!getInput<double>("target_y", target_y)) return BT::NodeStatus::FAILURE;
-  if (!getInput<double>("kick_speed", kick_speed)) kick_speed = 3.5;
+  getInput<double>("kick_speed", kick_speed);
 
-  // Obter dados do Blackboard (em MM ou Metros dependendo do sistema, aqui assumimos a mesma escala do GameData)
-  if (!config().blackboard->get("robot_x", rx)) return BT::NodeStatus::FAILURE;
-  if (!config().blackboard->get("robot_y", ry)) return BT::NodeStatus::FAILURE;
-  if (!config().blackboard->get("robot_yaw", ryaw)) return BT::NodeStatus::FAILURE;
-  if (!config().blackboard->get("ball_x", bx)) return BT::NodeStatus::FAILURE;
-  if (!config().blackboard->get("ball_y", by)) return BT::NodeStatus::FAILURE;
+  // Regra R-25 / SC-24 (M02): nunca exceder 3,0 m/s
+  kick_speed = std::clamp(kick_speed, 0.0, 3.0);
 
-  // Se o chute já foi disparado, esperamos um pouco para o robô completar o movimento
-  if (kick_triggered_) {
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_);
-    if (elapsed.count() > 150) {
-      return BT::NodeStatus::SUCCESS;
-    }
-    return BT::NodeStatus::RUNNING;
+  // Se o controlador já concluiu o disparo do chute desde onStart(), libera o override e encerra com SUCCESS
+  if (last_status_ &&
+      last_status_->robot_id == robot_id_ &&
+      last_status_->kick_fire_count > baseline_kick_count_) {
+    releaseOverride();
+    RCLCPP_INFO(node_->get_logger(), "PrecisionKick (Robot %d): chute concluído via override.", robot_id_);
+    return BT::NodeStatus::SUCCESS;
   }
 
-  // 1. Calcular vetor Bola -> Alvo (direção do chute ideal)
+  auto bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+  if (!bb) return BT::NodeStatus::FAILURE;
+  double ryaw = 0.0, bx = 0.0, by = 0.0;
+  if (!bb->get("robot_yaw", ryaw)) return BT::NodeStatus::FAILURE;
+  if (!bb->get("ball_x", bx)) return BT::NodeStatus::FAILURE;
+  if (!bb->get("ball_y", by)) return BT::NodeStatus::FAILURE;
+
+  // 1. Vetor Bola -> Alvo (direção do chute ideal)
   double dx_kick = target_x - bx;
   double dy_kick = target_y - by;
-  double angle_kick = atan2(dy_kick, dx_kick);
-
-  // 2. Erro de orientação atual do robô em relação ao chute ideal
+  double angle_kick = std::atan2(dy_kick, dx_kick);
   double angle_error = normalize_angle(angle_kick - ryaw);
 
-  // 3. Vetor Robô -> Bola (distância atual)
-  double dx_ball = bx - rx;
-  double dy_ball = by - ry;
-  double dist_ball = sqrt(dx_ball * dx_ball + dy_ball * dy_ball);
-
-  // 4. Lógica de Controle Suavizada
-  double vx = 0.0, vy = 0.0, w = 0.0, k = 0.0;
-
-  // Controle de giro (P-Controller com Deadband)
-  if (std::abs(angle_error) > 0.05) { // Só gira se o erro for maior que ~3 graus
-      w = angle_error * 2.5; // Reduzi de 4.0 para 2.5 para evitar oscilação
-      if (w > 2.0) w = 2.0;
-      if (w < -2.0) w = -2.0;
-  } else {
-      w = 0.0; // Ângulo perfeito
+  // Verifica se o controlador reportou alinhamento concluído ou se já está dentro da tolerância (~8.5 graus)
+  if (!aligned_latched_) {
+    bool status_aligned = last_status_ &&
+                          last_status_->robot_id == robot_id_ &&
+                          last_status_->active_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_ANGLE &&
+                          last_status_->aligned;
+    if (status_aligned || std::abs(angle_error) < 0.15) {
+      aligned_latched_ = true;
+    }
   }
 
-  // Só avança se o ângulo estiver minimamente aceitável
-  if (std::abs(angle_error) < 0.4) {
-      // Aproximação linear: quanto mais longe, mais rápido (até um limite)
-      vx = 0.2 + (dist_ball / 1000.0) * 0.5; 
-      if (vx > 0.6) vx = 0.6;
-      
-      // Se o ângulo estiver MUITO bom e estiver na distância de chute
-      if (std::abs(angle_error) < 0.15 && dist_ball < 130.0) { 
-          vx = 1.0; // Lunge final agressivo
-          k = kick_speed;
-          kick_triggered_ = true;
-          start_time_ = std::chrono::steady_clock::now();
-          RCLCPP_INFO(node_->get_logger(), "PrecisionKick (Robot %d): CHUTE DISPARADO!", robot_id);
-      }
+  auto msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
+  msg->robot_id = robot_id_;
+
+  if (!aligned_latched_) {
+    // Fase 1: Pede ao controlador para girar até o ângulo bola->alvo
+    msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_ANGLE;
+    msg->target_angle = angle_kick;
+    msg->angle_threshold_deg = 8.0;
+    msg->max_angular_speed = 3.0;
+    msg->p_gain = 4.0;
   } else {
-      // Se estiver muito desalinhado, para e foca em girar
-      vx = 0.0;
+    // Fase 2: Alinhado -> pede o disparo do chute ao controlador
+    msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK;
+    msg->kick_speed = kick_speed;
   }
 
-  send_command(vx, vy, w, k);
+  override_pub_->publish(std::move(msg));
   return BT::NodeStatus::RUNNING;
+}
+
+void PrecisionKickNode::releaseOverride()
+{
+  auto msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
+  msg->robot_id = robot_id_;
+  msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_NONE;
+  override_pub_->publish(std::move(msg));
 }
 
 void PrecisionKickNode::onHalted()
 {
-  send_command(0.0, 0.0, 0.0, 0.0);
-}
-
-void PrecisionKickNode::send_command(double vx, double vy, double w, double kick_speed)
-{
-  unsigned int robot_id;
-  if (!getInput<unsigned int>("robot_id", robot_id)) return;
-
-  auto msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
-  oxebots_interfaces::msg::RobotCmdData data;
-  data.id = robot_id;
-  data.x_velocity = vx;
-  data.y_velocity = vy;
-  data.angular_velocity = w;
-  data.kick_speed = kick_speed;
-  
-  msg->robots.push_back(data);
-  cmd_pub_->publish(std::move(msg));
+  releaseOverride();
 }
 
 double PrecisionKickNode::normalize_angle(double angle)

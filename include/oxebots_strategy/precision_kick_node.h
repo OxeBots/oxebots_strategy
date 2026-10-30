@@ -3,9 +3,9 @@
 
 #include "behaviortree_cpp/action_node.h"
 #include "rclcpp/rclcpp.hpp"
-#include "oxebots_interfaces/msg/robot_cmd.hpp"
-#include "oxebots_interfaces/msg/robot_cmd_data.hpp"
-#include <chrono>
+#include "oxebots_interfaces/msg/robot_motion_override.hpp"
+#include "oxebots_interfaces/msg/robot_motion_status.hpp"
+#include <cstdint>
 
 namespace oxebots_strategy
 {
@@ -22,14 +22,19 @@ public:
   void onHalted() override;
 
 private:
-  void send_command(double vx, double vy, double w, double kick_speed);
+  BT::NodeStatus step();
+  void statusCallback(const oxebots_interfaces::msg::RobotMotionStatus::SharedPtr msg);
+  void releaseOverride();
   double normalize_angle(double angle);
 
   rclcpp::Node::SharedPtr node_;
-  rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr cmd_pub_;
-  
-  std::chrono::steady_clock::time_point start_time_;
-  bool kick_triggered_ = false;
+  rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_pub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::RobotMotionStatus>::SharedPtr status_sub_;
+  oxebots_interfaces::msg::RobotMotionStatus::SharedPtr last_status_;
+
+  unsigned int robot_id_ = 0;
+  uint32_t baseline_kick_count_ = 0;
+  bool aligned_latched_ = false;
 };
 
 } // namespace oxebots_strategy

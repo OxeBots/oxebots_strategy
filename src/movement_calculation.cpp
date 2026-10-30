@@ -56,6 +56,16 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
         "/field_geometry", rclcpp::QoS(1).transient_local().reliable(),
         std::bind(&PathFollowerNode::geometry_callback, this, std::placeholders::_1));
 
+    // Assina o estado global de jogo consolidado pelo referee_state_node (SafetyGate)
+    game_state_sub_ = this->create_subscription<oxebots_interfaces::msg::GameState>(
+        "/game_state", rclcpp::QoS(1).transient_local().reliable(),
+        std::bind(&PathFollowerNode::game_state_callback, this, std::placeholders::_1));
+
+    // Assina o limite explícito de velocidade publicado pela folha SetMotionLimit (SafetyGate)
+    motion_limit_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+        "/robot_motion_limit", rclcpp::QoS(1).transient_local().reliable(),
+        std::bind(&PathFollowerNode::motion_limit_callback, this, std::placeholders::_1));
+
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(50), std::bind(&PathFollowerNode::calculate_and_move, this));
     
@@ -65,6 +75,17 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
 void PathFollowerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_geometry_ = msg;
+}
+
+void PathFollowerNode::game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    last_game_state_ = msg;
+}
+
+void PathFollowerNode::motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg) {
+    if (!msg || !std::isfinite(msg->data) || msg->data <= 0.0f) return;
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    motion_limit_mps_ = msg->data;
 }
 
 void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy) {
@@ -147,6 +168,16 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
     target_w_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     target_planner_type_ = msg->planner_type;
     disable_arrival_latch_ = msg->disable_arrival_latch;
+    target_max_speed_ = msg->max_speed;
+
+    // SafetyGate: renova o watchdog por nova intenção vinda da árvore
+    last_intent_time_ = std::chrono::steady_clock::now();
+    has_received_intent_ = true;
+
+    // Se havia um MODE_HALT segurado em override, a chegada de um novo goal libera explicitamente o robô
+    if (last_override_msg_ && last_override_msg_->mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
+        last_override_msg_.reset();
+    }
 }
 
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -159,6 +190,10 @@ void PathFollowerNode::override_callback(const oxebots_interfaces::msg::RobotMot
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_override_msg_ = msg;
     last_override_time_ = std::chrono::steady_clock::now();
+
+    // SafetyGate: renova o watchdog por nova intenção vinda da árvore
+    last_intent_time_ = last_override_time_;
+    has_received_intent_ = true;
 }
 
 void PathFollowerNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
@@ -194,8 +229,13 @@ void PathFollowerNode::calculate_and_move() {
     // quando o leaf libera explicitamente quanto quando um override simplesmente para de chegar
     // por mais que kOverrideTtl (proteção para casos como Halt, que não tem callback de saída).
     uint8_t effective_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_NONE;
-    if (last_override_msg_ && (std::chrono::steady_clock::now() - last_override_time_) < kOverrideTtl) {
-        effective_mode = last_override_msg_->mode;
+    if (last_override_msg_) {
+        if (last_override_msg_->mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
+            // MODE_HALT não expira por TTL de 200 ms (elimina a janela de 300 ms descrita no Cap. 17.5)
+            effective_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
+        } else if ((std::chrono::steady_clock::now() - last_override_time_) < kOverrideTtl) {
+            effective_mode = last_override_msg_->mode;
+        }
     }
 
     // Diagnóstico temporário: avisa sempre que o robô encostar (ou quase) na bola FORA do chute
@@ -258,21 +298,28 @@ void PathFollowerNode::calculate_and_move() {
                 target_found = true;
             }
         } else if (last_path_ && last_path_->poses.empty()) {
-            // Rota vazia recebida: parar o robô
-            auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
+            // Rota vazia recebida: parar o robô via SafetyGate
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
-            cmd_data.x_velocity = 0.0;
-            cmd_data.y_velocity = 0.0;
-            cmd_data.angular_velocity = 0.0;
-            cmd_msg->robots.push_back(cmd_data);
-            cmd_vel_pub_->publish(std::move(cmd_msg));
+            cmd_data.x_velocity = 0.0f;
+            cmd_data.y_velocity = 0.0f;
+            cmd_data.angular_velocity = 0.0f;
+            publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_NONE, false);
             return;
         }
 
-    if (!target_found) return;
+    if (!target_found) {
+        auto now = std::chrono::steady_clock::now();
+        bool watchdog_expired = !has_received_intent_ || (now - last_intent_time_) > kWatchdogTimeout;
+        bool is_halt = last_game_state_ && (
+            last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_HALT ||
+            last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_TIMEOUT);
+        if (watchdog_expired || is_halt) {
+            publishHalt();
+        }
+        return;
+    }
 
-    auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
 
@@ -378,8 +425,7 @@ void PathFollowerNode::calculate_and_move() {
     // Trava de segurança de velocidade para impedir entrada na área de pênalti (baseada em /field_geometry)
     clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
 
-    cmd_msg->robots.push_back(cmd_data);
-    cmd_vel_pub_->publish(std::move(cmd_msg));
+    publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_NONE, false);
 }
 
 void PathFollowerNode::publishStatus(uint8_t active_mode, bool aligned) {
@@ -392,15 +438,13 @@ void PathFollowerNode::publishStatus(uint8_t active_mode, bool aligned) {
 }
 
 void PathFollowerNode::publishHalt() {
-    auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
-    cmd_data.x_velocity = 0.0;
-    cmd_data.y_velocity = 0.0;
-    cmd_data.angular_velocity = 0.0;
-    cmd_msg->robots.push_back(cmd_data);
-    cmd_vel_pub_->publish(std::move(cmd_msg));
-    publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT, false);
+    cmd_data.x_velocity = 0.0f;
+    cmd_data.y_velocity = 0.0f;
+    cmd_data.angular_velocity = 0.0f;
+    cmd_data.kick_speed = 0.0f;
+    publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT, false);
 }
 
 // Gira o robô no lugar até apontar para o alvo pedido (a bola real, para MODE_ALIGN_TO_BALL, ou
@@ -421,21 +465,21 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
     double offset_deg = normalizeAngleDeg(target_angle_deg - heading_deg);
     bool aligned = std::abs(offset_deg) < last_override_msg_->angle_threshold_deg;
 
-    auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
-    cmd_data.x_velocity = 0.0;
-    cmd_data.y_velocity = 0.0;
+    cmd_data.x_velocity = 0.0f;
+    cmd_data.y_velocity = 0.0f;
+    cmd_data.kick_speed = 0.0f;
     if (aligned) {
-        cmd_data.angular_velocity = 0.0;
+        cmd_data.angular_velocity = 0.0f;
     } else {
         double offset_rad = offset_deg * M_PI / 180.0;
         cmd_data.angular_velocity = std::clamp(
             offset_rad * last_override_msg_->p_gain,
             -last_override_msg_->max_angular_speed, last_override_msg_->max_angular_speed);
     }
-    cmd_msg->robots.push_back(cmd_data);
-    cmd_vel_pub_->publish(std::move(cmd_msg));
+
+    publishCommand(cmd_data, mode, aligned);
 
     // Log throttled a 150ms (~10Hz): a 1000ms anterior estava mascarando o problema por
     // "aliasing" — um caso real de alinhamento que nunca convergia (erro ~82° girando sem parar
@@ -448,8 +492,6 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
         "Robô %d AlignTo(modo=%d): heading=%.1fdeg alvo=%.1fdeg offset=%.1fdeg limite=%.1fdeg alinhado=%s cmd_ang=%.2f",
         robot_id_, mode, heading_deg, target_angle_deg, offset_deg,
         last_override_msg_->angle_threshold_deg, aligned ? "sim" : "nao", cmd_data.angular_velocity);
-
-    publishStatus(mode, aligned);
 }
 
 // Máquina de estados do chute, portada de KickBallNode. Enquanto MODE_KICK estiver ativo:
@@ -468,7 +510,6 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
     if (kick_phase_ == KickPhase::FIRING) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - kick_start_time_);
         if (elapsed < kKickFireWindow) {
-            auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
             cmd_data.kick_speed = last_override_msg_->kick_speed;
@@ -485,11 +526,9 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             constexpr double kKickAdvanceSpeed = 0.5;
             cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
-            cmd_data.angular_velocity = 0.0;
+            cmd_data.angular_velocity = 0.0f;
             clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
-            cmd_msg->robots.push_back(cmd_data);
-            cmd_vel_pub_->publish(std::move(cmd_msg));
-            publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
+            publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
             return;
         }
 
@@ -499,15 +538,87 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
     }
 
     // Fora da janela de disparo (aguardando pedido ou em cooldown): mantém o robô parado.
-    auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
-    cmd_data.x_velocity = 0.0;
-    cmd_data.y_velocity = 0.0;
-    cmd_data.angular_velocity = 0.0;
+    cmd_data.x_velocity = 0.0f;
+    cmd_data.y_velocity = 0.0f;
+    cmd_data.angular_velocity = 0.0f;
+    cmd_data.kick_speed = 0.0f;
+    publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
+}
+
+void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cmd, uint8_t& active_mode) {
+    auto now = std::chrono::steady_clock::now();
+
+    // 1. Regra 3 (Watchdog 500 ms - Capítulo 17.5 e SC-26):
+    // Se o controlador não recebe um objetivo (/robot_goal) nem um override (/robot_motion_override)
+    // há mais de 500 ms, zera os comandos e informa MODE_HALT no status. Protege contra árvore travada/muda.
+    bool watchdog_expired = !has_received_intent_ || (now - last_intent_time_) > kWatchdogTimeout;
+    if (watchdog_expired) {
+        cmd.x_velocity = 0.0f;
+        cmd.y_velocity = 0.0f;
+        cmd.angular_velocity = 0.0f;
+        cmd.kick_speed = 0.0f;
+        active_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
+    }
+
+    // 2. Regra 1 (HALT zera a velocidade - Capítulo 17.5 e SC-02):
+    // Se o GameState indica HALT (ou TIMEOUT), o comando é zero, mesmo que um override ou rota digam o contrário.
+    if (last_game_state_) {
+        if (last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_HALT ||
+            last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_TIMEOUT) {
+            cmd.x_velocity = 0.0f;
+            cmd.y_velocity = 0.0f;
+            cmd.angular_velocity = 0.0f;
+            cmd.kick_speed = 0.0f;
+            active_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
+        }
+    }
+
+    // 3. Regra 2 (Teto de velocidade por fase e por objetivo - Capítulo 17.5, M03, SC-03 e R-27):
+    // O módulo do vetor (vx, vy) é limitado a speed_limit_mps do GameState (0,75 m/s em parada, 1,5 m/s em jogo)
+    // e também ao max_speed opcional pedido pelo GoToPoint no último RobotGoal.
+    float speed_cap = static_cast<float>(this->get_parameter("max_linear_speed").as_double());
+    if (last_game_state_ && last_game_state_->speed_limit_mps > 0.0f) {
+        speed_cap = std::min(speed_cap, last_game_state_->speed_limit_mps);
+    }
+    if (motion_limit_mps_ > 0.0f) {
+        speed_cap = std::min(speed_cap, motion_limit_mps_);
+    }
+    if (target_max_speed_ > 0.0f) {
+        speed_cap = std::min(speed_cap, target_max_speed_);
+    }
+    float speed = std::hypot(cmd.x_velocity, cmd.y_velocity);
+    if (speed > speed_cap && speed > 1e-4f) {
+        float scale = speed_cap / speed;
+        cmd.x_velocity *= scale;
+        cmd.y_velocity *= scale;
+    }
+
+    // 4. Regra 4 (Limite do chute - Capítulo 17.5 e SC-24):
+    // kick_speed é limitado a 3,0 m/s para qualquer origem, inclusive folhas legadas que esqueçam de limitar.
+    cmd.kick_speed = std::clamp(cmd.kick_speed, 0.0f, 3.0f);
+}
+
+void PathFollowerNode::publishCommand(oxebots_interfaces::msg::RobotCmdData cmd_data, uint8_t active_mode, bool aligned) {
+    applySafetyGate(cmd_data, active_mode);
+
+    // Sanitiza contra valores não finitos (NaN/Inf)
+    auto sanitize = [](float& val) {
+        if (!std::isfinite(val)) val = 0.0f;
+    };
+    sanitize(cmd_data.x_velocity);
+    sanitize(cmd_data.y_velocity);
+    sanitize(cmd_data.angular_velocity);
+    sanitize(cmd_data.kick_speed);
+
+    auto cmd_msg = std::make_unique<oxebots_interfaces::msg::RobotCmd>();
     cmd_msg->robots.push_back(cmd_data);
     cmd_vel_pub_->publish(std::move(cmd_msg));
-    publishStatus(oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
+
+    if (active_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_NONE) {
+        publishStatus(active_mode, aligned);
+    }
 }
 
 int main(int argc, char *argv[]) {

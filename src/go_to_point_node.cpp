@@ -65,7 +65,7 @@ GoToPointNode::GoToPointNode(const std::string& name, const BT::NodeConfig& conf
 
 // Portas do Behavior Tree (entradas e saídas de dados para o nó)
 BT::PortsList GoToPointNode::providedPorts() {
-    return { BT::InputPort<unsigned int>("robot_id"),
+    return { BT::InputPort<unsigned int>("robot_id", "{robot_id}", "ID do robô (padrão {robot_id} da blackboard)"),
              BT::InputPort<double>("x"),
              BT::InputPort<double>("y"),
              BT::InputPort<double>("face_x", "Opcional: X do alvo de orientação (bola, companheiro, canto do "
@@ -73,6 +73,7 @@ BT::PortsList GoToPointNode::providedPorts() {
                  "com face_y), mantém o padrão de sempre olhar para o gol adversário."),
              BT::InputPort<double>("face_y", "Opcional: Y do alvo de orientação. Ver face_x."),
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
+             BT::InputPort<double>("max_speed", 0.0, "Velocidade linear máxima opcional em m/s (<= 0 usa o padrão do controlador)"),
              BT::InputPort<std::string>("planner", "dstar",
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
                  "\"straight_line\" (linha reta, ignora a grade de obstáculos)"),
@@ -147,6 +148,10 @@ void GoToPointNode::publishGoal() {
     double tolerance = -1.0;
     getInput<double>("tolerance", tolerance);
     goal_msg->disable_arrival_latch = (tolerance <= 0.0);
+
+    double max_speed = 0.0;
+    getInput<double>("max_speed", max_speed);
+    goal_msg->max_speed = static_cast<float>(max_speed);
 
     // Converte de milímetros (padrão interno) para metros (padrão do ROS/RobotGoal)
     goal_msg->pose.pose.position.x = target_pos_.x / 1000.0;
@@ -236,6 +241,7 @@ void GoToPointNode::publishMarkers() {
 BT::NodeStatus GoToPointNode::onStart() {
     ball_contact_since_.reset();
     ball_wrong_side_since_.reset();
+    robot_missing_since_.reset();
 
     unsigned int input_id;
     if (!getInput<unsigned int>("robot_id", input_id)) return BT::NodeStatus::FAILURE;
@@ -245,9 +251,9 @@ BT::NodeStatus GoToPointNode::onStart() {
     auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
     if (root_bb && root_bb->get("robot_id", my_id)) {
         if (input_id != my_id) {
-            // Se o comando não é para este robô, retornamos SUCCESS imediatamente 
-            // para não travar a árvore, mas não fazemos nada.
-            return BT::NodeStatus::SUCCESS;
+            RCLCPP_ERROR_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                "GoToPoint: robot_id da porta (%u) difere da instância (%u) -> FAILURE.", input_id, my_id);
+            return BT::NodeStatus::FAILURE;
         }
     }
     
@@ -356,7 +362,19 @@ BT::NodeStatus GoToPointNode::onRunning() {
 
     // Pega a posição atual do robô para verificar se ele já chegou no destino
     auto robot = getRobotData(robot_id_);
-    if (!robot) return BT::NodeStatus::RUNNING;
+    if (!robot) {
+        constexpr double kRobotMissingTimeoutSec = 0.5;
+        if (!robot_missing_since_.has_value()) {
+            robot_missing_since_ = node_->now();
+        } else if ((node_->now() - *robot_missing_since_).seconds() >= kRobotMissingTimeoutSec) {
+            RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                "Robô %d ausente da visão por mais de 500 ms em GoToPoint -> FAILURE.", robot_id_);
+            robot_missing_since_.reset();
+            return BT::NodeStatus::FAILURE;
+        }
+        return BT::NodeStatus::RUNNING;
+    }
+    robot_missing_since_.reset();
 
     // Gatilho de contato indevido com a bola (ver providedPorts()): falhar aqui devolve a decisão
     // pra árvore — a Sequence falha e o ReactiveFallback recalcula tudo do zero na posição real e
@@ -459,6 +477,29 @@ BT::NodeStatus GoToPointNode::onRunning() {
     return BT::NodeStatus::RUNNING;
 }
 
-void GoToPointNode::onHalted() {}
+void GoToPointNode::onHalted() {
+    ball_contact_since_.reset();
+    ball_wrong_side_since_.reset();
+    robot_missing_since_.reset();
+
+    auto robot = getRobotData(robot_id_);
+    if (!robot) return;
+
+    auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
+    goal_msg->robot_id = robot_id_;
+    goal_msg->pose.header.stamp = node_->now();
+    goal_msg->pose.header.frame_id = "map";
+    goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+    goal_msg->disable_arrival_latch = true;
+    goal_msg->max_speed = 0.0f;
+
+    goal_msg->pose.pose.position.x = robot->x / 1000.0;
+    goal_msg->pose.pose.position.y = robot->y / 1000.0;
+    goal_msg->pose.pose.orientation.z = std::sin(robot->orientation * 0.5);
+    goal_msg->pose.pose.orientation.w = std::cos(robot->orientation * 0.5);
+
+    goal_pub_->publish(std::move(goal_msg));
+}
 
 } // namespace oxebots_strategy
+
