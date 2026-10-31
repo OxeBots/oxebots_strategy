@@ -240,4 +240,58 @@ install(
     DESTINATION share/${PROJECT_NAME}
 )
 
+# --- Ferramentas e testes das Behavior Trees (backlog T01 e T02) ---------------------------------
+# dump_bt_model: despeja as portas de todas as folhas para o scripts/validate_bt.py. Compila as
+# mesmas folhas do strategy_node (sem o strategy_node.cpp), por isso a lista abaixo precisa
+# acompanhar a do strategy_node; o validador avisa (regra R8) se os registros divergirem.
+set(BT_LEAF_SOURCES
+  src/go_to_point_node.cpp
+  src/kick_ball_node.cpp
+  src/align_to_ball_node.cpp
+  src/update_ball_position_node.cpp
+  src/calculate_interception_node.cpp
+  src/is_ball_close_condition.cpp
+  src/goalkeeper_node.cpp
+  src/precision_kick_node.cpp
+  src/defender_nodes.cpp
+  src/goal_line_defend_node.cpp
+  src/is_ball_in_area_condition.cpp
+  src/is_ball_in_our_half_condition.cpp
+  src/lateral_clear_node.cpp
+  src/position_bisector_node.cpp
+  src/smother_save_node.cpp
+  src/calculate_kickoff_pose.cpp
+  src/aim_at.cpp
+  src/has_line_of_sight.cpp
+  src/keep_distance.cpp
+)
+
+add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
+
+ament_target_dependencies(
+  dump_bt_model
+  rclcpp
+  oxebots_interfaces
+  ssl_league_msgs
+  behaviortree_cpp
+  ament_index_cpp
+  geometry_msgs
+  nav_msgs
+  visualization_msgs
+)
+
+target_include_directories(dump_bt_model PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+install(TARGETS dump_bt_model DESTINATION lib/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  # Harness de semântica da BehaviorTree.CPP (só behaviortree_cpp + gtest, sem ROS).
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_bt_semantics test/test_bt_semantics.cpp)
+  ament_target_dependencies(test_bt_semantics behaviortree_cpp)
+endif()
+
 ament_package()
