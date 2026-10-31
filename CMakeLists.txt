@@ -51,6 +51,43 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  ament_add_gtest(test_strategy_node
+    test/test_strategy_node.cpp
+    src/go_to_point_node.cpp
+    src/kick_ball_node.cpp
+    src/align_to_ball_node.cpp
+    src/update_ball_position_node.cpp
+    src/calculate_interception_node.cpp
+    src/is_ball_close_condition.cpp
+    src/goalkeeper_node.cpp
+    src/precision_kick_node.cpp
+    src/defender_nodes.cpp
+    src/goal_line_defend_node.cpp
+    src/is_ball_in_area_condition.cpp
+    src/is_ball_in_our_half_condition.cpp
+    src/lateral_clear_node.cpp
+    src/position_bisector_node.cpp
+    src/smother_save_node.cpp
+    src/calculate_kickoff_pose.cpp
+    src/aim_at.cpp
+    src/has_line_of_sight.cpp
+    src/keep_distance.cpp
+  )
+  ament_target_dependencies(test_strategy_node
+    rclcpp
+    oxebots_interfaces
+    ssl_league_msgs
+    behaviortree_cpp
+    ament_index_cpp
+    geometry_msgs
+    nav_msgs
+    visualization_msgs
+  )
+  target_include_directories(test_strategy_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
