@@ -19,6 +19,7 @@
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_strategy/has_line_of_sight.hpp"
 #include "oxebots_strategy/is_ball_close_condition.h"
+#include "oxebots_strategy/is_ball_closest_condition.h"
 #include "oxebots_strategy/is_ball_in_area_condition.h"
 #include "oxebots_strategy/is_ball_in_our_half_condition.h"
 #include "oxebots_strategy/keep_distance.hpp"
@@ -52,6 +53,7 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
   factory.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", node);
   factory.registerNodeType<oxebots_strategy::GoalLineDefendNode>("GoalLineDefend", node);
   factory.registerNodeType<oxebots_strategy::IsBallInAreaCondition>("IsBallInArea", node);
+  factory.registerNodeType<oxebots_strategy::IsBallClosestCondition>("IsBallClosest", node);
   factory.registerNodeType<oxebots_strategy::IsBallInOurHalfCondition>("IsBallInOurHalf", node);
   factory.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", node);
   factory.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", node);

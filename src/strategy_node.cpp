@@ -28,6 +28,7 @@
 #include "oxebots_strategy/defender_nodes.hpp"
 #include "oxebots_strategy/goal_line_defend_node.h"
 #include "oxebots_strategy/is_ball_in_area_condition.h"
+#include "oxebots_strategy/is_ball_closest_condition.h"
 #include "oxebots_strategy/is_ball_in_our_half_condition.h"
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/position_bisector_node.h"
@@ -117,6 +118,7 @@ public:
       factory_.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::GoalLineDefendNode>("GoalLineDefend", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallInAreaCondition>("IsBallInArea", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::IsBallClosestCondition>("IsBallClosest", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::IsBallInOurHalfCondition>("IsBallInOurHalf", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", shared_from_this());

@@ -39,6 +39,7 @@ add_executable(
   src/defender_nodes.cpp
   src/goal_line_defend_node.cpp
   src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
   src/is_ball_in_our_half_condition.cpp
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
@@ -173,6 +174,7 @@ set(BT_LEAF_SOURCES
   src/defender_nodes.cpp
   src/goal_line_defend_node.cpp
   src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
   src/is_ball_in_our_half_condition.cpp
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp

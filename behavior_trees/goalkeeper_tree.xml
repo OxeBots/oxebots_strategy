@@ -1,14 +1,46 @@
 <root main_tree_to_execute="GoalkeeperTree" BTCPP_format="4">
    <BehaviorTree ID="GoalkeeperTree">
-       <Fallback name="RobotRoleGuard">
-           <!-- APENAS o Robô 0 executa a lógica de goleiro -->
-           <ReactiveSequence name="GoalkeeperLogic">
-               <IsRobotId robot_id="0" />
-               <Goalkeeper robot_id="{robot_id}" />
-           </ReactiveSequence>
+       <Sequence>
+           <!-- Atualização contínua dos dados da bola -->
+           <UpdateBallPosition robot_id="{robot_id}" 
+                               goal_x="{my_goal_x}" 
+                               goal_y="0.0" 
+                               ball_x="{ball_x}" 
+                               ball_y="{ball_y}" />
+           
+           <Fallback name="RobotRoleGuard">
+               <!-- APENAS o Robô 0 executa a lógica de goleiro -->
+               <Sequence name="GoalkeeperLogic">
+                   <IsRobotId robot_id="0" />
+                   <ReactiveFallback name="ReactiveGoalkeeper">
 
-           <!-- Outros robôs (1 e 2) ficam parados quando esta árvore é a principal -->
-           <Halt reason="not_the_goalkeeper" />
-       </Fallback>
+                       <!-- 1. Bola dentro da área: buscar a bola e chutar (passe para aliado livre ou afastar para a frente) -->
+                       <ReactiveSequence name="State3_BallInArea">
+                           <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
+                           <Sequence name="ApproachAndKick">
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" kick_speed="{gk_kick_speed}" />
+                               <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
+                           </Sequence>
+                       </ReactiveSequence>
+
+                       <!-- 2. Bola fora da área, mais perto do goleiro que de qualquer outro robô: sair, buscar e chutar -->
+                       <ReactiveSequence name="State2_BallClosestToGoalkeeper">
+                           <IsBallClosest robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
+                           <Sequence name="FetchAndKick">
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" allow_leave_area="true" kick_speed="{gk_kick_speed}" />
+                               <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
+                           </Sequence>
+                       </ReactiveSequence>
+
+                       <!-- 3. Demais casos: triangulação bola->postes e interceptação de chutes -->
+                       <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
+
+                   </ReactiveFallback>
+               </Sequence>
+
+               <!-- Outros robôs (1 e 2) ficam parados quando esta árvore é a principal -->
+               <Halt reason="not_the_goalkeeper" />
+           </Fallback>
+       </Sequence>
    </BehaviorTree>
 </root>
