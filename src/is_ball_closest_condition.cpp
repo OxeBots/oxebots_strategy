@@ -1,8 +1,10 @@
 #include "oxebots_strategy/is_ball_closest_condition.h"
 #include "oxebots_strategy/goalkeeper_blackboard.hpp"
+#include "oxebots_strategy/goalkeeper_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace oxebots_strategy
 {
@@ -149,7 +151,10 @@ BT::NodeStatus IsBallClosestCondition::tick()
     }
   }
 
+  namespace gk = goalkeeper;
   bool found_me = false;
+  gk::Vec2 my_pos;
+  std::vector<gk::Vec2> enemy_positions;
   double my_dist = std::numeric_limits<double>::infinity();
   double other_dist = std::numeric_limits<double>::infinity();
   double ally_dist = std::numeric_limits<double>::infinity();   // aliado mais perto da bola, sem contar o goleiro
@@ -160,6 +165,7 @@ BT::NodeStatus IsBallClosestCondition::tick()
     if (ally.id == robot_id) {
       found_me = true;
       my_dist = d;
+      my_pos = {ally.x, ally.y};
     } else {
       other_dist = std::min(other_dist, d);
       ally_dist = std::min(ally_dist, d);
@@ -167,6 +173,7 @@ BT::NodeStatus IsBallClosestCondition::tick()
   }
   for (const auto& enemy : game_data->robots.enemies) {
     const double d = std::hypot(enemy.x - ball_x, enemy.y - ball_y);
+    enemy_positions.push_back({enemy.x, enemy.y});
     enemy_dist = std::min(enemy_dist, d);
     other_dist = std::min(other_dist, d);
   }
@@ -184,6 +191,26 @@ BT::NodeStatus IsBallClosestCondition::tick()
   const bool no_allies = std::isinf(ally_dist);
   if (!(enemy_has_it || no_allies)) {
     wants = false;
+  }
+
+  // Não sai se um adversário está pronto para chutar contra o nosso gol (ele chuta antes de o goleiro chegar e o gol
+  // fica aberto) nem se um adversário corta o caminho até a bola. Já perto da bola (trava) termina a jogada.
+  if (wants) {
+    const gk::Vec2 ball_pos{ball_x, ball_y};
+    const gk::Vec2 goal_center{geo.my_goal_x, 0.0};
+    bool threat = false;
+    for (const auto& enemy : game_data->robots.enemies) {
+      if (gk::isShotThreat({enemy.x, enemy.y}, enemy.orientation, ball_pos, goal_center)) {
+        threat = true;
+        break;
+      }
+    }
+    const bool blocked = gk::approachBlocked(my_pos, ball_pos, enemy_positions);
+    if ((threat || blocked) && !(engaged_ && my_dist < kLockInDistMm)) {
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+                           "Goleiro fica na defesa: %s", threat ? "adversario pronto para chutar ao gol" : "adversario no caminho ate a bola");
+      wants = false;
+    }
   }
 
   // Faixa externa da coleira: só assume (não precisa para continuar) com folga maior, bola lenta e sem adversário perto

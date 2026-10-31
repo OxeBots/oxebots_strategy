@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <mutex>
 
 #include "behaviortree_cpp/behavior_tree.h"
@@ -51,6 +52,7 @@ private:
   // Histerese da decisão de chute
   int last_pass_id_ = -1;
   bool opponent_close_ = false;
+  double last_clear_angle_ = std::numeric_limits<double>::quiet_NaN();   // direção de afastar do tick anterior
   bool plan_locked_ = false;
   KickPlan locked_plan_{1.0, 0.0, 3.0, -1};
 

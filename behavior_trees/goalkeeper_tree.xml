@@ -18,7 +18,7 @@
                        <ReactiveSequence name="State3_BallInArea">
                            <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
                            <Sequence name="ApproachAndKick">
-                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" kick_speed="{gk_kick_speed}" />
+                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" allow_leave_area="true" kick_speed="{gk_kick_speed}" />
                                <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
                            </Sequence>
                        </ReactiveSequence>

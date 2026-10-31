@@ -159,3 +159,104 @@ TEST(KickSpeedToStopWithin, VelocidadePeloAtrito)
   // Distância negativa não gera NaN
   EXPECT_NEAR(gk::kickSpeedToStopWithin(-50.0, 0.8, 1.0, 3.0), 1.0, 1e-9);
 }
+
+TEST(Destination, DistanciaDeParadaEPontoDeParada)
+{
+  // 3 m/s com atrito de 0,8 m/s^2 percorre 5,625 m; 2 m/s, 2,5 m.
+  EXPECT_NEAR(gk::ballStopDistanceMm(3.0, 0.8), 5625.0, 1e-6);
+  EXPECT_NEAR(gk::ballStopDistanceMm(2.0, 0.8), 2500.0, 1e-6);
+
+  // A 2 m/s a partir do centro, para dentro do campo (2200 mm de meio-comprimento).
+  const auto dentro = gk::landingPoint({0.0, 0.0}, 0.0, 2.0, 0.8, 2200.0, 1500.0);
+  EXPECT_TRUE(dentro.leaves_field);   // 2500 mm > 2200 mm: cruza a linha de fundo
+  EXPECT_NEAR(dentro.point.x, 2200.0, 1e-6);
+
+  const auto curto = gk::landingPoint({0.0, 0.0}, 0.0, 1.0, 0.8, 2200.0, 1500.0);
+  EXPECT_FALSE(curto.leaves_field);
+  EXPECT_NEAR(curto.point.x, 625.0, 1e-6);
+}
+
+TEST(Destination, VantagemDePosse)
+{
+  const gk::Vec2 ponto{0.0, 0.0};
+  // Aliado perto, adversário longe: favorece a gente.
+  EXPECT_GT(gk::possessionAdvantage(ponto, {{500.0, 0.0}}, {{2000.0, 0.0}}), 0.0);
+  // Adversário perto, aliado longe: favorece eles.
+  EXPECT_LT(gk::possessionAdvantage(ponto, {{2000.0, 0.0}}, {{500.0, 0.0}}), 0.0);
+  // Sem adversários: vantagem máxima.
+  EXPECT_NEAR(gk::possessionAdvantage(ponto, {{500.0, 0.0}}, {}), 1.0, 1e-9);
+  // Sem aliados: só um sinal fraco, nunca acima de 0,5.
+  const double sem_aliados = gk::possessionAdvantage(ponto, {}, {{2000.0, 0.0}});
+  EXPECT_GT(sem_aliados, 0.0);
+  EXPECT_LE(sem_aliados, 0.5);
+}
+
+TEST(ChooseClearAngleWithPossession, PrefereODestinoOndeOsNossosChegamPrimeiro)
+{
+  // Bola no nosso terço, atacando para +x. Aliado no alto (y > 0) e adversário embaixo (y < 0), os dois à frente.
+  const gk::Vec2 ball{-1500.0, 0.0};
+  const std::vector<gk::Vec2> aliados{{0.0, 900.0}};
+  const std::vector<gk::Vec2> adversarios{{0.0, -900.0}};
+  const auto c = gk::chooseClearAngleWithPossession(
+    ball, 0.0, 3.0, true, aliados, adversarios, 2200.0, 1500.0);
+  EXPECT_GT(c.angle, 0.0);   // vai para o lado do aliado
+}
+
+TEST(ChooseClearAngleWithPossession, ComPosseAVelocidadeFazABolaPararDentroDoCampo)
+{
+  const gk::Vec2 ball{-1700.0, 1000.0};
+  const auto c = gk::chooseClearAngleWithPossession(
+    ball, 20.0 * M_PI / 180.0, 3.0, true, {{-500.0, 0.0}}, {}, 2200.0, 1500.0);
+  EXPECT_LT(c.speed, 3.0);
+  const auto land = gk::landingPoint(ball, c.angle, c.speed, 0.8, 2200.0, 1500.0);
+  EXPECT_FALSE(land.leaves_field);
+}
+
+TEST(ChooseClearAngleWithPossession, AfastarComForcaMantemAVelocidadeMaxima)
+{
+  const auto c = gk::chooseClearAngleWithPossession(
+    {-1700.0, 0.0}, 0.0, 3.0, false, {}, {}, 2200.0, 1500.0);
+  EXPECT_NEAR(c.speed, 3.0, 1e-9);
+}
+
+TEST(ShotThreat, AdversarioAlinhadoComOGolEPertoDaBola)
+{
+  // Nosso gol em x = -2200. Bola em (-1500, 0); adversário atrás dela (x maior), apontando para o gol (180 graus).
+  const gk::Vec2 gol{-2200.0, 0.0};
+  const gk::Vec2 bola{-1500.0, 0.0};
+  EXPECT_TRUE(gk::isShotThreat({-1200.0, 0.0}, M_PI, bola, gol));
+  // Mesma posição, mas olhando para o outro lado: sem ameaça.
+  EXPECT_FALSE(gk::isShotThreat({-1200.0, 0.0}, 0.0, bola, gol));
+  // Longe da bola: sem ameaça.
+  EXPECT_FALSE(gk::isShotThreat({0.0, 0.0}, M_PI, bola, gol));
+  // Do lado do gol em relação à bola (a bola não está entre ele e o gol): sem ameaça.
+  EXPECT_FALSE(gk::isShotThreat({-1800.0, 0.0}, M_PI, bola, gol));
+}
+
+TEST(ApproachBlocked, AdversarioNoCaminhoBloqueiaMasNaBolaNao)
+{
+  const gk::Vec2 goleiro{-2000.0, 0.0};
+  const gk::Vec2 bola{-1000.0, 0.0};
+  // Adversário no meio do caminho
+  EXPECT_TRUE(gk::approachBlocked(goleiro, bola, {{-1500.0, 100.0}}));
+  // Adversário colado na bola (último trecho): não conta
+  EXPECT_FALSE(gk::approachBlocked(goleiro, bola, {{-1100.0, 100.0}}));
+  // Adversário longe do caminho
+  EXPECT_FALSE(gk::approachBlocked(goleiro, bola, {{-1500.0, 800.0}}));
+  // Bola já perto do goleiro: nada a bloquear
+  EXPECT_FALSE(gk::approachBlocked({-1100.0, 0.0}, bola, {{-1050.0, 0.0}}));
+}
+
+TEST(ChooseClearAngleWithPossession, EstabilidadeEvitaTrocarDeLadoComEscoresProximos)
+{
+  // Aliado e adversário simétricos em relação à bola: duas direções (para cima e para baixo) empatam.
+  const gk::Vec2 ball{-1500.0, 0.0};
+  const std::vector<gk::Vec2> aliados{{-300.0, 800.0}, {-300.0, -800.0}};
+  const auto livre = gk::chooseClearAngleWithPossession(
+    ball, 0.0, 3.0, false, aliados, {}, 2200.0, 1500.0);
+  const double anterior = livre.angle + 10.0 * M_PI / 180.0;   // a direção vizinha, quase tão boa quanto
+  const auto estavel = gk::chooseClearAngleWithPossession(
+    ball, 0.0, 3.0, false, aliados, {}, 2200.0, 1500.0, gk::PassParams(), gk::FanParams(),
+    gk::DestinationParams(), 400.0, 1.0, anterior, 0.5);
+  EXPECT_NEAR(estavel.angle, anterior, 1e-6);
+}

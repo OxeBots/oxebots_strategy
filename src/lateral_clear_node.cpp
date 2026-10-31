@@ -49,7 +49,12 @@ static constexpr double kTimeoutErrFactor = 2.0;
 // Se o robô se afasta da bola além disso, a direção do chute volta a ser recalculada
 static constexpr double kPlanUnlockDistMm = 400.0;
 // A bola não pode ficar mais de 10 s na área de defesa: depois disto o goleiro desiste do passe e do capricho
-static constexpr double kUrgentAfterS = 6.0;
+static constexpr double kUrgentAfterS = 4.0;
+// Com pressa e o goleiro entre a bola e o nosso gol, ele vai direto na bola e chuta em qualquer direção (a bola
+// sai para a frente): melhor um afastar torto do que o jogo parar com a bola na borda da área.
+static constexpr double kDesperateKickSpeed = 2.0;     // m/s
+// Bônus da direção de afastar do tick anterior, contra a troca de lado quando dois escores são parecidos
+static constexpr double kClearStickiness = 0.35;
 static constexpr double kFieldMarginMm = 150.0;
 // Folga além da coleira para o alvo do goleiro (a bola já está dentro da coleira)
 static constexpr double kLeashTargetMarginMm = 100.0;
@@ -94,6 +99,7 @@ BT::NodeStatus LateralClearNode::onStart()
     last_target_w_ = -99999.0;
     last_pass_id_ = -1;
     opponent_close_ = false;
+    last_clear_angle_ = std::numeric_limits<double>::quiet_NaN();
     plan_locked_ = false;
     contact_since_valid_ = false;
     engage_start_ = node_->now();
@@ -148,17 +154,23 @@ LateralClearNode::KickPlan LateralClearNode::planKick(
     gk::FanParams fan;
     if (near_goal_line) fan.half_span_rad = kNearLineFanSpanRad;
     if (safe_possession) fan.exit_penalty = kPossessionExitPenalty;
-    auto clear_plan = [&]() {
-        const gk::FanChoice choice = gk::chooseClearAngle(
-            ball, forward_angle, opponents, geo.halfLength(), geo.halfWidth(), gk::PassParams(), fan);
-        double speed = kClearKickSpeed;
-        if (safe_possession) {
-            // Com a posse, a bola tem de parar dentro do campo: velocidade pelo espaço que sobra até a borda
-            const double room = gk::rayDistanceToField(ball, choice.angle, geo.halfLength(), geo.halfWidth()) -
-                kStopInsideMarginMm;
-            speed = gk::kickSpeedToStopWithin(room, kBallFrictionAccel, kPossessionMinClearSpeed, kClearKickSpeed);
+    std::vector<gk::Vec2> allies;
+    if (game_data) {
+        for (const auto & ally : game_data->robots.allies) {
+            if (ally.id != robot_id_) allies.push_back({ally.x, ally.y});
         }
-        return KickPlan{std::cos(choice.angle), std::sin(choice.angle), speed, -1};
+    }
+    gk::DestinationParams dest;
+    dest.friction_mps2 = kBallFrictionAccel;
+    // Afastar: a direção do leque é escolhida também por quem chega primeiro ao ponto onde a bola para (nossos
+    // robôs ou os adversários). Com a posse, a velocidade faz a bola parar dentro do campo; sem ela, é com força.
+    auto clear_plan = [&]() {
+        const gk::FanChoice choice = gk::chooseClearAngleWithPossession(
+            ball, forward_angle, kClearKickSpeed, safe_possession, allies, opponents,
+            geo.halfLength(), geo.halfWidth(), gk::PassParams(), fan, dest,
+            kStopInsideMarginMm, kPossessionMinClearSpeed, last_clear_angle_, kClearStickiness);
+        last_clear_angle_ = choice.angle;
+        return KickPlan{std::cos(choice.angle), std::sin(choice.angle), choice.speed, -1};
     };
 
     if (!game_data || urgent) {
@@ -310,6 +322,14 @@ BT::NodeStatus LateralClearNode::onRunning()
     }
     const double max_y = allow_leave_area ? geo.halfWidth() - kFieldMarginMm : (p_width / 2.0) - kAreaMarginMm;
 
+    // Modo desespero: sem pressa o robô se posiciona atrás da bola na direção do chute; com pressa (e entre a bola
+    // e o nosso gol) vai direto na bola
+    const bool desperate = urgent && dir * (ball_x - rx) > 0.0 && dist_to_ball > 1.0;
+    if (desperate) {
+        target_x = ball_x - (vec_r_to_ball_x / dist_to_ball) * kContactOffsetMm;
+        target_y = ball_y - (vec_r_to_ball_y / dist_to_ball) * kContactOffsetMm;
+    }
+
     target_x = std::clamp(target_x, min_x, max_x);
     target_y = std::clamp(target_y, -max_y, max_y);
 
@@ -322,6 +342,7 @@ BT::NodeStatus LateralClearNode::onRunning()
     } else if (dist_to_ball < 350.0) {
         target_w = angle_to_ball;
     }
+    if (desperate) target_w = angle_to_ball;
 
     bool target_changed = (std::abs(target_x - last_target_x_) > POS_UPDATE_THRESHOLD ||
                            std::abs(target_y - last_target_y_) > POS_UPDATE_THRESHOLD ||
@@ -368,6 +389,15 @@ BT::NodeStatus LateralClearNode::onRunning()
         (near_goal_line ? kMaxNearLineAlignErr : kMaxClearAlignErr);
     if (contact_time > kAlignTimeoutS || urgent) max_kick_dir_err *= kTimeoutErrFactor;
 
+    // Pressa: em contato com a bola (kicker voltado para ela), chuta em qualquer direção
+    if (desperate && dist_to_ball <= 150.0 && std::abs(kicker_ball_err) < 0.35) {
+        RCLCPP_INFO(node_->get_logger(),
+            "Goleiro chuta com pressa (bola parada ha mais de %.0fs): dist_ball=%.1fmm, erro_kicker=%.1fdeg",
+            kUrgentAfterS, dist_to_ball, kicker_ball_err * 180.0 / M_PI);
+        setOutput("kick_speed", kDesperateKickSpeed);
+        return BT::NodeStatus::SUCCESS;
+    }
+
     // Autoriza o chute quando o goleiro está atrás da bola, em distância de contato e alinhado
     if (contact_ready && kick_dir_err < max_kick_dir_err) {
         if (plan.pass_id >= 0) {
@@ -382,6 +412,13 @@ BT::NodeStatus LateralClearNode::onRunning()
         setOutput("kick_speed", plan.speed);
         return BT::NodeStatus::SUCCESS;
     }
+
+    RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+        "LateralClear: robo=(%.0f,%.0f) bola=(%.0f,%.0f) dist=%.0f atras=%.0f lateral=%.0f posicionado=%d contato=%d "
+        "erro_dir=%.2f(max %.2f) erro_kicker=%.2f plano=%s%s%s",
+        rx, ry, ball_x, ball_y, dist_to_ball, behind_proj, lateral_err, is_positioned_behind ? 1 : 0,
+        contact_ready ? 1 : 0, kick_dir_err, max_kick_dir_err, kicker_ball_err, plan.pass_id >= 0 ? "passe" : "afastar",
+        urgent ? " pressa" : "", desperate ? " desespero" : "");
 
     return BT::NodeStatus::RUNNING;
 }
