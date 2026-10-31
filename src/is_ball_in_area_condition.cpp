@@ -3,9 +3,12 @@
 namespace oxebots_strategy
 {
 
-static constexpr double AREA_EXIT_MARGIN = 200.0;
+// A faixa logo fora da linha da área também é do goleiro: um jogador de linha não consegue se posicionar atrás
+// de uma bola ali (o alvo dele fica limitado fora da área). Entra com ENTRY_TOLERANCE e só larga depois de
+// ENTRY_TOLERANCE + EXIT_MARGIN, para a bola parada na linha não alternar o estado.
+static constexpr double AREA_EXIT_MARGIN = 100.0;
 static constexpr double AREA_ENTRY_TOLERANCE = 100.0;
-static constexpr double GOAL_LINE_TOLERANCE = 100.0;
+static constexpr double GOAL_LINE_TOLERANCE = 150.0;
 
 IsBallInAreaCondition::IsBallInAreaCondition(const std::string& name, const BT::NodeConfig& config, rclcpp::Node::SharedPtr node)
   : BT::ConditionNode(name, config), node_(node) {}
@@ -44,7 +47,7 @@ BT::NodeStatus IsBallInAreaCondition::tick()
   if (in_depth && in_width) {
     last_status_ = true;
     return BT::NodeStatus::SUCCESS;
-  }
+ }
 
   last_status_ = false;
   return BT::NodeStatus::FAILURE;

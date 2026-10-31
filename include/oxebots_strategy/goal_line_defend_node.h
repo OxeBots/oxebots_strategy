@@ -4,6 +4,8 @@
 #include "behaviortree_cpp/behavior_tree.h"
 #include "rclcpp/rclcpp.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
+#include "oxebots_interfaces/msg/ball_prediction.hpp"
+#include <mutex>
 
 namespace oxebots_strategy
 {
@@ -20,12 +22,29 @@ public:
   void onHalted() override;
 
 private:
+  void ballPredictionCallback(const oxebots_interfaces::msg::BallPrediction::SharedPtr msg);
+
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
+  rclcpp::Subscription<oxebots_interfaces::msg::BallPrediction>::SharedPtr ball_pred_sub_;
+
+  std::mutex data_mutex_;
+  oxebots_interfaces::msg::BallPrediction::SharedPtr last_ball_pred_;
+  rclcpp::Time last_ball_pred_stamp_{0, 0, RCL_ROS_TIME};
 
   uint32_t robot_id_;
   double my_goal_x_;
   double last_target_y_ = -99999.0;
+  double last_target_x_ = -99999.0;
+  double last_target_w_ = -99999.0;
+
+  // Modo da última decisão (para registrar só quando muda)
+  const char * last_mode_ = nullptr;
+
+  // Histerese da interceptação de chute
+  bool intercepting_ = false;
+  double last_intercept_y_ = 0.0;
+  rclcpp::Time intercept_hold_until_{0, 0, RCL_ROS_TIME};
 };
 
 } // namespace oxebots_strategy

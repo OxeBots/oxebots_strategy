@@ -108,6 +108,7 @@ add_executable(
   src/defender_nodes.cpp
   src/goal_line_defend_node.cpp
   src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
   src/is_ball_in_our_half_condition.cpp
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
@@ -256,6 +257,7 @@ set(BT_LEAF_SOURCES
   src/defender_nodes.cpp
   src/goal_line_defend_node.cpp
   src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
   src/is_ball_in_our_half_condition.cpp
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
@@ -292,6 +294,12 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_bt_semantics test/test_bt_semantics.cpp)
   ament_target_dependencies(test_bt_semantics behaviortree_cpp)
+
+  # Geometria pura do goleiro (passe com corredor/cone e leque de afastar), só biblioteca padrão e gtest.
+  ament_add_gtest(test_goalkeeper_geometry test/test_goalkeeper_geometry.cpp)
+  target_include_directories(test_goalkeeper_geometry PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
 endif()
 
 ament_package()
