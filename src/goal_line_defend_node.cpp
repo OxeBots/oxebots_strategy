@@ -1,4 +1,5 @@
 #include "oxebots_strategy/goal_line_defend_node.h"
+#include "oxebots_strategy/goalkeeper_blackboard.hpp"
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -8,7 +9,6 @@
 namespace oxebots_strategy
 {
 
-static constexpr double DEFAULT_GOAL_WIDTH = 800.0;
 static constexpr double GOALKEEPER_LINE_DEPTH = 300.0;
 static constexpr double POSITION_UPDATE_THRESHOLD = 5.0;
 static constexpr double ROBOT_RADIUS = 90.0;
@@ -17,9 +17,6 @@ static constexpr double kAreaMarginMm = 20.0;
 // Abaixo dessa distância alvo->bola o rumo à bola fica instável: mantém a orientação anterior
 static constexpr double kMinFacingDistMm = 100.0;
 static constexpr double ANGLE_UPDATE_THRESHOLD = 0.05;
-// Fallbacks da geometria (campo Entry Level); o valor real vem de /field_geometry via Blackboard
-static constexpr double DEFAULT_AREA_DEPTH = 500.0;
-static constexpr double DEFAULT_AREA_WIDTH = 1350.0;
 static constexpr double kMinShotSpeed = 500.0;
 static constexpr double kMaxImpactTime = 3.0;
 // Histerese da interceptação: limiares mais folgados para continuar interceptando um chute já detectado
@@ -110,11 +107,6 @@ BT::NodeStatus GoalLineDefendNode::onStart()
         robot_id_ = 0;
     }
 
-    auto blackboard = config().blackboard;
-    if (!blackboard->get("my_goal_x", my_goal_x_)) {
-        my_goal_x_ = (robot_id_ == 0) ? -2200.0 : 2200.0; // Default fallback
-    }
-
     last_target_y_ = -99999.0;
     last_target_x_ = -99999.0;
     last_target_w_ = -99999.0;
@@ -133,17 +125,18 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     double ball_x, ball_y;
     if (!getInput<double>("ball_x", ball_x) || !getInput<double>("ball_y", ball_y)) return BT::NodeStatus::FAILURE;
 
-    // Geometria atualizada por /field_geometry no Blackboard raiz; valores ausentes ou zerados usam o fallback
-    double goal_width = DEFAULT_GOAL_WIDTH;
-    double area_depth = DEFAULT_AREA_DEPTH;
-    double area_width = DEFAULT_AREA_WIDTH;
-    if (auto root = config().blackboard ? config().blackboard->rootBlackboard() : nullptr) {
-        double value = 0.0;
-        if (root->get("goal_width", value) && value > 0.0) goal_width = value;
-        if (root->get("penalty_area_depth", value) && value > 0.0) area_depth = value;
-        if (root->get("penalty_area_width", value) && value > 0.0) area_width = value;
+    // Geometria atualizada por /field_geometry no Blackboard raiz; sem ela o nó espera, em vez de assumir
+    // valores padrão (que poderiam inverter o lado do gol ou usar uma área de outro campo)
+    goalkeeper::FieldGeometry geo;
+    if (!goalkeeper::readFieldGeometry(config(), geo)) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+            "GoalLineDefend: aguardando a geometria do campo no Blackboard raiz");
+        return BT::NodeStatus::RUNNING;
     }
-    const double half   = goal_width / 2.0;
+    my_goal_x_ = geo.my_goal_x;
+    const double area_depth = geo.penalty_area_depth;
+    const double area_width = geo.penalty_area_width;
+    const double half   = geo.goal_width / 2.0;
     const double dir    = (my_goal_x_ < 0) ? 1.0 : -1.0;   // +1 se o gol está à esquerda
     const double line_x = my_goal_x_ + dir * GOALKEEPER_LINE_DEPTH;
 
@@ -154,20 +147,27 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     const double xmax   = std::max(my_goal_x_, x_far);
     const double ylim   = area_width / 2.0 - ROBOT_RADIUS - kAreaMarginMm;
 
-    // 1. Posição base: ponto médio da corda bola->postes na borda da área
+    // 1. Posição base: ponto médio da corda bola->postes na borda da área. Com os postes simétricos isso é o
+    // ponto da reta bola->centro do gol na borda da frente da área (o que tampa a maior parte do gol).
     double target_x = line_x;
     double target_y = std::clamp(ball_y, -half, half);
+    const char * mode = "atras da linha do gol";
 
     if (dir * (ball_x - my_goal_x_) > 0.0) {   // bola à frente do gol
-        auto e1 = entryPoint(ball_x, ball_y, my_goal_x_, -half, xmin, xmax, -ylim, ylim);
-        auto e2 = entryPoint(ball_x, ball_y, my_goal_x_,  half, xmin, xmax, -ylim, ylim);
+        // Se o gol for mais largo que o retângulo de movimento, mira nas bordas dele (os postes ficariam fora do
+        // retângulo, as retas deixariam de cruzá-lo e o goleiro cairia no caso "segue a bola")
+        const double post_y = std::min(half, ylim);
+        auto e1 = entryPoint(ball_x, ball_y, my_goal_x_, -post_y, xmin, xmax, -ylim, ylim);
+        auto e2 = entryPoint(ball_x, ball_y, my_goal_x_,  post_y, xmin, xmax, -ylim, ylim);
         if (e1 && e2) {
             target_x = 0.5 * (e1->first  + e2->first);
             target_y = 0.5 * (e1->second + e2->second);
+            mode = "triangulacao";
         } else {
             // Retas não cruzam a área: segue a bola limitada à área
             target_x = std::clamp(ball_x, xmin, xmax);
             target_y = std::clamp(ball_y, -ylim, ylim);
+            mode = "segue a bola (retas nao cruzam a area)";
         }
     }
 
@@ -214,11 +214,19 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     if (shot) {
         target_x = line_x;
         target_y = last_intercept_y_;
+        mode = "interceptacao";
     }
 
     // 3. Mantém o alvo dentro da área
     target_x = std::clamp(target_x, xmin, xmax);
     target_y = std::clamp(target_y, -ylim, ylim);
+
+    if (mode != last_mode_) {
+        last_mode_ = mode;
+        RCLCPP_INFO(node_->get_logger(),
+            "GoalLineDefend: %s | alvo=(%.0f, %.0f) bola=(%.0f, %.0f) | gol=%.0f area=%.0fx%.0f x:[%.0f, %.0f] |y|<=%.0f",
+            mode, target_x, target_y, ball_x, ball_y, geo.goal_width, area_depth, area_width, xmin, xmax, ylim);
+    }
 
     // Orientação: kicker voltado para a bola (visto do ponto alvo). Com a bola muito perto do alvo o rumo
     // é instável, então mantém a orientação anterior (ou olha para o campo se ainda não houver uma).

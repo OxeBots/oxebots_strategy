@@ -38,6 +38,9 @@ private:
   double last_target_x_ = -99999.0;
   double last_target_w_ = -99999.0;
 
+  // Modo da última decisão (para registrar só quando muda)
+  const char * last_mode_ = nullptr;
+
   // Histerese da interceptação de chute
   bool intercepting_ = false;
   double last_intercept_y_ = 0.0;

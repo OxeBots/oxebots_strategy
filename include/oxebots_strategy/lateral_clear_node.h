@@ -7,6 +7,7 @@
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_strategy/goalkeeper_blackboard.hpp"
 
 namespace oxebots_strategy
 {
@@ -32,7 +33,7 @@ private:
   };
 
   void gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
-  KickPlan planKick(double ball_x, double ball_y, double my_goal_x);
+  KickPlan planKick(double ball_x, double ball_y, const goalkeeper::FieldGeometry & geo, bool urgent);
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_pub_;
@@ -56,6 +57,9 @@ private:
   // Início do contato com a bola, para o tempo limite do alinhamento
   bool contact_since_valid_ = false;
   rclcpp::Time contact_since_{0, 0, RCL_ROS_TIME};
+
+  // Início da jogada (a bola não pode ficar mais de 10 s na área de defesa)
+  rclcpp::Time engage_start_{0, 0, RCL_ROS_TIME};
 };
 
 }

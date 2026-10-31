@@ -1,12 +1,15 @@
 #include "oxebots_strategy/lateral_clear_node.h"
+#include "oxebots_strategy/goalkeeper_geometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
-#include <optional>
+#include <vector>
 
 namespace oxebots_strategy
 {
+
+namespace gk = goalkeeper;
 
 static constexpr double LATERAL_TARGET_Y = 2000.0;
 static constexpr double POS_UPDATE_THRESHOLD = 5.0;
@@ -14,25 +17,42 @@ static constexpr double ANG_UPDATE_THRESHOLD = 0.03;
 
 // Decisão do chute (passe x afastar)
 static constexpr double kNearGoalLineMm = 180.0;       // bola quase em cima da linha do gol
+static constexpr double kNearLineFanSpanRad = 35.0 * M_PI / 180.0;   // na linha do gol o leque é mais estreito (traves)
 static constexpr double kPassMinDistMm = 300.0;
 static constexpr double kPassMaxDistMm = 2500.0;
-// Corredor livre de adversários: raio do robô (90) + raio da bola (21) + folga
-static constexpr double kPassCorridorMm = 170.0;
 static constexpr double kOpponentCloseMm = 300.0;      // adversário colado na bola: só afasta para a frente
 static constexpr double kOpponentCloseHystMm = 80.0;
+// Posse nossa: um aliado (sem contar o goleiro) mais perto da bola que qualquer adversário, e nenhum adversário
+// por perto. Com a posse, o goleiro não manda a bola para fora: aceita passe curto e lateral, e afasta com a
+// velocidade que faz a bola parar dentro do campo.
+static constexpr double kPossessionMarginMm = 100.0;
+static constexpr double kPossessionEnemyFreeMm = 700.0;
+static constexpr double kPassMinDistPossessionMm = 200.0;
+static constexpr double kPossessionBackLimit = -0.2;   // cosseno mínimo do ângulo (na direção do ataque) do passe
+static constexpr double kPossessionExitPenalty = 1.5;
+static constexpr double kStopInsideMarginMm = 400.0;   // a bola deve parar pelo menos isto antes da borda
+static constexpr double kPossessionMinClearSpeed = 1.0;   // m/s
+static constexpr double kPassStickyScore = 0.15;       // o aliado anterior só é trocado se o novo for melhor por mais que isso
 static constexpr double kClearKickSpeed = 3.0;         // m/s
-static constexpr double kPassMinKickSpeed = 1.5;       // m/s
+static constexpr double kPassMinKickSpeed = 1.0;       // m/s
 static constexpr double kPassArrivalSpeed = 1.0;       // m/s: velocidade com que a bola deve chegar ao aliado
 static constexpr double kBallFrictionAccel = 0.8;      // m/s^2, mesmo valor do filtro de Kalman
-// Erro angular máximo (rad) entre a orientação do robô (para onde a bola vai sair) e a direção do chute
-static constexpr double kMaxClearAlignErr = 0.45;
+// Erro angular máximo (rad) entre a orientação do robô (para onde a bola vai sair) e a direção do chute.
+// Com o robô apontando para a direção do chute a tolerância pode ser pequena: a bola sai por onde ele aponta.
+// O passe e a bola sobre a linha do gol (traves) pedem mais pontaria que afastar.
+static constexpr double kMaxClearAlignErr = 0.35;
+static constexpr double kMaxNearLineAlignErr = 0.25;
 static constexpr double kMaxPassAlignErr = 0.20;
 // Em contato com a bola há mais que isso, a tolerância dobra para o goleiro não ficar ajustando por segundos
-static constexpr double kAlignTimeoutS = 0.6;
+static constexpr double kAlignTimeoutS = 0.4;
 static constexpr double kTimeoutErrFactor = 2.0;
 // Se o robô se afasta da bola além disso, a direção do chute volta a ser recalculada
 static constexpr double kPlanUnlockDistMm = 400.0;
+// A bola não pode ficar mais de 10 s na área de defesa: depois disto o goleiro desiste do passe e do capricho
+static constexpr double kUrgentAfterS = 6.0;
 static constexpr double kFieldMarginMm = 150.0;
+// Folga além da coleira para o alvo do goleiro (a bola já está dentro da coleira)
+static constexpr double kLeashTargetMarginMm = 100.0;
 
 LateralClearNode::LateralClearNode(const std::string & name, const BT::NodeConfig & config, rclcpp::Node::SharedPtr node_ptr)
 : BT::StatefulActionNode(name, config), node_(node_ptr)
@@ -58,7 +78,7 @@ BT::PortsList LateralClearNode::providedPorts()
         BT::InputPort<double>("ball_x"),
         BT::InputPort<double>("ball_y"),
         BT::InputPort<bool>("allow_leave_area", false,
-                            "Permite o alvo fora da grande área (bola fora da área e mais perto do goleiro)"),
+                            "Permite o alvo fora da grande área, até a coleira (bola fora da área e mais perto do goleiro)"),
         BT::OutputPort<double>("kick_speed", "Velocidade do chute escolhida (m/s): passe ou afastar")
     };
 }
@@ -76,104 +96,133 @@ BT::NodeStatus LateralClearNode::onStart()
     opponent_close_ = false;
     plan_locked_ = false;
     contact_since_valid_ = false;
+    engage_start_ = node_->now();
 
     return BT::NodeStatus::RUNNING;
 }
 
-// Escolhe para onde chutar. Padrão: afastar para a frente (com leve tendência para fora). Se não há
-// adversário colado na bola e existe um aliado à frente com corredor livre de adversários, passa para ele.
-LateralClearNode::KickPlan LateralClearNode::planKick(double ball_x, double ball_y, double my_goal_x)
+// Escolhe para onde chutar. Passe: o aliado à frente da bola com corredor livre de adversários (cápsula que
+// cresce com a distância e pontas maiores em volta da bola e do receptor), de melhor escore. Sem passe seguro,
+// ou com adversário colado na bola, ou com pressa (a bola não pode ficar mais de 10 s na área), afasta na
+// melhor direção de um leque em torno do "para a frente" (maior folga de adversários, de preferência sem
+// sair do campo).
+LateralClearNode::KickPlan LateralClearNode::planKick(
+    double ball_x, double ball_y, const goalkeeper::FieldGeometry & geo, bool urgent)
 {
-    const double dir = (my_goal_x < 0) ? 1.0 : -1.0;
+    const double dir = geo.forwardSign();
+    const gk::Vec2 ball{ball_x, ball_y};
+    const bool near_goal_line = std::abs(ball_x - geo.my_goal_x) < kNearGoalLineMm;
 
-    // Para a frente; a componente lateral leva a bola para o lado em que ela já está
+    // "Para a frente" com leve tendência para o lado onde a bola já está
     const double target_side_y = (ball_y > 0) ? LATERAL_TARGET_Y : -LATERAL_TARGET_Y;
-    double fx = dir;
-    double fy = 0.25 * (target_side_y - ball_y) / LATERAL_TARGET_Y;
-    const double fn = std::hypot(fx, fy);
-    fx /= fn;
-    fy /= fn;
-    const KickPlan forward{fx, fy, kClearKickSpeed, -1};
+    const double forward_angle = std::atan2(0.25 * (target_side_y - ball_y) / LATERAL_TARGET_Y, dir);
 
     oxebots_interfaces::msg::GameData::SharedPtr game_data;
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
         game_data = last_game_data_;
     }
-    if (!game_data) {
+
+    std::vector<gk::Vec2> opponents;
+    if (game_data) {
+        for (const auto & enemy : game_data->robots.enemies) {
+            opponents.push_back({enemy.x, enemy.y});
+        }
+    }
+
+    // Posse: algum aliado (fora o goleiro) mais perto da bola que qualquer adversário, e ninguém de lá por perto
+    double ally_near_ball = std::numeric_limits<double>::infinity();
+    double enemy_near_ball = std::numeric_limits<double>::infinity();
+    if (game_data) {
+        for (const auto & ally : game_data->robots.allies) {
+            if (ally.id == robot_id_) continue;
+            ally_near_ball = std::min(ally_near_ball, gk::distance({ally.x, ally.y}, ball));
+        }
+        for (const auto & opp : opponents) {
+            enemy_near_ball = std::min(enemy_near_ball, gk::distance(opp, ball));
+        }
+    }
+    const bool safe_possession = ally_near_ball + kPossessionMarginMm < enemy_near_ball &&
+        enemy_near_ball > kPossessionEnemyFreeMm;
+
+    gk::FanParams fan;
+    if (near_goal_line) fan.half_span_rad = kNearLineFanSpanRad;
+    if (safe_possession) fan.exit_penalty = kPossessionExitPenalty;
+    auto clear_plan = [&]() {
+        const gk::FanChoice choice = gk::chooseClearAngle(
+            ball, forward_angle, opponents, geo.halfLength(), geo.halfWidth(), gk::PassParams(), fan);
+        double speed = kClearKickSpeed;
+        if (safe_possession) {
+            // Com a posse, a bola tem de parar dentro do campo: velocidade pelo espaço que sobra até a borda
+            const double room = gk::rayDistanceToField(ball, choice.angle, geo.halfLength(), geo.halfWidth()) -
+                kStopInsideMarginMm;
+            speed = gk::kickSpeedToStopWithin(room, kBallFrictionAccel, kPossessionMinClearSpeed, kClearKickSpeed);
+        }
+        return KickPlan{std::cos(choice.angle), std::sin(choice.angle), speed, -1};
+    };
+
+    if (!game_data || urgent) {
         last_pass_id_ = -1;
-        return forward;
+        return clear_plan();
     }
 
     // Adversário muito perto da bola: não arrisca o passe
     double enemy_near = std::numeric_limits<double>::infinity();
-    for (const auto & enemy : game_data->robots.enemies) {
-        enemy_near = std::min(enemy_near, std::hypot(enemy.x - ball_x, enemy.y - ball_y));
+    for (const auto & opp : opponents) {
+        enemy_near = std::min(enemy_near, gk::distance(opp, ball));
     }
     opponent_close_ = enemy_near < (opponent_close_ ? kOpponentCloseMm + kOpponentCloseHystMm : kOpponentCloseMm);
     if (opponent_close_) {
         last_pass_id_ = -1;
-        return forward;
+        return clear_plan();
     }
 
-    const bool near_goal_line = std::abs(ball_x - my_goal_x) < kNearGoalLineMm;
-
-    // Direção unitária e distância do passe ao aliado, se ele estiver à frente e sem adversário no corredor
-    struct Pass { double ux; double uy; double dist; };
-    auto evalPass = [&](const oxebots_interfaces::msg::RobotGameData & ally) -> std::optional<Pass> {
-        const double dx = ally.x - ball_x;
-        const double dy = ally.y - ball_y;
-        const double dist = std::hypot(dx, dy);
-        if (dist < kPassMinDistMm || dist > kPassMaxDistMm) return std::nullopt;
-        const double ux = dx / dist;
-        const double uy = dy / dist;
-        if (dir * ux <= 0.0) return std::nullopt;                  // aliado atrás da bola
-        if (near_goal_line && dir * ux < 0.8) return std::nullopt;   // na linha do gol só sai quase reto (travas)
-        for (const auto & enemy : game_data->robots.enemies) {
-            const double rx = enemy.x - ball_x;
-            const double ry = enemy.y - ball_y;
-            const double along = rx * ux + ry * uy;
-            if (along <= 0.0 || along >= dist) continue;
-            if (std::abs(rx * uy - ry * ux) < kPassCorridorMm) return std::nullopt;   // adversário entre os dois
-        }
-        return Pass{ux, uy, dist};
-    };
-
-    std::optional<Pass> best;
-    int best_id = -1;
-
-    // Mantém o aliado escolhido enquanto o passe continuar válido (evita trocar de alvo a cada tick)
-    if (last_pass_id_ >= 0) {
-        for (const auto & ally : game_data->robots.allies) {
-            if (static_cast<int>(ally.id) == last_pass_id_ && ally.id != robot_id_) {
-                best = evalPass(ally);
-                if (best) best_id = last_pass_id_;
-            }
-        }
-    }
-    if (!best) {
-        for (const auto & ally : game_data->robots.allies) {
-            if (ally.id == robot_id_) continue;
-            auto candidate = evalPass(ally);
-            if (candidate && (!best || candidate->dist < best->dist)) {
-                best = candidate;
-                best_id = static_cast<int>(ally.id);
-            }
-        }
+    // Aliados à frente da bola com corredor livre
+    struct Candidate { int id; gk::Vec2 pos; double dist; double score; };
+    std::vector<Candidate> candidates;
+    const gk::PassParams pass{};
+    for (const auto & ally : game_data->robots.allies) {
+        if (ally.id == robot_id_) continue;
+        const gk::Vec2 pos{ally.x, ally.y};
+        const double dist = gk::distance(ball, pos);
+        const double min_dist = safe_possession ? kPassMinDistPossessionMm : kPassMinDistMm;
+        if (dist < min_dist || dist > kPassMaxDistMm) continue;
+        const double ux = (pos.x - ball.x) / dist;
+        // Aliado atrás da bola; com a posse aceita também o passe lateral (e levemente para trás)
+        if (dir * ux <= (safe_possession ? kPossessionBackLimit : 0.0)) continue;
+        if (near_goal_line && dir * ux < 0.8) continue;        // na linha do gol só sai quase reto (travas)
+        const double clearance = gk::passClearance(ball, pos, opponents, pass);
+        if (clearance <= 0.0) continue;                        // adversário no corredor ou colado em uma das pontas
+        candidates.push_back({static_cast<int>(ally.id), pos, dist,
+            gk::passScore(ball, pos, clearance, dir, geo.halfWidth(), kPassMaxDistMm)});
     }
 
-    if (!best) {
+    if (candidates.empty()) {
         last_pass_id_ = -1;
-        return forward;
+        return clear_plan();
     }
 
-    last_pass_id_ = best_id;
+    const Candidate * best = &candidates.front();
+    for (const auto & c : candidates) {
+        if (c.score > best->score) best = &c;
+    }
+    // Mantém o aliado escolhido enquanto o passe continuar bom (evita trocar de alvo a cada tick)
+    for (const auto & c : candidates) {
+        if (c.id == last_pass_id_ && c.score >= best->score - kPassStickyScore) {
+            best = &c;
+            break;
+        }
+    }
+
+    last_pass_id_ = best->id;
+    const double ux = (best->pos.x - ball.x) / best->dist;
+    const double uy = (best->pos.y - ball.y) / best->dist;
     // v^2 = v_chegada^2 + 2*a*d: chega ao aliado ainda com velocidade, descontado o atrito
     const double dist_m = best->dist / 1000.0;
     const double speed = std::clamp(
         std::sqrt(kPassArrivalSpeed * kPassArrivalSpeed + 2.0 * kBallFrictionAccel * dist_m),
         kPassMinKickSpeed, kClearKickSpeed);
-    return KickPlan{best->ux, best->uy, speed, best_id};
+    return KickPlan{ux, uy, speed, best->id};
 }
 
 BT::NodeStatus LateralClearNode::onRunning()
@@ -183,26 +232,29 @@ BT::NodeStatus LateralClearNode::onRunning()
         return BT::NodeStatus::FAILURE;
     }
 
+    // Geometria e pose vêm do Blackboard raiz; sem elas o nó espera (sem assumir valores padrão)
+    gk::FieldGeometry geo;
     double rx, ry, ryaw;
-    if (!config().blackboard->get("robot_x", rx) ||
-        !config().blackboard->get("robot_y", ry) ||
-        !config().blackboard->get("robot_yaw", ryaw)) {
-        return BT::NodeStatus::RUNNING; // Wait for data
+    if (!gk::readFieldGeometry(config(), geo) || !gk::readRobotPose(config(), rx, ry, ryaw)) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+            "LateralClear: aguardando geometria do campo e pose do robô no Blackboard raiz");
+        return BT::NodeStatus::RUNNING;
     }
-
-    double p_depth = 500.0, p_width = 1350.0, my_goal_x = -2200.0;
-    (void)config().blackboard->get("penalty_area_depth", p_depth);
-    (void)config().blackboard->get("penalty_area_width", p_width);
-    (void)config().blackboard->get("my_goal_x", my_goal_x);
+    const double my_goal_x = geo.my_goal_x;
+    const double p_depth = geo.penalty_area_depth;
+    const double p_width = geo.penalty_area_width;
+    const double dir = geo.forwardSign();
 
     bool allow_leave_area = false;
     (void)getInput<bool>("allow_leave_area", allow_leave_area);
 
-    // Direção do chute: passe para um aliado livre ou afastar para a frente. Depois que o robô se posiciona
-    // atrás da bola a direção fica travada, senão um aliado ou adversário se movendo faz o robô reajustar o
-    // ângulo o tempo todo.
+    const rclcpp::Time now = node_->now();
+    const bool urgent = (now - engage_start_).seconds() > kUrgentAfterS;
+
+    // Direção do chute: passe para um aliado livre ou afastar. Depois que o robô se posiciona atrás da bola a
+    // direção fica travada, senão um aliado ou adversário se movendo faz o robô reajustar o ângulo o tempo todo.
     if (plan_locked_ && std::hypot(ball_x - rx, ball_y - ry) > kPlanUnlockDistMm) plan_locked_ = false;
-    const KickPlan plan = plan_locked_ ? locked_plan_ : planKick(ball_x, ball_y, my_goal_x);
+    const KickPlan plan = plan_locked_ ? locked_plan_ : planKick(ball_x, ball_y, geo, urgent);
     const double clear_dir_x = plan.dir_x;
     const double clear_dir_y = plan.dir_y;
     const double clear_angle = std::atan2(clear_dir_y, clear_dir_x);
@@ -242,31 +294,32 @@ BT::NodeStatus LateralClearNode::onRunning()
     }
 
     // Limita o alvo para nunca sair da grande área, permitindo recuar até 180mm para dentro do gol.
-    // Com allow_leave_area (bola fora da área e mais perto do goleiro) o limite do lado do campo passa a
-    // ser o do próprio campo.
+    // Com allow_leave_area (bola fora da área e mais perto do goleiro) o limite do lado do campo passa a ser
+    // a coleira (fração da metade aliada), e o lateral o do próprio campo.
     constexpr double kMaxGoalDepthMm = 180.0;
     constexpr double kAreaMarginMm = 120.0;
-    const double half_len = std::abs(my_goal_x);
-    double field_width = 0.0;
-    (void)config().blackboard->get("field_width", field_width);
-    const double half_wid = (field_width > 0.0) ? field_width / 2.0 : p_width / 2.0;
+    const double leash_x = my_goal_x + dir * (gk::kDefaultLeashFraction * geo.halfLength() + kLeashTargetMarginMm);
 
     double min_x, max_x;
     if (my_goal_x < 0) {
         min_x = my_goal_x - kMaxGoalDepthMm;
-        max_x = allow_leave_area ? half_len - kFieldMarginMm : my_goal_x + p_depth - kAreaMarginMm;
+        max_x = allow_leave_area ? leash_x : my_goal_x + p_depth - kAreaMarginMm;
     } else {
-        min_x = allow_leave_area ? -half_len + kFieldMarginMm : my_goal_x - p_depth + kAreaMarginMm;
+        min_x = allow_leave_area ? leash_x : my_goal_x - p_depth + kAreaMarginMm;
         max_x = my_goal_x + kMaxGoalDepthMm;
     }
-    double max_y = allow_leave_area ? half_wid - kFieldMarginMm : (p_width / 2.0) - kAreaMarginMm;
+    const double max_y = allow_leave_area ? geo.halfWidth() - kFieldMarginMm : (p_width / 2.0) - kAreaMarginMm;
 
     target_x = std::clamp(target_x, min_x, max_x);
     target_y = std::clamp(target_y, -max_y, max_y);
 
-    // Orienta o kicker frontal diretamente para a bola quando posicionado ou próximo
+    // Orientação: a bola sai por onde o kicker aponta. Já posicionado atrás da bola, o robô aponta para a direção
+    // escolhida do chute (e não para a bola, que desviaria o chute pelo erro lateral); chegando perto, aponta
+    // para a bola para ela entrar no cone do kicker.
     double target_w = clear_angle;
-    if (is_positioned_behind || dist_to_ball < 350.0) {
+    if (is_positioned_behind) {
+        target_w = clear_angle;
+    } else if (dist_to_ball < 350.0) {
         target_w = angle_to_ball;
     }
 
@@ -298,11 +351,11 @@ BT::NodeStatus LateralClearNode::onRunning()
     while (kicker_ball_err < -M_PI) kicker_ball_err += 2.0 * M_PI;
 
     // Orientação do robô (a bola sai por onde o kicker aponta) contra a direção desejada do chute.
-    // No passe a pontaria precisa ser mais fina; depois de kAlignTimeoutS em contato a tolerância dobra.
+    // No passe a pontaria precisa ser mais fina; depois de kAlignTimeoutS em contato, ou com pressa
+    // (10 s na área), a tolerância dobra.
     const double kick_dir_err = std::abs(std::remainder(clear_angle - ryaw, 2.0 * M_PI));
 
     const bool contact_ready = behind_proj > 40.0 && dist_to_ball <= 150.0 && std::abs(kicker_ball_err) < 0.28;
-    const rclcpp::Time now = node_->now();
     if (!contact_ready) {
         contact_since_valid_ = false;
     } else if (!contact_since_valid_) {
@@ -310,8 +363,10 @@ BT::NodeStatus LateralClearNode::onRunning()
         contact_since_ = now;
     }
     const double contact_time = contact_since_valid_ ? (now - contact_since_).seconds() : 0.0;
-    double max_kick_dir_err = (plan.pass_id >= 0) ? kMaxPassAlignErr : kMaxClearAlignErr;
-    if (contact_time > kAlignTimeoutS) max_kick_dir_err *= kTimeoutErrFactor;
+    const bool near_goal_line = std::abs(ball_x - my_goal_x) < kNearGoalLineMm;
+    double max_kick_dir_err = (plan.pass_id >= 0) ? kMaxPassAlignErr :
+        (near_goal_line ? kMaxNearLineAlignErr : kMaxClearAlignErr);
+    if (contact_time > kAlignTimeoutS || urgent) max_kick_dir_err *= kTimeoutErrFactor;
 
     // Autoriza o chute quando o goleiro está atrás da bola, em distância de contato e alinhado
     if (contact_ready && kick_dir_err < max_kick_dir_err) {
@@ -321,8 +376,8 @@ BT::NodeStatus LateralClearNode::onRunning()
                 plan.pass_id, dist_to_ball, kicker_ball_err * 180.0 / M_PI, plan.speed);
         } else {
             RCLCPP_INFO(node_->get_logger(),
-                "Goleiro alinhado na bola para afastar: dist_ball=%.1fmm, erro_kicker=%.1fdeg",
-                dist_to_ball, kicker_ball_err * 180.0 / M_PI);
+                "Goleiro alinhado na bola para afastar%s: dist_ball=%.1fmm, erro_kicker=%.1fdeg",
+                urgent ? " (com pressa)" : "", dist_to_ball, kicker_ball_err * 180.0 / M_PI);
         }
         setOutput("kick_speed", plan.speed);
         return BT::NodeStatus::SUCCESS;
