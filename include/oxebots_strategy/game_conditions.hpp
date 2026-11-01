@@ -2,6 +2,8 @@
 
 #include "behaviortree_cpp/condition_node.h"
 
+#include <string>
+
 namespace oxebots_strategy
 {
 

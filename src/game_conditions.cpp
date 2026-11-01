@@ -1,5 +1,7 @@
 #include "oxebots_strategy/game_conditions.hpp"
 
+#include "rclcpp/rclcpp.hpp"
+
 #include <string>
 
 namespace oxebots_strategy
@@ -7,9 +9,23 @@ namespace oxebots_strategy
 namespace
 {
 
+const rclcpp::Logger LOGGER = rclcpp::get_logger("game_conditions");
+
 BT::NodeStatus boolStatus(bool value)
 {
   return value ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+}
+
+void logError(const char * message)
+{
+  static rclcpp::Clock clock;
+  RCLCPP_ERROR_THROTTLE(LOGGER, clock, 1000, "%s", message);
+}
+
+void logWarning(const char * message)
+{
+  static rclcpp::Clock clock;
+  RCLCPP_WARN_THROTTLE(LOGGER, clock, 1000, "%s", message);
 }
 
 bool readString(const BT::Blackboard::Ptr & blackboard, const char * key, std::string & value)
@@ -53,11 +69,13 @@ BT::NodeStatus CheckGameStateCondition::tick()
 {
   std::string expected;
   if (!getInput("phase", expected) || expected.empty()) {
+    logError("CheckGameState: porta [phase] ausente ou vazia");
     return BT::NodeStatus::FAILURE;
   }
 
   std::string current;
   if (!readPhase(config().blackboard, current)) {
+    logError("CheckGameState: chave [phase] ausente ou inválida na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 
@@ -79,6 +97,7 @@ BT::NodeStatus WeAreFavoredCondition::tick()
 {
   bool favored = false;
   if (!config().blackboard || !config().blackboard->get("we_favored", favored)) {
+    logError("WeAreFavored: chave [we_favored] ausente na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 
@@ -108,6 +127,7 @@ BT::NodeStatus IsDataFreshCondition::tick()
       !getInput("max_pose_ms", max_pose_ms) ||
       !getInput("max_ball_ms", max_ball_ms) ||
       max_gc_ms < 0.0 || max_pose_ms < 0.0 || max_ball_ms < 0.0) {
+    logError("IsDataFresh: portas de limite ausentes ou inválidas");
     return BT::NodeStatus::FAILURE;
   }
 
@@ -119,13 +139,27 @@ BT::NodeStatus IsDataFreshCondition::tick()
       !blackboard->get("gc_age_ms", gc_age_ms) ||
       !blackboard->get("pose_age_ms", pose_age_ms) ||
       !blackboard->get("ball_age_ms", ball_age_ms)) {
+    logError("IsDataFresh: uma ou mais idades estão ausentes na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 
-  return boolStatus(
-    gc_age_ms <= max_gc_ms &&
-    pose_age_ms <= max_pose_ms &&
-    ball_age_ms <= max_ball_ms);
+  const bool gc_fresh = gc_age_ms <= max_gc_ms;
+  const bool pose_fresh = pose_age_ms <= max_pose_ms;
+  const bool ball_fresh = ball_age_ms <= max_ball_ms;
+  if (!gc_fresh || !pose_fresh || !ball_fresh) {
+    if (!gc_fresh) {
+      logWarning("IsDataFresh: gc_age_ms excedeu max_gc_ms");
+    }
+    if (!pose_fresh) {
+      logWarning("IsDataFresh: pose_age_ms excedeu max_pose_ms");
+    }
+    if (!ball_fresh) {
+      logWarning("IsDataFresh: ball_age_ms excedeu max_ball_ms");
+    }
+    return BT::NodeStatus::FAILURE;
+  }
+
+  return BT::NodeStatus::SUCCESS;
 }
 
 HasRoleCondition::HasRoleCondition(
@@ -143,11 +177,13 @@ BT::NodeStatus HasRoleCondition::tick()
 {
   std::string expected_role;
   if (!getInput("role", expected_role) || expected_role.empty()) {
+    logError("HasRole: porta [role] ausente ou vazia");
     return BT::NodeStatus::FAILURE;
   }
 
   std::string current_role;
   if (!readString(config().blackboard, "role", current_role)) {
+    logError("HasRole: chave [role] ausente na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 

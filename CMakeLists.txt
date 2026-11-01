@@ -93,6 +93,7 @@ if(BUILD_TESTING)
     src/game_conditions.cpp
   )
   ament_target_dependencies(test_game_conditions
+    rclcpp
     behaviortree_cpp
   )
   target_include_directories(test_game_conditions PUBLIC
