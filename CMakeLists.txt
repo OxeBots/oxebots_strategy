@@ -76,6 +76,7 @@ if(BUILD_TESTING)
     src/keep_distance.cpp
     src/hold_position_node.cpp
     src/set_motion_limit_node.cpp
+    src/compute_legal_slot_node.cpp
   )
   ament_target_dependencies(test_strategy_node
     rclcpp
@@ -124,6 +125,7 @@ add_executable(
   src/keep_distance.cpp
   src/hold_position_node.cpp
   src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
 )
 
 ament_target_dependencies(
@@ -277,6 +279,7 @@ set(BT_LEAF_SOURCES
   src/keep_distance.cpp
   src/hold_position_node.cpp
   src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
 )
 
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})

@@ -13,6 +13,7 @@
 #include "oxebots_strategy/align_to_ball_node.h"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/calculate_kick_off_pose.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_strategy/defender_nodes.hpp"
 #include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/goal_line_defend_node.h"
@@ -66,6 +67,7 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
   factory.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
   factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
   factory.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", node);
+  factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
 
   factory.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
   factory.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
