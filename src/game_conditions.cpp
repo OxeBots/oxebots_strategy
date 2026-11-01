@@ -113,9 +113,9 @@ IsDataFreshCondition::IsDataFreshCondition(
 BT::PortsList IsDataFreshCondition::providedPorts()
 {
   return {
-    BT::InputPort<double>("max_gc_ms", 500.0),
-    BT::InputPort<double>("max_pose_ms", 150.0),
-    BT::InputPort<double>("max_ball_ms", 300.0)};
+    BT::InputPort<double>("max_gc_ms", 500.0, "Idade máxima do Game Controller em ms"),
+    BT::InputPort<double>("max_pose_ms", 150.0, "Idade máxima da pose em ms"),
+    BT::InputPort<double>("max_ball_ms", 300.0, "Idade máxima da bola em ms")};
 }
 
 BT::NodeStatus IsDataFreshCondition::tick()

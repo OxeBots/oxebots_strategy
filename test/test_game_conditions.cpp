@@ -24,7 +24,7 @@ TEST(GameConditionsTest, CheckGameStateMatchesBlackboardPhase)
   auto blackboard = BT::Blackboard::create();
   blackboard->set("phase", std::string("STOP"));
 
-  const auto tree = factory.createTreeFromText(
+  auto tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <CheckGameState phase="STOP"/>
@@ -41,7 +41,7 @@ TEST(GameConditionsTest, CheckGameStateAcceptsCurrentNumericPhase)
   auto blackboard = BT::Blackboard::create();
   blackboard->set("phase", 2);
 
-  const auto tree = factory.createTreeFromText(
+  auto tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <CheckGameState phase="STOP"/>
@@ -58,7 +58,7 @@ TEST(GameConditionsTest, CheckGameStateFailsForDifferentOrMissingPhase)
   auto blackboard = BT::Blackboard::create();
   blackboard->set("phase", std::string("RUN"));
 
-  const auto different_tree = factory.createTreeFromText(
+  auto different_tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <CheckGameState phase="HALT"/>
@@ -68,7 +68,7 @@ TEST(GameConditionsTest, CheckGameStateFailsForDifferentOrMissingPhase)
   EXPECT_EQ(different_tree.tickOnce(), BT::NodeStatus::FAILURE);
 
   auto missing_blackboard = BT::Blackboard::create();
-  const auto missing_tree = factory.createTreeFromText(
+  auto missing_tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <CheckGameState phase="RUN"/>
@@ -84,7 +84,7 @@ TEST(GameConditionsTest, WeAreFavoredReadsBlackboard)
   auto blackboard = BT::Blackboard::create();
   blackboard->set("we_favored", true);
 
-  const auto tree = factory.createTreeFromText(
+  auto tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <WeAreFavored/>
@@ -105,7 +105,7 @@ TEST(GameConditionsTest, IsDataFreshAppliesDocumentedDefaults)
   blackboard->set("pose_age_ms", 150.0);
   blackboard->set("ball_age_ms", 300.0);
 
-  const auto tree = factory.createTreeFromText(
+  auto tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <IsDataFresh/>
@@ -124,7 +124,7 @@ TEST(GameConditionsTest, HasRoleMatchesCurrentRole)
   auto blackboard = BT::Blackboard::create();
   blackboard->set("role", std::string("goalkeeper"));
 
-  const auto tree = factory.createTreeFromText(
+  auto tree = factory.createTreeFromText(
     R"(<root BTCPP_format="4">
          <BehaviorTree ID="Test">
            <HasRole role="goalkeeper"/>
