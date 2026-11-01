@@ -34,7 +34,7 @@ public:
   // ao carregar. Fica na mesma linha bola→gol que intercept_carry_x/y, recalculado a cada tick a
   // partir da bola atual (evita zigue-zague de um alvo de orientação fixo/distante), mas longe o
   // bastante da bola pra não ter instabilidade de bearing.
-  static constexpr double kCarryFaceLookaheadMm = 400.0;
+  static constexpr double kCarryFaceLookaheadMm = 2500.0;
 
   // Deslocamento lateral (mm) do waypoint de contorno (intercept_pk_safe_x/y), usado só enquanto
   // o robô está do lado errado da bola. Ver cálculo de intercept_pk_safe no .cpp.
@@ -60,6 +60,10 @@ private:
 
   // Histerese do waypoint de contorno: entra ao detectar lado errado, só desarma com folga real.
   bool swing_active_ = false;
+  // Histerese do lado de abordagem na frente da área aliada para não inverter pk_y perto de Y=0.
+  double last_clear_sign_ = 1.0;
+  // Histerese do lado de contorno (side_sign) de pk_safe para não pular de um lado pro outro da reta bola-gol.
+  double last_side_sign_ = 1.0;
 };
 
 } // namespace oxebots_strategy

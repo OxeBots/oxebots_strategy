@@ -87,13 +87,20 @@ private:
     // Histerese da repulsão de contato: entra a kContactEnterMm, só desarma a kContactExitMm.
     bool contact_repulsion_active_ = false;
 
+    // Estado para termo derivativo (amortecimento D) do controle angular (evita overshoot/oscilação de yaw)
+    bool has_prev_orientation_ = false;
+    double prev_orientation_ = 0.0;
+    double filtered_omega_ = 0.0;
+    std::chrono::steady_clock::time_point prev_control_time_;
+
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
     int robot_id_ = 0;
     bool game_data_received_ = false;
 
-    bool is_yellow_team_;
+    bool is_yellow_team_ = false;
+    bool invert_sides_ = false;
 
     // --- SafetyGate: Watchdog de 500 ms (Capítulo 17.5) ---
     // Se nenhum /robot_goal nem /robot_motion_override for recebido por mais de kWatchdogTimeout,
