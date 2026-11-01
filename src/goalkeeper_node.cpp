@@ -115,8 +115,11 @@ void GoalkeeperNode::publishGoal(double x, double y, double target_w, uint8_t pl
   bool pos_changed = (std::abs(x - last_target_x_) > 5.0 || std::abs(y - last_target_y_) > 5.0);
   bool ang_changed = (std::abs(normalizeAngle(target_w - last_target_w_)) > 0.05);
   bool planner_changed = (planner_type != last_planner_type_);
+  // Heartbeat de 200 ms para manter o watchdog de 500 ms do SafetyGate ativo enquanto em RUNNING
+  bool heartbeat_due = !last_goal_publish_time_.has_value() ||
+                       (node_->now() - *last_goal_publish_time_).seconds() >= 0.2;
 
-  if (pos_changed || ang_changed || planner_changed) {
+  if (pos_changed || ang_changed || planner_changed || heartbeat_due) {
     auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
     goal_msg->robot_id = robot_id_;
     goal_msg->pose.header.stamp = node_->now();
@@ -133,6 +136,7 @@ void GoalkeeperNode::publishGoal(double x, double y, double target_w, uint8_t pl
     last_target_y_ = y;
     last_target_w_ = target_w;
     last_planner_type_ = planner_type;
+    last_goal_publish_time_ = node_->now();
   }
 }
 

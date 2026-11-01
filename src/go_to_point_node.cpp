@@ -162,6 +162,7 @@ void GoToPointNode::publishGoal() {
     goal_msg->pose.pose.orientation.w = std::cos(target_w_ * 0.5);
 
     goal_pub_->publish(std::move(goal_msg));
+    last_goal_publish_time_ = node_->now();
     publishMarkers();
 }
 
@@ -354,7 +355,10 @@ BT::NodeStatus GoToPointNode::onRunning() {
         }
         double candidate_w = resolveFaceAngle();
         bool orientation_changed = std::abs(normalizeAngle(candidate_w - target_w_)) > 0.02; // ~1.1 grau
-        if (position_changed || orientation_changed) {
+        // Heartbeat de 200 ms para manter o watchdog de 500 ms do SafetyGate ativo enquanto em RUNNING
+        bool heartbeat_due = !last_goal_publish_time_.has_value() ||
+                             (node_->now() - *last_goal_publish_time_).seconds() >= 0.2;
+        if (position_changed || orientation_changed || heartbeat_due) {
             publishGoal();
         }
 

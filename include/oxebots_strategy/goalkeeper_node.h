@@ -7,6 +7,7 @@
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/ball_position.hpp"
+#include <optional>
 
 namespace oxebots_strategy
 {
@@ -58,6 +59,7 @@ private:
   uint8_t last_planner_type_{oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE};
 
   bool kick_override_active_{false};
+  std::optional<rclcpp::Time> last_goal_publish_time_;
 };
 
 }  // namespace oxebots_strategy
