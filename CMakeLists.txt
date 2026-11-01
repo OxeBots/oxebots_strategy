@@ -88,6 +88,18 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  ament_add_gtest(test_game_conditions
+    test/test_game_conditions.cpp
+    src/game_conditions.cpp
+  )
+  ament_target_dependencies(test_game_conditions
+    behaviortree_cpp
+  )
+  target_include_directories(test_game_conditions PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
@@ -97,6 +109,7 @@ endif()
 add_executable(
   strategy_node
   src/strategy_node.cpp
+  src/game_conditions.cpp
   src/go_to_point_node.cpp
   src/kick_ball_node.cpp
   src/align_to_ball_node.cpp
