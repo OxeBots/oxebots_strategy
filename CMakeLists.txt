@@ -19,8 +19,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 if(BUILD_TESTING)
-<<<<<<< Updated upstream
-=======
+
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_strategy
     test/test_strategy.cpp
@@ -96,8 +95,6 @@ if(BUILD_TESTING)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
   )
-
->>>>>>> Stashed changes
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
@@ -122,8 +119,7 @@ add_executable(
   src/lateral_clear_node.cpp
   src/position_bisector_node.cpp
   src/smother_save_node.cpp
-<<<<<<< Updated upstream
-=======
+
   src/calculate_kickoff_pose.cpp
   src/aim_at.cpp
   src/has_line_of_sight.cpp
@@ -131,7 +127,6 @@ add_executable(
   src/hold_position_node.cpp
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
->>>>>>> Stashed changes
 )
 
 ament_target_dependencies(
