@@ -28,28 +28,44 @@ void logWarning(const char * message)
   RCLCPP_WARN_THROTTLE(LOGGER, clock, 1000, "%s", message);
 }
 
-bool readString(const BT::Blackboard::Ptr & blackboard, const char * key, std::string & value)
+// Acesso seguro à blackboard raiz — as chaves de estado (phase, we_favored,
+// gc_age_ms, role…) são escritas pelo strategy_node na raiz, e dentro de
+// SubTrees a blackboard local pode não tê-las.  Padrão do projeto
+// (goalkeeper_node, go_to_point_node, defender_nodes).
+BT::Blackboard * rootBB(const BT::NodeConfig & config)
 {
-  return blackboard && blackboard->get(key, value);
+  return config.blackboard ? config.blackboard->rootBlackboard() : nullptr;
 }
 
-bool readPhase(const BT::Blackboard::Ptr & blackboard, std::string & phase)
+bool readString(BT::Blackboard * bb, const char * key, std::string & value)
 {
-  if (readString(blackboard, "phase", phase)) {
-    return true;
-  }
+  return bb && bb->get(key, value);
+}
 
-  int phase_id;
-  if (!blackboard || !blackboard->get("phase", phase_id) ||
-      phase_id < 0 || phase_id > 9) {
+bool readPhase(BT::Blackboard * bb, std::string & phase)
+{
+  if (!bb) {
     return false;
   }
 
-  static const char * const phase_names[] = {
-    "HALT", "TIMEOUT", "STOP", "BALL_PLACEMENT", "PREPARE_KICKOFF",
-    "KICKOFF", "PREPARE_PENALTY", "PENALTY", "FREE_KICK", "RUN"};
-  phase = phase_names[phase_id];
-  return true;
+  // Tenta int primeiro — é o tipo real escrito pelo strategy_node.
+  // Se o valor armazenado for string (ex.: "STOP"), a conversão para int
+  // lança exceção na BT.CPP 4.x; nesse caso caímos no fallback.
+  try {
+    int phase_id = -1;
+    if (bb->get("phase", phase_id) && phase_id >= 0 && phase_id <= 9) {
+      static const char * const phase_names[] = {
+        "HALT", "TIMEOUT", "STOP", "BALL_PLACEMENT", "PREPARE_KICKOFF",
+        "KICKOFF", "PREPARE_PENALTY", "PENALTY", "FREE_KICK", "RUN"};
+      phase = phase_names[phase_id];
+      return true;
+    }
+  } catch (const std::exception &) {
+    // Valor armazenado não é conversível para int — tenta string abaixo
+  }
+
+  // Fallback: alguém escreveu a fase como string diretamente
+  return bb->get("phase", phase);
 }
 
 }  // namespace
@@ -62,7 +78,9 @@ CheckGameStateCondition::CheckGameStateCondition(
 
 BT::PortsList CheckGameStateCondition::providedPorts()
 {
-  return {BT::InputPort<std::string>("phase")};
+  return {BT::InputPort<std::string>(
+    "phase", "Fase esperada: HALT, TIMEOUT, STOP, BALL_PLACEMENT, "
+             "PREPARE_KICKOFF, KICKOFF, PREPARE_PENALTY, PENALTY, FREE_KICK ou RUN")};
 }
 
 BT::NodeStatus CheckGameStateCondition::tick()
@@ -74,7 +92,7 @@ BT::NodeStatus CheckGameStateCondition::tick()
   }
 
   std::string current;
-  if (!readPhase(config().blackboard, current)) {
+  if (!readPhase(rootBB(config()), current)) {
     logError("CheckGameState: chave [phase] ausente ou inválida na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
@@ -96,7 +114,8 @@ BT::PortsList WeAreFavoredCondition::providedPorts()
 BT::NodeStatus WeAreFavoredCondition::tick()
 {
   bool favored = false;
-  if (!config().blackboard || !config().blackboard->get("we_favored", favored)) {
+  auto * bb = rootBB(config());
+  if (!bb || !bb->get("we_favored", favored)) {
     logError("WeAreFavored: chave [we_favored] ausente na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
@@ -134,11 +153,11 @@ BT::NodeStatus IsDataFreshCondition::tick()
   double gc_age_ms;
   double pose_age_ms;
   double ball_age_ms;
-  const auto blackboard = config().blackboard;
-  if (!blackboard ||
-      !blackboard->get("gc_age_ms", gc_age_ms) ||
-      !blackboard->get("pose_age_ms", pose_age_ms) ||
-      !blackboard->get("ball_age_ms", ball_age_ms)) {
+  auto * bb = rootBB(config());
+  if (!bb ||
+      !bb->get("gc_age_ms", gc_age_ms) ||
+      !bb->get("pose_age_ms", pose_age_ms) ||
+      !bb->get("ball_age_ms", ball_age_ms)) {
     logError("IsDataFresh: uma ou mais idades estão ausentes na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
@@ -170,7 +189,8 @@ HasRoleCondition::HasRoleCondition(
 
 BT::PortsList HasRoleCondition::providedPorts()
 {
-  return {BT::InputPort<std::string>("role")};
+  return {BT::InputPort<std::string>(
+    "role", "Papel esperado: goalkeeper, attacker, defender ou kicker")};
 }
 
 BT::NodeStatus HasRoleCondition::tick()
@@ -182,7 +202,7 @@ BT::NodeStatus HasRoleCondition::tick()
   }
 
   std::string current_role;
-  if (!readString(config().blackboard, "role", current_role)) {
+  if (!readString(rootBB(config()), "role", current_role)) {
     logError("HasRole: chave [role] ausente na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
