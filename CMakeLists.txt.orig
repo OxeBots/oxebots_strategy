@@ -1,0 +1,310 @@
+cmake_minimum_required(VERSION 3.8)
+project(oxebots_strategy)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(oxebots_interfaces REQUIRED)
+find_package(ssl_league_msgs REQUIRED)
+find_package(behaviortree_cpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_strategy
+    test/test_strategy.cpp
+    src/is_ball_in_our_half_condition.cpp
+    src/is_ball_in_area_condition.cpp
+  )
+  ament_target_dependencies(test_strategy
+    rclcpp
+    oxebots_interfaces
+    behaviortree_cpp
+    geometry_msgs
+    nav_msgs
+  )
+  target_include_directories(test_strategy PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  ament_add_gtest(test_referee_state_node
+    test/test_referee_state_node.cpp
+  )
+  ament_target_dependencies(test_referee_state_node
+    rclcpp
+    oxebots_interfaces
+    ssl_league_msgs
+    geometry_msgs
+  )
+  target_include_directories(test_referee_state_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  ament_add_gtest(test_strategy_node
+    test/test_strategy_node.cpp
+    src/go_to_point_node.cpp
+    src/kick_ball_node.cpp
+    src/align_to_ball_node.cpp
+    src/update_ball_position_node.cpp
+    src/calculate_interception_node.cpp
+    src/is_ball_close_condition.cpp
+    src/goalkeeper_node.cpp
+    src/precision_kick_node.cpp
+    src/defender_nodes.cpp
+    src/goal_line_defend_node.cpp
+    src/is_ball_in_area_condition.cpp
+    src/is_ball_in_our_half_condition.cpp
+    src/lateral_clear_node.cpp
+    src/position_bisector_node.cpp
+    src/smother_save_node.cpp
+    src/calculate_kickoff_pose.cpp
+    src/aim_at.cpp
+    src/has_line_of_sight.cpp
+    src/keep_distance.cpp
+  )
+  ament_target_dependencies(test_strategy_node
+    rclcpp
+    oxebots_interfaces
+    ssl_league_msgs
+    behaviortree_cpp
+    ament_index_cpp
+    geometry_msgs
+    nav_msgs
+    visualization_msgs
+  )
+  target_include_directories(test_strategy_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  find_package(ament_lint_auto REQUIRED)
+  set(ament_cmake_copyright_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+add_executable(
+  strategy_node
+  src/strategy_node.cpp
+  src/go_to_point_node.cpp
+  src/kick_ball_node.cpp
+  src/align_to_ball_node.cpp
+  src/update_ball_position_node.cpp
+  src/calculate_interception_node.cpp
+  src/is_ball_close_condition.cpp
+  src/goalkeeper_node.cpp
+  src/precision_kick_node.cpp
+  src/defender_nodes.cpp
+  src/goal_line_defend_node.cpp
+  src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
+  src/is_ball_in_our_half_condition.cpp
+  src/lateral_clear_node.cpp
+  src/position_bisector_node.cpp
+  src/smother_save_node.cpp
+  src/calculate_kickoff_pose.cpp
+  src/aim_at.cpp
+  src/has_line_of_sight.cpp
+  src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
+)
+
+ament_target_dependencies(
+  strategy_node
+  rclcpp
+  oxebots_interfaces
+  ssl_league_msgs
+  behaviortree_cpp
+  ament_index_cpp
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  visualization_msgs
+)
+
+target_include_directories(strategy_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+
+add_executable(
+  movement_calculation_node
+  src/movement_calculation.cpp
+)
+
+ament_target_dependencies(
+  movement_calculation_node
+  rclcpp
+  oxebots_interfaces
+  geometry_msgs
+  nav_msgs
+  visualization_msgs
+  sensor_msgs
+  std_msgs
+  tf2_ros
+)
+
+target_include_directories(movement_calculation_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+add_executable(
+  trajectory_setpoint_node
+  src/trajectory_setpoint_node.cpp
+)
+
+ament_target_dependencies(
+  trajectory_setpoint_node
+  rclcpp
+  oxebots_interfaces
+)
+
+target_include_directories(trajectory_setpoint_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+add_executable(
+  d_star_planner_node
+  src/d_star_planner.cpp
+)
+
+ament_target_dependencies(
+  d_star_planner_node
+  rclcpp
+  oxebots_interfaces
+  nav_msgs
+  geometry_msgs
+)
+
+target_include_directories(d_star_planner_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+add_executable(
+  role_assigner_node
+  src/role_assigner_node.cpp
+)
+
+ament_target_dependencies(
+  role_assigner_node
+  rclcpp
+  oxebots_interfaces
+)
+
+add_executable(
+  referee_state_node
+  src/referee_state_node.cpp
+)
+
+ament_target_dependencies(
+  referee_state_node
+  rclcpp
+  oxebots_interfaces
+  ssl_league_msgs
+  geometry_msgs
+)
+
+install(TARGETS
+  strategy_node
+  movement_calculation_node
+  trajectory_setpoint_node
+  d_star_planner_node
+  role_assigner_node
+  referee_state_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY include/
+  DESTINATION include
+)
+
+install(
+  DIRECTORY behavior_trees
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+    DIRECTORY launch
+    DESTINATION share/${PROJECT_NAME}
+)
+
+# --- Ferramentas e testes das Behavior Trees (backlog T01 e T02) ---------------------------------
+# dump_bt_model: despeja as portas de todas as folhas para o scripts/validate_bt.py. Compila as
+# mesmas folhas do strategy_node (sem o strategy_node.cpp), por isso a lista abaixo precisa
+# acompanhar a do strategy_node; o validador avisa (regra R8) se os registros divergirem.
+set(BT_LEAF_SOURCES
+  src/go_to_point_node.cpp
+  src/kick_ball_node.cpp
+  src/align_to_ball_node.cpp
+  src/update_ball_position_node.cpp
+  src/calculate_interception_node.cpp
+  src/is_ball_close_condition.cpp
+  src/goalkeeper_node.cpp
+  src/precision_kick_node.cpp
+  src/defender_nodes.cpp
+  src/goal_line_defend_node.cpp
+  src/is_ball_in_area_condition.cpp
+  src/is_ball_closest_condition.cpp
+  src/is_ball_in_our_half_condition.cpp
+  src/lateral_clear_node.cpp
+  src/position_bisector_node.cpp
+  src/smother_save_node.cpp
+  src/calculate_kickoff_pose.cpp
+  src/aim_at.cpp
+  src/has_line_of_sight.cpp
+  src/keep_distance.cpp
+)
+
+add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
+
+ament_target_dependencies(
+  dump_bt_model
+  rclcpp
+  oxebots_interfaces
+  ssl_league_msgs
+  behaviortree_cpp
+  ament_index_cpp
+  geometry_msgs
+  nav_msgs
+  visualization_msgs
+)
+
+target_include_directories(dump_bt_model PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+install(TARGETS dump_bt_model DESTINATION lib/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  # Harness de semântica da BehaviorTree.CPP (só behaviortree_cpp + gtest, sem ROS).
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_bt_semantics test/test_bt_semantics.cpp)
+  ament_target_dependencies(test_bt_semantics behaviortree_cpp)
+
+  # Geometria pura do goleiro (passe com corredor/cone e leque de afastar), só biblioteca padrão e gtest.
+  ament_add_gtest(test_goalkeeper_geometry test/test_goalkeeper_geometry.cpp)
+  target_include_directories(test_goalkeeper_geometry PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+endif()
+
+ament_package()

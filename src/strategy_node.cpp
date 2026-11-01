@@ -32,6 +32,16 @@
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/position_bisector_node.h"
 #include "oxebots_strategy/smother_save_node.h"
+<<<<<<< Updated upstream
+=======
+#include "oxebots_strategy/calculate_kick_off_pose.hpp"
+#include "oxebots_strategy/keep_distance.hpp"
+#include "oxebots_strategy/aim_at.hpp"
+#include "oxebots_strategy/has_line_of_sight.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
+>>>>>>> Stashed changes
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
@@ -111,6 +121,16 @@ public:
       factory_.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::SmotherSaveNode>("SmotherSave", shared_from_this());
+<<<<<<< Updated upstream
+=======
+      factory_.registerNodeType<oxebots_strategy::CalculateKickOffPose>("CalculateKickOffPose");
+      factory_.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
+      factory_.registerNodeType<oxebots_strategy::AimAt>("AimAt");
+      factory_.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
+      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
+>>>>>>> Stashed changes
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
