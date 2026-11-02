@@ -107,6 +107,20 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  ament_add_gtest(test_compute_legal_slot
+    test/test_compute_legal_slot.cpp
+    src/compute_legal_slot_node.cpp
+  )
+  ament_target_dependencies(test_compute_legal_slot
+    rclcpp
+    behaviortree_cpp
+    oxebots_interfaces
+  )
+  target_include_directories(test_compute_legal_slot PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
