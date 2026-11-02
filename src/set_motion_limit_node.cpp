@@ -20,24 +20,27 @@ SetMotionLimitNode::SetMotionLimitNode(const std::string& name, const BT::NodeCo
 BT::PortsList SetMotionLimitNode::providedPorts()
 {
   return {
-    BT::InputPort<double>("limit_mps", 1.5, "Teto de velocidade linear (m/s) enviado ao SafetyGate")
+    BT::InputPort<double>("limit_mps", 1.5,
+      "Teto de velocidade linear (m/s) enviado ao SafetyGate (<= 0.0 limpa o override)")
   };
 }
 
 BT::NodeStatus SetMotionLimitNode::tick()
 {
   double limit_mps = 1.5;
-  if (!getInput<double>("limit_mps", limit_mps) || !std::isfinite(limit_mps) || limit_mps <= 0.0) {
+  if (!getInput<double>("limit_mps", limit_mps) || !std::isfinite(limit_mps)) {
     RCLCPP_ERROR(node_->get_logger(), "SetMotionLimit: valor inválido na porta limit_mps");
     return BT::NodeStatus::FAILURE;
   }
 
-  double absolute_max_mps = 1.5;
-  if (node_->has_parameter("absolute_max_mps")) {
-    absolute_max_mps = node_->get_parameter("absolute_max_mps").as_double();
+  double effective_limit = 0.0;
+  if (limit_mps > 0.0) {
+    double absolute_max_mps = 1.5;
+    if (node_->has_parameter("absolute_max_mps")) {
+      absolute_max_mps = node_->get_parameter("absolute_max_mps").as_double();
+    }
+    effective_limit = std::clamp(limit_mps, 0.0, absolute_max_mps);
   }
-
-  double effective_limit = std::clamp(limit_mps, 0.0, absolute_max_mps);
 
   auto msg = std::make_unique<std_msgs::msg::Float32>();
   msg->data = static_cast<float>(effective_limit);

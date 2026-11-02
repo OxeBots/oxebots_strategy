@@ -33,7 +33,9 @@ BT::NodeStatus PrecisionKickNode::onStart()
   if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
 
   aligned_latched_ = false;
-  baseline_kick_count_ = (last_status_ && last_status_->robot_id == robot_id_) ? last_status_->kick_fire_count : 0;
+  kick_dispatched_ = false;
+  baseline_kick_count_ = 0;
+  start_time_ = node_->now();
 
   return step();
 }
@@ -47,6 +49,14 @@ BT::NodeStatus PrecisionKickNode::step()
 {
   if (!getInput<unsigned int>("robot_id", robot_id_)) return BT::NodeStatus::FAILURE;
 
+  constexpr double kTimeoutSec = 2.0;
+  if (start_time_.has_value() && (node_->now() - *start_time_).seconds() > kTimeoutSec) {
+    RCLCPP_WARN(node_->get_logger(),
+      "PrecisionKick (Robot %d): timeout de %.1fs excedido -> FAILURE.", robot_id_, kTimeoutSec);
+    releaseOverride();
+    return BT::NodeStatus::FAILURE;
+  }
+
   double target_x, target_y, kick_speed = 3.0;
   if (!getInput<double>("target_x", target_x)) return BT::NodeStatus::FAILURE;
   if (!getInput<double>("target_y", target_y)) return BT::NodeStatus::FAILURE;
@@ -54,15 +64,6 @@ BT::NodeStatus PrecisionKickNode::step()
 
   // Regra R-25 / SC-24 (M02): nunca exceder 3,0 m/s
   kick_speed = std::clamp(kick_speed, 0.0, 3.0);
-
-  // Se o controlador já concluiu o disparo do chute desde onStart(), libera o override e encerra com SUCCESS
-  if (last_status_ &&
-      last_status_->robot_id == robot_id_ &&
-      last_status_->kick_fire_count > baseline_kick_count_) {
-    releaseOverride();
-    RCLCPP_INFO(node_->get_logger(), "PrecisionKick (Robot %d): chute concluído via override.", robot_id_);
-    return BT::NodeStatus::SUCCESS;
-  }
 
   auto bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
   if (!bb) return BT::NodeStatus::FAILURE;
@@ -99,7 +100,21 @@ BT::NodeStatus PrecisionKickNode::step()
     msg->max_angular_speed = 3.0;
     msg->p_gain = 4.0;
   } else {
-    // Fase 2: Alinhado -> pede o disparo do chute ao controlador
+    // Fase 2: Chute em andamento -> verifica se concluiu após o despacho do MODE_KICK
+    if (kick_dispatched_ && last_status_ &&
+        last_status_->robot_id == robot_id_ &&
+        last_status_->kick_fire_count > baseline_kick_count_) {
+      releaseOverride();
+      RCLCPP_INFO(node_->get_logger(), "PrecisionKick (Robot %d): chute concluído via override.", robot_id_);
+      return BT::NodeStatus::SUCCESS;
+    }
+
+    // Primeiro tick de disparo: captura baseline_kick_count_ no instante exato em que MODE_KICK é enviado
+    if (!kick_dispatched_) {
+      baseline_kick_count_ = (last_status_ && last_status_->robot_id == robot_id_) ? last_status_->kick_fire_count : 0;
+      kick_dispatched_ = true;
+    }
+
     msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK;
     msg->kick_speed = kick_speed;
   }
@@ -118,6 +133,9 @@ void PrecisionKickNode::releaseOverride()
 
 void PrecisionKickNode::onHalted()
 {
+  aligned_latched_ = false;
+  kick_dispatched_ = false;
+  start_time_.reset();
   releaseOverride();
 }
 

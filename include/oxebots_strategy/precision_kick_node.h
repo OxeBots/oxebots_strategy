@@ -6,6 +6,7 @@
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/robot_motion_status.hpp"
 #include <cstdint>
+#include <optional>
 
 namespace oxebots_strategy
 {
@@ -35,6 +36,8 @@ private:
   unsigned int robot_id_ = 0;
   uint32_t baseline_kick_count_ = 0;
   bool aligned_latched_ = false;
+  bool kick_dispatched_ = false;
+  std::optional<rclcpp::Time> start_time_;
 };
 
 } // namespace oxebots_strategy

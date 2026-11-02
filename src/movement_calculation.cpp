@@ -96,14 +96,20 @@ void PathFollowerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeome
 }
 
 void PathFollowerNode::game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg) {
+    if (!msg) return;
     std::lock_guard<std::mutex> lock(data_mutex_);
+    if (last_game_state_ && last_game_state_->phase != msg->phase &&
+        msg->phase == oxebots_interfaces::msg::GameState::PHASE_RUN) {
+        motion_limit_mps_ = 0.0f; // Restaura teto nominal do jogo ao entrar em PHASE_RUN
+    }
     last_game_state_ = msg;
 }
 
 void PathFollowerNode::motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg) {
-    if (!msg || !std::isfinite(msg->data) || msg->data <= 0.0f) return;
+    if (!msg || !std::isfinite(msg->data)) return;
     std::lock_guard<std::mutex> lock(data_mutex_);
-    motion_limit_mps_ = msg->data;
+    // Valores <= 0.0 limpam o override dinâmico, restaurando o teto nominal do GameState/controlador
+    motion_limit_mps_ = (msg->data > 0.0f) ? msg->data : 0.0f;
 }
 
 void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy) {
