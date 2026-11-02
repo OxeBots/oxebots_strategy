@@ -16,6 +16,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 if(BUILD_TESTING)
@@ -64,6 +65,7 @@ if(BUILD_TESTING)
     src/defender_nodes.cpp
     src/goal_line_defend_node.cpp
     src/is_ball_in_area_condition.cpp
+    src/is_ball_closest_condition.cpp
     src/is_ball_in_our_half_condition.cpp
     src/lateral_clear_node.cpp
     src/position_bisector_node.cpp
@@ -72,6 +74,9 @@ if(BUILD_TESTING)
     src/aim_at.cpp
     src/has_line_of_sight.cpp
     src/keep_distance.cpp
+    src/hold_position_node.cpp
+    src/set_motion_limit_node.cpp
+    src/compute_legal_slot_node.cpp
   )
   ament_target_dependencies(test_strategy_node
     rclcpp
@@ -81,6 +86,7 @@ if(BUILD_TESTING)
     ament_index_cpp
     geometry_msgs
     nav_msgs
+    std_msgs
     visualization_msgs
   )
   target_include_directories(test_strategy_node PUBLIC
@@ -131,6 +137,9 @@ add_executable(
   src/aim_at.cpp
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
 )
 
 ament_target_dependencies(
@@ -142,6 +151,7 @@ ament_target_dependencies(
   ament_index_cpp
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
 )
 
@@ -164,6 +174,7 @@ ament_target_dependencies(
   nav_msgs
   visualization_msgs
   sensor_msgs
+  std_msgs
   tf2_ros
 )
 
@@ -280,6 +291,9 @@ set(BT_LEAF_SOURCES
   src/aim_at.cpp
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
 )
 
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
@@ -293,6 +307,7 @@ ament_target_dependencies(
   ament_index_cpp
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
 )
 

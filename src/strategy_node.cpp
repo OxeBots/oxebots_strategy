@@ -38,6 +38,9 @@
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/has_line_of_sight.hpp"
 #include "oxebots_strategy/game_conditions.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -162,6 +165,9 @@ public:
       factory_.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
       factory_.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
       factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");

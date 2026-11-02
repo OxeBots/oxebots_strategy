@@ -47,6 +47,8 @@ private:
   double target_w_;
   std::optional<rclcpp::Time> ball_contact_since_;
   std::optional<rclcpp::Time> ball_wrong_side_since_;
+  std::optional<rclcpp::Time> robot_missing_since_;
+  std::optional<rclcpp::Time> last_goal_publish_time_;
 };
 
 } // namespace oxebots_strategy
