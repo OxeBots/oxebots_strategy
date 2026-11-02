@@ -6,13 +6,22 @@
 namespace
 {
 
-BT::BehaviorTreeFactory makeFactory()
+BT::BehaviorTreeFactory makeFactory(std::string * last_halt_reason = nullptr)
 {
   BT::BehaviorTreeFactory factory;
   factory.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
   factory.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
   factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
   factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+
+  factory.registerSimpleAction("Halt", [last_halt_reason](BT::TreeNode & node) {
+    std::string reason;
+    if (node.getInput("reason", reason) && last_halt_reason) {
+      *last_halt_reason = reason;
+    }
+    return BT::NodeStatus::SUCCESS;
+  }, {BT::InputPort<std::string>("reason")});
+
   return factory;
 }
 
@@ -135,4 +144,99 @@ TEST(GameConditionsTest, HasRoleMatchesCurrentRole)
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
   blackboard->set("role", std::string("defender"));
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+}
+
+// ============================================================================
+// Tarefa E02: HaltTree, TimeoutTree e DegradedModeTree (SC-01, SC-02, SC-13)
+// ============================================================================
+
+TEST(SafetyTreesTest, SC01_DegradedModeTreeExecutesOnStaleData)
+{
+  std::string last_reason;
+  auto factory = makeFactory(&last_reason);
+  auto blackboard = BT::Blackboard::create();
+
+  // Dados antigos (estourando limite do GC)
+  blackboard->set("gc_age_ms", 600.0);
+  blackboard->set("pose_age_ms", 50.0);
+  blackboard->set("ball_age_ms", 100.0);
+
+  // Ramo SafetyGuard da Master Tree v2 (Capítulo 16 e 17)
+  const std::string xml_text = R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="DegradedModeTree">
+        <Halt reason="stale_data"/>
+      </BehaviorTree>
+      <BehaviorTree ID="Main">
+        <ReactiveSequence name="SafetyGuard">
+          <Inverter>
+            <IsDataFresh/>
+          </Inverter>
+          <SubTree ID="DegradedModeTree"/>
+        </ReactiveSequence>
+      </BehaviorTree>
+    </root>
+  )";
+
+  factory.registerBehaviorTreeFromText(xml_text);
+  auto tree = factory.createTree("Main", blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_EQ(last_reason, "stale_data");
+}
+
+TEST(SafetyTreesTest, SC02_HaltSubTreeExecutesOnHaltPhase)
+{
+  std::string last_reason;
+  auto factory = makeFactory(&last_reason);
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("phase", std::string("HALT"));
+
+  const std::string xml_text = R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="HaltSubTree">
+        <Halt reason="gc_halt"/>
+      </BehaviorTree>
+      <BehaviorTree ID="Main">
+        <ReactiveSequence name="HaltBranch">
+          <CheckGameState phase="HALT"/>
+          <SubTree ID="HaltSubTree"/>
+        </ReactiveSequence>
+      </BehaviorTree>
+    </root>
+  )";
+
+  factory.registerBehaviorTreeFromText(xml_text);
+  auto tree = factory.createTree("Main", blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_EQ(last_reason, "gc_halt");
+}
+
+TEST(SafetyTreesTest, SC13_TimeoutTreeExecutesOnTimeoutPhase)
+{
+  std::string last_reason;
+  auto factory = makeFactory(&last_reason);
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("phase", std::string("TIMEOUT"));
+
+  const std::string xml_text = R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="TimeoutTree">
+        <Halt reason="timeout"/>
+      </BehaviorTree>
+      <BehaviorTree ID="Main">
+        <ReactiveSequence name="TimeoutBranch">
+          <CheckGameState phase="TIMEOUT"/>
+          <SubTree ID="TimeoutTree"/>
+        </ReactiveSequence>
+      </BehaviorTree>
+    </root>
+  )";
+
+  factory.registerBehaviorTreeFromText(xml_text);
+  auto tree = factory.createTree("Main", blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_EQ(last_reason, "timeout");
 }

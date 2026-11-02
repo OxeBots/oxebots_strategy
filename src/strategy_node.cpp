@@ -212,8 +212,18 @@ public:
       factory_.registerSimpleAction("Halt", [&](BT::TreeNode& node) {
           std::string reason = "pelo GC";
           std::string input_reason;
-          if (node.getInput("reason", input_reason) && input_reason == "idle") {
-              reason = "por estar ocioso (sem papel)";
+          if (node.getInput("reason", input_reason)) {
+              if (input_reason == "idle") {
+                  reason = "por estar ocioso (sem papel)";
+              } else if (input_reason == "gc_halt") {
+                  reason = "por HALT do arbitro";
+              } else if (input_reason == "timeout") {
+                  reason = "por TIMEOUT";
+              } else if (input_reason == "stale_data") {
+                  reason = "por dados desatualizados (stale/modo degradado)";
+              } else {
+                  reason = "motivo: " + input_reason;
+              }
           }
           RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Robô %d parado %s", robot_id_, reason.c_str());
 

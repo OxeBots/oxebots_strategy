@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4">
+  <BehaviorTree ID="DegradedModeTree">
+    <Halt reason="stale_data"/>
+  </BehaviorTree>
+</root>

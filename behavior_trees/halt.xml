@@ -1,5 +1,9 @@
+<?xml version="1.0"?>
 <root BTCPP_format="4">
   <BehaviorTree ID="HaltSubTree">
-    <Halt/>
+    <Halt reason="gc_halt"/>
+  </BehaviorTree>
+  <BehaviorTree ID="HaltTree">
+    <Halt reason="gc_halt"/>
   </BehaviorTree>
 </root>
