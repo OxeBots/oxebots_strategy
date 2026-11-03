@@ -109,16 +109,6 @@ ComputeLegalSlotNode::ComputeLegalSlotNode(const std::string& name,
   if (!node_->has_parameter("slot_margin_mm")) {
     node_->declare_parameter<double>("slot_margin_mm", 150.0);
   }
-
-  game_data_sub_ = node_->create_subscription<oxebots_interfaces::msg::GameData>(
-      "/game_data", 10,
-      std::bind(&ComputeLegalSlotNode::gameDataCallback, this, std::placeholders::_1));
-}
-
-void ComputeLegalSlotNode::gameDataCallback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
-{
-  std::lock_guard<std::mutex> lock(data_mutex_);
-  last_game_data_ = msg;
 }
 
 BT::PortsList ComputeLegalSlotNode::providedPorts()
@@ -233,13 +223,7 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     }
   }
 
-  // 4. Posição da bola (Pose2D 'ball', pares 'ball_x'/'ball_y' ou '/game_data')
-  oxebots_interfaces::msg::GameData::SharedPtr game_data;
-  {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    game_data = last_game_data_;
-  }
-
+  // 4. Posição da bola (Pose2D 'ball', pares 'ball_x'/'ball_y')
   double ball_x = 0.0;
   double ball_y = 0.0;
   bool has_ball = false;
@@ -258,10 +242,6 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     ball_x = ball_pose.x;
     ball_y = ball_pose.y;
     has_ball = true;
-  } else if (game_data) {
-    ball_x = game_data->ball.x;
-    ball_y = game_data->ball.y;
-    has_ball = true;
   } else if (has_ball_xy) {
     ball_x = bx_bb;
     ball_y = by_bb;
@@ -278,7 +258,7 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  // 5. Posição do robô (Pose2D 'robot_pose', pares 'robot_x'/'robot_y' ou '/game_data')
+  // 5. Posição do robô (Pose2D 'robot_pose', pares 'robot_x'/'robot_y')
   double robot_x = 0.0;
   double robot_y = 0.0;
   bool has_robot_pose = false;
@@ -297,15 +277,6 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     robot_x = rx_bb;
     robot_y = ry_bb;
     has_robot_pose = true;
-  } else if (game_data && has_robot_id) {
-    for (const auto& ally : game_data->robots.allies) {
-      if (ally.id == robot_id) {
-        robot_x = ally.x;
-        robot_y = ally.y;
-        has_robot_pose = true;
-        break;
-      }
-    }
   } else if (has_rp_struct) {
     robot_x = robot_pose.x;
     robot_y = robot_pose.y;
