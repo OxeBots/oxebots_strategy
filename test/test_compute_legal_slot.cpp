@@ -315,7 +315,7 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
   bool goto_called = false;
   factory.registerSimpleAction("GoToPoint", [&goto_called](BT::TreeNode&) {
     goto_called = true;
-    return BT::NodeStatus::RUNNING;
+    return BT::NodeStatus::SUCCESS;
   }, {BT::InputPort<unsigned int>("robot_id"),
       BT::InputPort<double>("x"),
       BT::InputPort<double>("y"),
@@ -326,7 +326,7 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
   bool hold_called = false;
   factory.registerSimpleAction("HoldPosition", [&hold_called](BT::TreeNode&) {
     hold_called = true;
-    return BT::NodeStatus::RUNNING;
+    return BT::NodeStatus::SUCCESS;
   }, {BT::InputPort<unsigned int>("robot_id")});
 
   // Estrutura idêntica ao stop.xml
@@ -357,7 +357,7 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
   // Cenário 1: Bola perto (< 650 mm) -> Recua
   ball_is_close_flag = true;
   auto tree_close = factory.createTreeFromText(stop_xml, bb);
-  EXPECT_EQ(tree_close.tickExactlyOnce(), BT::NodeStatus::RUNNING);
+  EXPECT_EQ(tree_close.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
   EXPECT_DOUBLE_EQ(recorded_limit, 0.75);
   EXPECT_TRUE(goto_called);
   EXPECT_FALSE(hold_called);
@@ -367,7 +367,7 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
   goto_called = false;
   hold_called = false;
   auto tree_far = factory.createTreeFromText(stop_xml, bb);
-  EXPECT_EQ(tree_far.tickExactlyOnce(), BT::NodeStatus::RUNNING);
+  EXPECT_EQ(tree_far.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
   EXPECT_DOUBLE_EQ(recorded_limit, 0.75);
   EXPECT_FALSE(goto_called);
   EXPECT_TRUE(hold_called);
