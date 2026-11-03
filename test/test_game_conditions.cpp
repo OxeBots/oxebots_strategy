@@ -127,6 +127,52 @@ TEST(GameConditionsTest, IsDataFreshAppliesDocumentedDefaults)
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
 }
 
+TEST(GameConditionsTest, IsDataFreshIgnoresGCAgeWhenRequireGCIsFalseInPort)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  // gc_age_ms estourado
+  blackboard->set("gc_age_ms", 99999.0);
+  blackboard->set("pose_age_ms", 100.0);
+  blackboard->set("ball_age_ms", 200.0);
+
+  auto tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsDataFresh require_gc="false"/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+}
+
+TEST(GameConditionsTest, IsDataFreshReadsRequireGCAndLimitsFromBlackboard)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("require_gc", false);
+  blackboard->set("max_pose_ms", 250.0);
+  blackboard->set("max_ball_ms", 400.0);
+  // Sem gc_age_ms na blackboard
+  blackboard->set("pose_age_ms", 200.0);
+  blackboard->set("ball_age_ms", 350.0);
+
+  auto tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsDataFresh/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // Se pose_age_ms exceder o limite customizado da Blackboard
+  blackboard->set("pose_age_ms", 260.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+}
+
 TEST(GameConditionsTest, HasRoleMatchesCurrentRole)
 {
   auto factory = makeFactory();

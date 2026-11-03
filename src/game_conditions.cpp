@@ -134,7 +134,8 @@ BT::PortsList IsDataFreshCondition::providedPorts()
   return {
     BT::InputPort<double>("max_gc_ms", 500.0, "Idade máxima do Game Controller em ms"),
     BT::InputPort<double>("max_pose_ms", 150.0, "Idade máxima da pose em ms"),
-    BT::InputPort<double>("max_ball_ms", 300.0, "Idade máxima da bola em ms")};
+    BT::InputPort<double>("max_ball_ms", 300.0, "Idade máxima da bola em ms"),
+    BT::InputPort<bool>("require_gc", "Se falso, ignora a verificação de idade do GC")};
 }
 
 BT::NodeStatus IsDataFreshCondition::tick()
@@ -150,31 +151,58 @@ BT::NodeStatus IsDataFreshCondition::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  double gc_age_ms;
-  double pose_age_ms;
-  double ball_age_ms;
   auto * bb = rootBB(config());
-  if (!bb ||
-      !bb->get("gc_age_ms", gc_age_ms) ||
-      !bb->get("pose_age_ms", pose_age_ms) ||
-      !bb->get("ball_age_ms", ball_age_ms)) {
-    logError("IsDataFresh: uma ou mais idades estão ausentes na Blackboard");
+  if (!bb) {
+    logError("IsDataFresh: Blackboard inexistente");
     return BT::NodeStatus::FAILURE;
   }
 
-  const bool gc_fresh = gc_age_ms <= max_gc_ms;
-  const bool pose_fresh = pose_age_ms <= max_pose_ms;
-  const bool ball_fresh = ball_age_ms <= max_ball_ms;
-  if (!gc_fresh || !pose_fresh || !ball_fresh) {
+  // Permite que o YAML (via Blackboard) sobrescreva os limites configurados
+  (void)bb->get("max_gc_ms", max_gc_ms);
+  (void)bb->get("max_pose_ms", max_pose_ms);
+  (void)bb->get("max_ball_ms", max_ball_ms);
+
+  // Determina se o GC é obrigatório:
+  // 1. Valor padrão: true
+  // 2. Blackboard (via parâmetro YAML no strategy_node: 'require_gc' ou 'use_gc')
+  // 3. Porta 'require_gc' explícita no XML da BT (maior prioridade)
+  bool require_gc = true;
+  if (!bb->get("require_gc", require_gc)) {
+    (void)bb->get("use_gc", require_gc);
+  }
+  (void)getInput("require_gc", require_gc);
+
+  double pose_age_ms;
+  double ball_age_ms;
+  if (!bb->get("pose_age_ms", pose_age_ms) ||
+      !bb->get("ball_age_ms", ball_age_ms)) {
+    logError("IsDataFresh: pose_age_ms ou ball_age_ms ausentes na Blackboard");
+    return BT::NodeStatus::FAILURE;
+  }
+
+  bool gc_fresh = true;
+  if (require_gc && max_gc_ms > 0.0) {
+    double gc_age_ms;
+    if (!bb->get("gc_age_ms", gc_age_ms)) {
+      logError("IsDataFresh: gc_age_ms ausente na Blackboard e require_gc=true");
+      return BT::NodeStatus::FAILURE;
+    }
+    gc_fresh = (gc_age_ms <= max_gc_ms);
     if (!gc_fresh) {
       logWarning("IsDataFresh: gc_age_ms excedeu max_gc_ms");
     }
-    if (!pose_fresh) {
-      logWarning("IsDataFresh: pose_age_ms excedeu max_pose_ms");
-    }
-    if (!ball_fresh) {
-      logWarning("IsDataFresh: ball_age_ms excedeu max_ball_ms");
-    }
+  }
+
+  const bool pose_fresh = pose_age_ms <= max_pose_ms;
+  const bool ball_fresh = ball_age_ms <= max_ball_ms;
+  if (!pose_fresh) {
+    logWarning("IsDataFresh: pose_age_ms excedeu max_pose_ms");
+  }
+  if (!ball_fresh) {
+    logWarning("IsDataFresh: ball_age_ms excedeu max_ball_ms");
+  }
+
+  if (!gc_fresh || !pose_fresh || !ball_fresh) {
     return BT::NodeStatus::FAILURE;
   }
 
