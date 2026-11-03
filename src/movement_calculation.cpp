@@ -217,6 +217,14 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_path_ = msg;
+    if (msg && !msg->poses.empty()) {
+        last_intent_time_ = std::chrono::steady_clock::now();
+        has_received_intent_ = true;
+
+        if (last_override_msg_ && last_override_msg_->mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
+            last_override_msg_.reset();
+        }
+    }
 }
 
 void PathFollowerNode::override_callback(const oxebots_interfaces::msg::RobotMotionOverride::SharedPtr msg) {
