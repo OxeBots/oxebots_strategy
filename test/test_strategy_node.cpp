@@ -207,3 +207,66 @@ TEST_F(StrategyNodeBlackboardTest, RefreshComputesStampsAndPoses)
     EXPECT_GE(ball_age_ms, 0.0);
     EXPECT_LT(ball_age_ms, 1000.0);
 }
+
+// ============================================================================
+// 4. Consumo da RoleAssignment ampliada na Blackboard (P02)
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, P02_RoleAssignmentUpdatesEpochKickerAndActiveIds)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 2);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    // Antes de receber RoleAssignment, o papel deve iniciar como "idle" (sem papéis fixos chumbados)
+    std::string initial_role;
+    uint32_t initial_epoch = 999;
+    ASSERT_TRUE(bb->get("role", initial_role));
+    ASSERT_TRUE(bb->get("role_epoch", initial_epoch));
+    EXPECT_EQ(initial_role, "idle");
+    EXPECT_EQ(initial_epoch, 0u);
+
+    // Publica um RoleAssignment com robô 2 como atacante e cobrador (epoch = 3)
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 2;
+    roles->defender_id = 1;
+    roles->kicker_id = 2;
+    roles->epoch = 3;
+    roles->active_ids = {0, 1, 2};
+
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+
+    std::string role;
+    uint32_t gk_id = 999, att_id = 999, def_id = 999, kick_id = 999, epoch = 0;
+    bool is_gk = true, is_att = false, is_def = true, is_kick = false;
+    std::vector<uint32_t> active_ids;
+
+    ASSERT_TRUE(bb->get("role", role));
+    ASSERT_TRUE(bb->get("goalkeeper_id", gk_id));
+    ASSERT_TRUE(bb->get("attacker_id", att_id));
+    ASSERT_TRUE(bb->get("defender_id", def_id));
+    ASSERT_TRUE(bb->get("kicker_id", kick_id));
+    ASSERT_TRUE(bb->get("role_epoch", epoch));
+    ASSERT_TRUE(bb->get("active_ids", active_ids));
+    ASSERT_TRUE(bb->get("is_goalkeeper", is_gk));
+    ASSERT_TRUE(bb->get("is_attacker", is_att));
+    ASSERT_TRUE(bb->get("is_defender", is_def));
+    ASSERT_TRUE(bb->get("is_kicker", is_kick));
+
+    EXPECT_EQ(role, "attacker");
+    EXPECT_EQ(gk_id, 0u);
+    EXPECT_EQ(att_id, 2u);
+    EXPECT_EQ(def_id, 1u);
+    EXPECT_EQ(kick_id, 2u);
+    EXPECT_EQ(epoch, 3u);
+    ASSERT_EQ(active_ids.size(), 3u);
+    EXPECT_FALSE(is_gk);
+    EXPECT_TRUE(is_att);
+    EXPECT_FALSE(is_def);
+    EXPECT_TRUE(is_kick);
+}

@@ -80,7 +80,8 @@ public:
     setup_blackboard();
 
     role_sub_ = this->create_subscription<oxebots_interfaces::msg::RoleAssignment>(
-      "/role_assignment", 10, std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
+      "/role_assignment", rclcpp::QoS(1).transient_local().reliable(),
+      std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
     
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
       "game_data", 10, std::bind(&StrategyNode::game_callback, this, std::placeholders::_1));
@@ -181,10 +182,14 @@ public:
           uint32_t my_id, target_id;
           if (!node.getInput("role", role)) return BT::NodeStatus::FAILURE;
           if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
-          if (role == "attacker") {
+          if (role == "goalkeeper") {
+              if (blackboard_->get("goalkeeper_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+          } else if (role == "attacker") {
               if (blackboard_->get("attacker_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
           } else if (role == "defender") {
               if (blackboard_->get("defender_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+          } else if (role == "kicker") {
+              if (blackboard_->get("kicker_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
           }
           return BT::NodeStatus::FAILURE;
       }, { BT::InputPort<std::string>("role") });
@@ -297,14 +302,16 @@ private:
   {
     // D03: is_yellow volta a significar a cor real do time (invert_sides fica exclusivo da visão/simulador)
     blackboard_->set("is_yellow", is_yellow_);
+    blackboard_->set("goalkeeper_id", goalkeeper_id_);
     blackboard_->set("attacker_id", attacker_id_);
     blackboard_->set("defender_id", defender_id_);
+    blackboard_->set("kicker_id", kicker_id_);
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
-    blackboard_->set("is_goalkeeper", (robot_id_ == 0));
-    blackboard_->set("is_attacker", (static_cast<uint32_t>(robot_id_) == attacker_id_));
-    blackboard_->set("is_defender", (static_cast<uint32_t>(robot_id_) == defender_id_));
-    blackboard_->set("role", (robot_id_ == 0) ? std::string("goalkeeper") : std::string("idle"));
-    blackboard_->set("kicker_id", 0u);
+    blackboard_->set("is_goalkeeper", false);
+    blackboard_->set("is_attacker", false);
+    blackboard_->set("is_defender", false);
+    blackboard_->set("is_kicker", false);
+    blackboard_->set("role", std::string("idle"));
     blackboard_->set("role_epoch", 0u);
     blackboard_->set("active_ids", std::vector<uint32_t>{});
 
@@ -490,7 +497,37 @@ public:
       blackboard_->set("gc_age_ms", 0.0);
     }
 
-    // 4. GameData (robôs, bola, velocidades e idades)
+    // 4. Papéis (RoleAssignment) — atualizado antes de GameData para que attacker_ball_dist use o attacker_id_ atual
+    if (roles) {
+      goalkeeper_id_ = roles->goalkeeper_id;
+      attacker_id_ = roles->attacker_id;
+      defender_id_ = roles->defender_id;
+      kicker_id_ = roles->kicker_id;
+
+      blackboard_->set("goalkeeper_id", roles->goalkeeper_id);
+      blackboard_->set("attacker_id", roles->attacker_id);
+      blackboard_->set("defender_id", roles->defender_id);
+      blackboard_->set("kicker_id", roles->kicker_id);
+      blackboard_->set("role_epoch", roles->epoch);
+      blackboard_->set("active_ids", roles->active_ids);
+
+      const uint32_t my_id = static_cast<uint32_t>(robot_id_);
+      std::string my_role = "idle";
+      if (my_id == roles->goalkeeper_id) {
+        my_role = "goalkeeper";
+      } else if (my_id == roles->attacker_id) {
+        my_role = "attacker";
+      } else if (my_id == roles->defender_id) {
+        my_role = "defender";
+      }
+      blackboard_->set("role", my_role);
+      blackboard_->set("is_goalkeeper", (my_id == roles->goalkeeper_id));
+      blackboard_->set("is_attacker", (my_id == roles->attacker_id));
+      blackboard_->set("is_defender", (my_id == roles->defender_id));
+      blackboard_->set("is_kicker", (my_id == roles->kicker_id));
+    }
+
+    // 5. GameData (robôs, bola, velocidades e idades)
     if (gd) {
       const double ball_x = static_cast<double>(gd->ball.x);
       const double ball_y = static_cast<double>(gd->ball.y);
@@ -576,34 +613,15 @@ public:
       if (ball_age_ms < 0.0) ball_age_ms = 0.0;
       blackboard_->set("ball_age_ms", ball_age_ms);
     }
-
-    // 5. Papéis (RoleAssignment)
-    if (roles) {
-      attacker_id_ = roles->attacker_id;
-      defender_id_ = roles->defender_id;
-      blackboard_->set("attacker_id", roles->attacker_id);
-      blackboard_->set("defender_id", roles->defender_id);
-
-      const uint32_t my_id = static_cast<uint32_t>(robot_id_);
-      std::string my_role = "idle";
-      if (my_id == roles->attacker_id) {
-        my_role = "attacker";
-      } else if (my_id == roles->defender_id) {
-        my_role = "defender";
-      } else if (my_id == 0) {
-        my_role = "goalkeeper";
-      }
-      blackboard_->set("role", my_role);
-      blackboard_->set("is_attacker", (my_id == roles->attacker_id));
-      blackboard_->set("is_defender", (my_id == roles->defender_id));
-    }
   }
 
   bool is_yellow_;
   bool invert_sides_;
   int robot_id_;
-  uint32_t attacker_id_{2};
-  uint32_t defender_id_{1};
+  uint32_t goalkeeper_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t attacker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t defender_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t kicker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
 
   double possession_distance_mm_{220.0};
 
