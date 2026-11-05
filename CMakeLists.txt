@@ -308,6 +308,7 @@ set(BT_LEAF_SOURCES
   src/hold_position_node.cpp
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
+  src/game_conditions.cpp
 )
 
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
@@ -342,6 +343,14 @@ if(BUILD_TESTING)
   ament_add_gtest(test_goalkeeper_geometry test/test_goalkeeper_geometry.cpp)
   target_include_directories(test_goalkeeper_geometry PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # T02: validador estático das BTs (scripts/validate_bt.py). Roda o dump_bt_model compilado e só
+  # achados novos (fora de scripts/validate_bt_baseline.txt) reprovam.
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_validate_bt test/test_validate_bt.py
+    ENV DUMP_BT_MODEL=${CMAKE_CURRENT_BINARY_DIR}/dump_bt_model
+    TIMEOUT 240
   )
 endif()
 
