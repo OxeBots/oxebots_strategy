@@ -154,6 +154,8 @@ add_executable(
   src/hold_position_node.cpp
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
+  src/kick_once_node.cpp
+  src/wait_ball_in_play_condition.cpp
 )
 
 ament_target_dependencies(
@@ -309,6 +311,8 @@ set(BT_LEAF_SOURCES
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
   src/game_conditions.cpp
+  src/kick_once_node.cpp
+  src/wait_ball_in_play_condition.cpp
 )
 
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
@@ -352,6 +356,41 @@ if(BUILD_TESTING)
     ENV DUMP_BT_MODEL=${CMAKE_CURRENT_BINARY_DIR}/dump_bt_model
     TIMEOUT 240
   )
+
+  # E08: WaitBallInPlay (regra de bola em jogo; rclcpp só para o log).
+  ament_add_gtest(test_wait_ball_in_play
+    test/test_wait_ball_in_play.cpp
+    src/wait_ball_in_play_condition.cpp
+  )
+  ament_target_dependencies(test_wait_ball_in_play rclcpp behaviortree_cpp)
+  target_include_directories(test_wait_ball_in_play PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # E08: KickOnce (publica/libera o override e confirma pelo deslocamento da bola).
+  ament_add_gtest(test_kick_once
+    test/test_kick_once.cpp
+    src/kick_once_node.cpp
+  )
+  ament_target_dependencies(test_kick_once rclcpp behaviortree_cpp oxebots_interfaces)
+  target_include_directories(test_kick_once PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # E10: defensor agnóstico de lado (IsBallInOpponentField, clamp da área, troca de papel).
+  ament_add_gtest(test_defender_nodes
+    test/test_defender_nodes.cpp
+    src/defender_nodes.cpp
+    src/game_conditions.cpp
+  )
+  ament_target_dependencies(test_defender_nodes rclcpp behaviortree_cpp oxebots_interfaces)
+  target_include_directories(test_defender_nodes PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # E09/E10: política estática das árvores de produção (sem PrecisionKick, chute <= 3 m/s, guardas
+  # reativas, papel por HasRole). Só Python, sem compilar nada.
+  ament_add_pytest_test(test_trees_policy test/test_trees_policy.py TIMEOUT 60)
 endif()
 
 ament_package()

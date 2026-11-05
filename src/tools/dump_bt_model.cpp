@@ -27,12 +27,14 @@
 #include "oxebots_strategy/is_ball_in_our_half_condition.h"
 #include "oxebots_strategy/keep_distance.hpp"
 #include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/kick_once_node.hpp"
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/position_bisector_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
@@ -73,6 +75,8 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
   factory.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
   factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
   factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+  factory.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", node);
+  factory.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
 
   factory.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
   factory.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");

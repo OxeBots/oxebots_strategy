@@ -29,6 +29,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_interfaces/msg/game_state.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -339,6 +340,11 @@ class DStarPlannerNode : public rclcpp::Node
 
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
+
+    /// Lado do campo vindo do GameState (troca de lados). Sem ele vale is_yellow_/invert_sides_.
+    void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg);
+    rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
+    std::optional<bool> own_goal_positive_x_;
 
     /**
      * @brief Timer callback to trigger planning iteration.

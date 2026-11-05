@@ -122,7 +122,13 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
     float penalty_width = static_cast<float>(last_geometry_->field.penalty_area_width);
     if (field_length <= 0.0f || penalty_depth <= 0.0f || penalty_width <= 0.0f) return;
 
+    // effective_is_yellow == "nosso gol está em x positivo". Com GameState, o lado vem do GC e acompanha a
+    // troca de lados do 2o tempo; os parâmetros is_yellow_team/invert_sides só valem sem GameState. Antes
+    // eram a única fonte: após a troca o goleiro era barrado na própria área (tratada como inimiga).
     bool effective_is_yellow = invert_sides_ ? !is_yellow_team_ : is_yellow_team_;
+    if (last_game_state_) {
+        effective_is_yellow = last_game_state_->our_goal_positive_x;
+    }
 
     // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
     constexpr float kAllyMarginMm = 0.0f;

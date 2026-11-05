@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+  E09 — lógica do atacante em jogo corrido, extraída do master_strategy_carry.xml (Capítulos 9 e 19).
+
+  A guarda de papel NÃO fica aqui: quem chama (o ramo AttackerRole do mestre, ou o NormalPlayTree)
+  decide quando esta árvore roda, com HasRole role="attacker" dentro de uma ReactiveSequence.
+  Assim a árvore é só comportamento e o atacante é interrompido no tick em que perde o papel.
+
+  Diferenças em relação ao trecho original do carry:
+   - o chute passa por KickBall com kick_speed="3.0" (o original pedia 6.5, que o KickBall e o
+     controlador cortavam para 3.0): o valor do XML agora é o valor real (regra R-25, SC-24);
+   - nenhum PrecisionKick: o atacante de produção chuta só com KickBall (o PrecisionKick, depois do
+     M02, passa pelo override e limita a 3 m/s, mas segue sendo folha legada das árvores antigas);
+   - sem dados, UpdateBallPosition e CalculateInterception devolvem FAILURE com log (antes
+     ficavam RUNNING mudos); o RetryUntilSuccessful repete no tick seguinte.
+-->
+<root BTCPP_format="4">
+  <BehaviorTree ID="AttackerTree">
+    <RetryUntilSuccessful num_attempts="-1">
+      <ReactiveSequence name="AttackerLogicLoop">
+        <UpdateBallPosition robot_id="{robot_id}"
+                            ball_x="{ball_x}" ball_y="{ball_y}"
+                            pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                            is_ready_to_kick="{is_ready}"
+                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+        <CalculateInterception robot_id="{robot_id}"
+                               goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
+                               carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
+                               intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
+                               intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                               intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
+                               intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
+                               intercept_carry_x="{int_carry_x}" intercept_carry_y="{int_carry_y}"
+                               intercept_carry_face_x="{int_carry_face_x}" intercept_carry_face_y="{int_carry_face_y}"
+                               is_ready_to_kick="{is_ready_pred}" />
+
+        <ReactiveFallback name="AttackLogicActions">
+          <Sequence name="ChaseAndKick">
+            <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}"
+                       face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                       tolerance="120.0" ball_contact_threshold_mm="150.0" />
+
+            <ReactiveFallback name="ApproachAndKick">
+              <Sequence name="Shoot">
+                <Inverter>
+                  <IsBallInOurHalf ball_x="{ball_x}" />
+                </Inverter>
+                <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
+              </Sequence>
+
+              <ReactiveSequence name="Realign">
+                <Inverter>
+                  <IsBallInOurHalf ball_x="{ball_x}" />
+                </Inverter>
+                <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
+                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                           tolerance="0.0" planner="straight_line" />
+              </ReactiveSequence>
+
+              <ReactiveSequence name="Carry">
+                <IsBallInOurHalf ball_x="{ball_x}" />
+                <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                           tolerance="0.0" planner="straight_line" ball_side_check="true" />
+              </ReactiveSequence>
+            </ReactiveFallback>
+
+            <Delay delay_msec="600">
+              <AlwaysSuccess/>
+            </Delay>
+          </Sequence>
+        </ReactiveFallback>
+      </ReactiveSequence>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+</root>

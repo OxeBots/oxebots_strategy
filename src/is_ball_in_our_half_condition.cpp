@@ -20,8 +20,10 @@ BT::NodeStatus IsBallInOurHalfCondition::tick()
 
   if (!getInput<double>("ball_x", ball_x)) return BT::NodeStatus::FAILURE;
   
-  auto blackboard = config().blackboard;
-  if (!blackboard->get("my_goal_x", my_goal_x)) return BT::NodeStatus::FAILURE;
+  // A chave my_goal_x mora na blackboard RAIZ; dentro de uma subárvore (AttackerTree) a blackboard
+  // local pode não tê-la, então lê direto da raiz como as demais condições de estado.
+  auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+  if (!blackboard || !blackboard->get("my_goal_x", my_goal_x)) return BT::NodeStatus::FAILURE;
 
   bool in_our_half = last_status_;
 
