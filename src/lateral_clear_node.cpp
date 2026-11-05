@@ -348,7 +348,13 @@ BT::NodeStatus LateralClearNode::onRunning()
                            std::abs(target_y - last_target_y_) > POS_UPDATE_THRESHOLD ||
                            std::abs(target_w - last_target_w_) > ANG_UPDATE_THRESHOLD);
 
-    if (target_changed) {
+    // Reenvia o objetivo a cada 200 ms mesmo sem mudança: o watchdog de 500 ms do SafetyGate zera
+    // o robô se nenhum /robot_goal ou override chegar (o GoToPoint e o GoalkeeperNode já fazem isso).
+    constexpr double kGoalHeartbeatS = 0.2;
+    const double goal_now_s = node_->now().seconds();
+    const bool heartbeat_due = (goal_now_s - last_goal_publish_s_) >= kGoalHeartbeatS;
+
+    if (target_changed || heartbeat_due) {
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
         goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
@@ -364,6 +370,7 @@ BT::NodeStatus LateralClearNode::onRunning()
         last_target_x_ = target_x;
         last_target_y_ = target_y;
         last_target_w_ = target_w;
+        last_goal_publish_s_ = goal_now_s;
     }
 
     // Ângulo real entre o kicker frontal e a bola

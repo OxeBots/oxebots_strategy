@@ -510,6 +510,9 @@ public:
 
       double gc_age_ms = (now_time - rclcpp::Time(gs->header.stamp)).nanoseconds() / 1e6;
       if (gc_age_ms < 0.0) gc_age_ms = 0.0;
+      // O referee_state_node recarimba o GameState a cada publicação, inclusive as de 100 ms com
+      // stale=true; o carimbo sozinho não revela a perda do GC (Cap. 15 e 17).
+      if (gs->stale) gc_age_ms = std::numeric_limits<double>::infinity();
       blackboard_->set("gc_age_ms", gc_age_ms);
     } else if (ref) {
       blackboard_->set("gc_command", static_cast<int>(ref->command));

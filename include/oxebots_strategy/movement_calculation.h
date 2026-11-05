@@ -108,6 +108,10 @@ private:
     static constexpr std::chrono::milliseconds kWatchdogTimeout{500};
     std::chrono::steady_clock::time_point last_intent_time_;
     bool has_received_intent_ = false;
+    // Se verdadeiro, uma rota recebida em /robot_<id>/path também renova o watchdog. Só deve ser
+    // ligado quando a rota vem de um gerador externo (trajectory_benchmark): o D* republica a
+    // rota em timer mesmo com a árvore travada, o que anularia o watchdog.
+    bool path_renews_watchdog_ = false;
 
     // --- Estado do canal de override (Align/Kick/Halt) ---
     // Se nenhum override for recebido por kOverrideTtl, o modo efetivo cai para NONE sozinho:

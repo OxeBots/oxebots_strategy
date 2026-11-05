@@ -3,53 +3,56 @@
     <ReactiveFallback name="MasterStrategy">
       
       <!-- 0. HALT: Parada Absoluta -->
-      <Sequence name="HaltBranch">
+      <!-- Toda guarda de ramo é ReactiveSequence: uma Sequence comum não reavalia a guarda enquanto o
+           filho está RUNNING (o HoldPosition do STOP nunca termina) e o robô ficaria preso no ramo
+           antigo depois de um FORCE START. -->
+      <ReactiveSequence name="HaltBranch">
         <CheckGCCommand expected="0"/>
         <SubTree ID="HaltSubTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
 
       <!-- 1. STOP: Aciona a árvore de stop (que usa o KeepDistance de 550mm) -->
-      <Sequence name="StopBranch">
+      <ReactiveSequence name="StopBranch">
         <CheckGCCommand expected="1"/>
         <SubTree ID="StopSubTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
 
       <!-- ========================================================= -->
       <!-- NOSSA BOLA PARADA: KICK-OFF (Amarelo 4, Azul 5) -->
-      <Sequence name="OurKickOffBranch">
+      <ReactiveSequence name="OurKickOffBranch">
         <Fallback>
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
         </Fallback>
         <SubTree ID="KickOffTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
 
       <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
-      <Sequence name="OurPenaltyBranch">
+      <ReactiveSequence name="OurPenaltyBranch">
         <Fallback>
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
         </Fallback>
         <SubTree ID="PenaltyTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
 
       <!-- NOSSAS FALTAS / LATERAIS (Já resolvidas no C++) -->
-      <Sequence name="CornerBranch">
+      <ReactiveSequence name="CornerBranch">
           <IsValueTrue value="{is_corner_kick}"/>
           <SubTree ID="CornerTree" _autoremap="true" />
-      </Sequence>
-      <Sequence name="ThrowInBranch">
+      </ReactiveSequence>
+      <ReactiveSequence name="ThrowInBranch">
           <IsValueTrue value="{is_kick_in}"/>
           <SubTree ID="ThrowInTree" _autoremap="true" />
-      </Sequence>
-      <Sequence name="FreeKickBranch">
+      </ReactiveSequence>
+      <ReactiveSequence name="FreeKickBranch">
           <IsValueTrue value="{is_free_kick}"/>
           <SubTree ID="FreeKickTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
 
       <!-- ========================================================= -->
       <!-- BOLA PARADA DO ADVERSÁRIO: Usa o OppSetPieceTree para RECUAR -->
-      <Sequence name="OpponentSetPieceBranch">
+      <ReactiveSequence name="OpponentSetPieceBranch">
         <Fallback>
           <!-- Kick-Off deles -->
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
@@ -64,7 +67,7 @@
           <IsValueTrue value="{is_opponent_foul}"/>
         </Fallback>
         <SubTree ID="OppSetPieceTree" _autoremap="true" />
-      </Sequence>
+      </ReactiveSequence>
       <!-- ========================================================= -->
 
       <!-- JOGO ROLANDO -->
