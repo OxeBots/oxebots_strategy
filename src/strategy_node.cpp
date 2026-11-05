@@ -37,6 +37,10 @@
 #include "oxebots_strategy/keep_distance.hpp"
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/has_line_of_sight.hpp"
+#include "oxebots_strategy/game_conditions.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -70,11 +74,19 @@ public:
     this->declare_parameter<std::string>("game_state_topic", "/game_state");
     this->declare_parameter<std::string>("gc_topic", "/gc_multicast_bridge/referee_messages");
     this->declare_parameter<double>("possession_distance", 220.0);
+    this->declare_parameter<bool>("require_gc", true);
+    this->declare_parameter<double>("max_gc_ms", 500.0);
+    this->declare_parameter<double>("max_pose_ms", 150.0);
+    this->declare_parameter<double>("max_ball_ms", 300.0);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
     robot_id_ = this->get_parameter("robot_id").as_int();
     possession_distance_mm_ = this->get_parameter("possession_distance").as_double();
+    require_gc_ = this->get_parameter("require_gc").as_bool();
+    max_gc_ms_ = this->get_parameter("max_gc_ms").as_double();
+    max_pose_ms_ = this->get_parameter("max_pose_ms").as_double();
+    max_ball_ms_ = this->get_parameter("max_ball_ms").as_double();
 
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
@@ -158,6 +170,13 @@ public:
       factory_.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
       factory_.registerNodeType<oxebots_strategy::AimAt>("AimAt");
       factory_.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
+      factory_.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
+      factory_.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
+      factory_.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
+      factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
@@ -212,8 +231,18 @@ public:
       factory_.registerSimpleAction("Halt", [&](BT::TreeNode& node) {
           std::string reason = "pelo GC";
           std::string input_reason;
-          if (node.getInput("reason", input_reason) && input_reason == "idle") {
-              reason = "por estar ocioso (sem papel)";
+          if (node.getInput("reason", input_reason)) {
+              if (input_reason == "idle") {
+                  reason = "por estar ocioso (sem papel)";
+              } else if (input_reason == "gc_halt") {
+                  reason = "por HALT do arbitro";
+              } else if (input_reason == "timeout") {
+                  reason = "por TIMEOUT";
+              } else if (input_reason == "stale_data") {
+                  reason = "por dados desatualizados (stale/modo degradado)";
+              } else {
+                  reason = "motivo: " + input_reason;
+              }
           }
           RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Robô %d parado %s", robot_id_, reason.c_str());
 
@@ -330,8 +359,16 @@ private:
     blackboard_->set("goal_width", 0.0);
     blackboard_->set("center_circle_radius", 0.0);
 
+    // Configurações de limites e obrigatoriedade de GC
+    blackboard_->set("require_gc", require_gc_);
+    blackboard_->set("use_gc", require_gc_);
+    blackboard_->set("max_gc_ms", max_gc_ms_);
+    blackboard_->set("max_pose_ms", max_pose_ms_);
+    blackboard_->set("max_ball_ms", max_ball_ms_);
+
     // Chaves de GameState e GC
-    blackboard_->set("phase", 0);
+    const int initial_phase = require_gc_ ? 0 : 9;  // 9 = PHASE_RUN no modo sem GC
+    blackboard_->set("phase", initial_phase);
     blackboard_->set("restart_ctx", 0);
     blackboard_->set("we_favored", false);
     blackboard_->set("speed_limit", 1.5);
@@ -361,7 +398,7 @@ private:
     blackboard_->set("defender_ball_dist", std::numeric_limits<double>::infinity());
 
     // Idades dos dados
-    blackboard_->set("gc_age_ms", std::numeric_limits<double>::infinity());
+    blackboard_->set("gc_age_ms", require_gc_ ? std::numeric_limits<double>::infinity() : 0.0);
     blackboard_->set("pose_age_ms", std::numeric_limits<double>::infinity());
     blackboard_->set("ball_age_ms", std::numeric_limits<double>::infinity());
   }
@@ -480,6 +517,9 @@ public:
 
       double gc_age_ms = (now_time - rclcpp::Time(gs->header.stamp)).nanoseconds() / 1e6;
       if (gc_age_ms < 0.0) gc_age_ms = 0.0;
+      // O referee_state_node recarimba o GameState a cada publicação, inclusive as de 100 ms com
+      // stale=true; o carimbo sozinho não revela a perda do GC (Cap. 15 e 17).
+      if (gs->stale) gc_age_ms = std::numeric_limits<double>::infinity();
       blackboard_->set("gc_age_ms", gc_age_ms);
     } else if (ref) {
       blackboard_->set("gc_command", static_cast<int>(ref->command));
@@ -494,6 +534,28 @@ public:
         blackboard_->set("has_designated", true);
         blackboard_->set("designated", Pose2D{dx, dy, 0.0});
       }
+      blackboard_->set("gc_age_ms", 0.0);
+
+      // Mapeamento de phase a partir do referee bruto para garantir compatibilidade
+      int mapped_phase = 0;
+      switch (ref->command) {
+        case 0: mapped_phase = 0; break;  // HALT
+        case 1: mapped_phase = 2; break;  // STOP
+        case 2: mapped_phase = 9; break;  // NORMAL_START -> RUN
+        case 3: mapped_phase = 9; break;  // FORCE_START -> RUN
+        case 4: case 5: mapped_phase = 4; break;  // PREPARE_KICKOFF
+        case 6: case 7: mapped_phase = 6; break;  // PREPARE_PENALTY
+        case 8: case 9: case 10: case 11: mapped_phase = 8; break;  // FREE_KICK
+        case 12: case 13: mapped_phase = 1; break;  // TIMEOUT
+        case 16: case 17: mapped_phase = 3; break;  // BALL_PLACEMENT
+        default: mapped_phase = 0; break;
+      }
+      blackboard_->set("phase", mapped_phase);
+      bool we_favored = (is_yellow_ && (ref->command == 4 || ref->command == 6 || ref->command == 8 || ref->command == 10 || ref->command == 16)) ||
+                        (!is_yellow_ && (ref->command == 5 || ref->command == 7 || ref->command == 9 || ref->command == 11 || ref->command == 17));
+      blackboard_->set("we_favored", we_favored);
+    } else if (!require_gc_) {
+      blackboard_->set("phase", 9);  // PHASE_RUN
       blackboard_->set("gc_age_ms", 0.0);
     }
 
@@ -624,6 +686,10 @@ public:
   uint32_t kicker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
 
   double possession_distance_mm_{220.0};
+  bool require_gc_{true};
+  double max_gc_ms_{500.0};
+  double max_pose_ms_{150.0};
+  double max_ball_ms_{300.0};
 
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};

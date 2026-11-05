@@ -16,6 +16,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 if(BUILD_TESTING)
@@ -76,6 +77,7 @@ if(BUILD_TESTING)
     src/defender_nodes.cpp
     src/goal_line_defend_node.cpp
     src/is_ball_in_area_condition.cpp
+    src/is_ball_closest_condition.cpp
     src/is_ball_in_our_half_condition.cpp
     src/lateral_clear_node.cpp
     src/position_bisector_node.cpp
@@ -84,6 +86,9 @@ if(BUILD_TESTING)
     src/aim_at.cpp
     src/has_line_of_sight.cpp
     src/keep_distance.cpp
+    src/hold_position_node.cpp
+    src/set_motion_limit_node.cpp
+    src/compute_legal_slot_node.cpp
   )
   ament_target_dependencies(test_strategy_node
     rclcpp
@@ -93,9 +98,37 @@ if(BUILD_TESTING)
     ament_index_cpp
     geometry_msgs
     nav_msgs
+    std_msgs
     visualization_msgs
   )
   target_include_directories(test_strategy_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  ament_add_gtest(test_game_conditions
+    test/test_game_conditions.cpp
+    src/game_conditions.cpp
+  )
+  ament_target_dependencies(test_game_conditions
+    rclcpp
+    behaviortree_cpp
+  )
+  target_include_directories(test_game_conditions PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  ament_add_gtest(test_compute_legal_slot
+    test/test_compute_legal_slot.cpp
+    src/compute_legal_slot_node.cpp
+  )
+  ament_target_dependencies(test_compute_legal_slot
+    rclcpp
+    behaviortree_cpp
+    oxebots_interfaces
+  )
+  target_include_directories(test_compute_legal_slot PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
   )
@@ -109,6 +142,7 @@ endif()
 add_executable(
   strategy_node
   src/strategy_node.cpp
+  src/game_conditions.cpp
   src/go_to_point_node.cpp
   src/kick_ball_node.cpp
   src/align_to_ball_node.cpp
@@ -129,6 +163,9 @@ add_executable(
   src/aim_at.cpp
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
 )
 
 ament_target_dependencies(
@@ -140,6 +177,7 @@ ament_target_dependencies(
   ament_index_cpp
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
 )
 
@@ -162,6 +200,7 @@ ament_target_dependencies(
   nav_msgs
   visualization_msgs
   sensor_msgs
+  std_msgs
   tf2_ros
 )
 
@@ -278,6 +317,10 @@ set(BT_LEAF_SOURCES
   src/aim_at.cpp
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
+  src/hold_position_node.cpp
+  src/set_motion_limit_node.cpp
+  src/compute_legal_slot_node.cpp
+  src/game_conditions.cpp
 )
 
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
@@ -291,6 +334,7 @@ ament_target_dependencies(
   ament_index_cpp
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
 )
 
@@ -311,6 +355,14 @@ if(BUILD_TESTING)
   ament_add_gtest(test_goalkeeper_geometry test/test_goalkeeper_geometry.cpp)
   target_include_directories(test_goalkeeper_geometry PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # T02: validador estático das BTs (scripts/validate_bt.py). Roda o dump_bt_model compilado e só
+  # achados novos (fora de scripts/validate_bt_baseline.txt) reprovam.
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_validate_bt test/test_validate_bt.py
+    ENV DUMP_BT_MODEL=${CMAKE_CURRENT_BINARY_DIR}/dump_bt_model
+    TIMEOUT 240
   )
 endif()
 

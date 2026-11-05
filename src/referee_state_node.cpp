@@ -45,6 +45,7 @@ public:
         this->declare_parameter<double>("kick_timeout_s", 10.0);
         this->declare_parameter<double>("stop_speed_mps", 0.75);
         this->declare_parameter<double>("play_speed_mps", 1.5);
+        this->declare_parameter<bool>("require_gc", true);
 
         is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
         stale_timeout_ms_ = this->get_parameter("stale_timeout_ms").as_double();
@@ -52,6 +53,7 @@ public:
         kick_timeout_s_ = this->get_parameter("kick_timeout_s").as_double();
         stop_speed_mps_ = this->get_parameter("stop_speed_mps").as_double();
         play_speed_mps_ = this->get_parameter("play_speed_mps").as_double();
+        require_gc_ = this->get_parameter("require_gc").as_bool();
 
         const auto gc_topic = this->get_parameter("gc_topic").as_string();
         const auto ball_topic = this->get_parameter("ball_topic").as_string();
@@ -231,6 +233,14 @@ public:
     // 6. Marcar o estado como velho (temporizador de 100 ms)
     void staleTimerCallback()
     {
+        if (!require_gc_)
+        {
+            state_.stale = false;
+            state_.phase = GameState::PHASE_RUN;
+            publishState();
+            return;
+        }
+
         if (!has_received_gc_ || !last_gc_rx_time_.has_value())
         {
             state_.stale = true;
@@ -256,25 +266,36 @@ public:
 private:
     void initDefaultState()
     {
-        state_.header.stamp.sec = 0;
-        state_.header.stamp.nanosec = 0U;
+        state_.header.stamp = this->now();
         state_.command_counter = 0;
-        state_.command = Referee::COMMAND_HALT;
-        state_.phase = GameState::PHASE_HALT;
-        state_.restart_ctx = GameState::RESTART_NONE;
-        state_.we_favored = false;
         state_.stage = 0;
         state_.our_goal_positive_x = is_yellow_team_;
         state_.has_designated = false;
         state_.designated_position.x = 0.0f;
         state_.designated_position.y = 0.0f;
         state_.designated_position.z = 0.0f;
-        state_.speed_limit_mps = 0.0f;
+        state_.speed_limit_mps = require_gc_ ? 0.0f : static_cast<float>(play_speed_mps_);
         state_.ball_min_distance_mm = 0.0f;
         state_.can_place_ball = false;
         state_.max_allowed_bots = 3;
         state_.our_goalkeeper_id = 0;
-        state_.stale = true;
+
+        if (!require_gc_)
+        {
+            state_.command = Referee::COMMAND_FORCE_START;
+            state_.phase = GameState::PHASE_RUN;
+            state_.restart_ctx = GameState::RESTART_NONE;
+            state_.we_favored = true;
+            state_.stale = false;
+        }
+        else
+        {
+            state_.command = Referee::COMMAND_HALT;
+            state_.phase = GameState::PHASE_HALT;
+            state_.restart_ctx = GameState::RESTART_NONE;
+            state_.we_favored = false;
+            state_.stale = true;
+        }
     }
 
     void updateTeamInfo(const Referee & msg)
@@ -529,6 +550,7 @@ private:
     }
 
     bool is_yellow_team_{false};
+    bool require_gc_{true};
     double stale_timeout_ms_{500.0};
     double ball_moved_mm_{50.0};
     double kick_timeout_s_{10.0};

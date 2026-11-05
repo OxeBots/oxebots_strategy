@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4" main_tree_to_execute="MainTreeEL">
+  <BehaviorTree ID="MainTreeEL">
+    <ReactiveFallback name="MasterEL">
+
+      <!-- Dados ausentes ou antigos: modo seguro -->
+      <ReactiveSequence name="SafetyGuard">
+        <Inverter>
+          <IsDataFresh max_gc_ms="500" max_pose_ms="150" max_ball_ms="300"/>
+        </Inverter>
+        <SubTree ID="DegradedModeTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <!-- HALT -->
+      <ReactiveSequence name="HaltBranch">
+        <CheckGameState phase="HALT"/>
+        <SubTree ID="HaltSubTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <!-- TIMEOUT -->
+      <ReactiveSequence name="TimeoutBranch">
+        <CheckGameState phase="TIMEOUT"/>
+        <SubTree ID="TimeoutTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <!-- STOP -->
+      <ReactiveSequence name="StopBranch">
+        <CheckGameState phase="STOP"/>
+        <SubTree ID="StopSubTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <!-- Fases ainda não implementadas: parada segura -->
+      <ReactiveSequence name="BallPlacementBranch">
+        <CheckGameState phase="BALL_PLACEMENT"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="PrepareKickoffBranch">
+        <CheckGameState phase="PREPARE_KICKOFF"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="KickoffBranch">
+        <CheckGameState phase="KICKOFF"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="PreparePenaltyBranch">
+        <CheckGameState phase="PREPARE_PENALTY"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="PenaltyBranch">
+        <CheckGameState phase="PENALTY"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="FreeKickBranch">
+        <CheckGameState phase="FREE_KICK"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="RunBranch">
+        <CheckGameState phase="RUN"/>
+        <Halt reason="not_implemented"/>
+      </ReactiveSequence>
+
+      <!-- Estado desconhecido: seguro por padrão -->
+      <Halt reason="unknown_phase"/>
+
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

@@ -239,7 +239,13 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     const bool pos_changed = std::hypot(target_x - last_target_x_, target_y - last_target_y_) > POSITION_UPDATE_THRESHOLD;
     const bool ang_changed = std::abs(std::remainder(target_w - last_target_w_, 2.0 * M_PI)) > ANGLE_UPDATE_THRESHOLD;
 
-    if (pos_changed || ang_changed) {
+    // Reenvia o objetivo a cada 200 ms mesmo sem mudança: o watchdog de 500 ms do SafetyGate zera
+    // o robô se nenhum /robot_goal ou override chegar (o GoToPoint e o GoalkeeperNode já fazem isso).
+    constexpr double kGoalHeartbeatS = 0.2;
+    const double now_s = now.seconds();
+    const bool heartbeat_due = (now_s - last_goal_publish_s_) >= kGoalHeartbeatS;
+
+    if (pos_changed || ang_changed || heartbeat_due) {
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
         goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
@@ -255,6 +261,7 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
         last_target_y_ = target_y;
         last_target_x_ = target_x;
         last_target_w_ = target_w;
+        last_goal_publish_s_ = now_s;
     }
 
     return BT::NodeStatus::RUNNING;

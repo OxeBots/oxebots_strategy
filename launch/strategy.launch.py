@@ -10,21 +10,30 @@ def launch_setup(context, *args, **kwargs):
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
     bringup_pkg_share = get_package_share_directory("oxebots_bringup")
 
+    base_config = os.path.join(bringup_pkg_share, "config", "match_config.yaml")
     config_file = LaunchConfiguration("config_file").perform(context)
     if not config_file:
-        config_file = os.path.join(bringup_pkg_share, "config", "match_config.yaml")
+        config_file = base_config
+
+    config_params = [base_config]
+    if os.path.abspath(config_file) != os.path.abspath(base_config):
+        config_params.append(config_file)
 
     bt_xml = LaunchConfiguration("bt_xml").perform(context)
     invert_sides = LaunchConfiguration("invert_sides").perform(context)
+    require_gc = LaunchConfiguration("require_gc").perform(context)
 
     # Helper to create nodes for each robot
     def create_robot_nodes(robot_id):
         # We only add bt_xml_path if it's not empty to avoid overriding YAML
         strategy_parameters = [
-            config_file,
+            *config_params,
             {"robot_id": robot_id},
             {"invert_sides": invert_sides == "True"}
         ]
+
+        if require_gc:
+            strategy_parameters.append({"require_gc": require_gc.lower() in ("true", "1")})
 
         # Only override if bt_xml is explicitly provided
         if bt_xml:
@@ -36,7 +45,7 @@ def launch_setup(context, *args, **kwargs):
             name=f"d_star_planner_node_{robot_id}",
             output="screen",
             parameters=[
-                config_file,
+                *config_params,
                 {"robot_id": robot_id},
                 {"invert_sides": invert_sides == "True"}
             ],
@@ -47,7 +56,7 @@ def launch_setup(context, *args, **kwargs):
             name=f"path_follower_node_{robot_id}",
             output="screen",
             parameters=[
-                config_file,
+                *config_params,
                 {"robot_id": robot_id},
                 {"invert_sides": invert_sides == "True"}
             ],
@@ -57,7 +66,7 @@ def launch_setup(context, *args, **kwargs):
             executable="trajectory_setpoint_node",
             name=f"trajectory_setpoint_node_{robot_id}",
             output="screen",
-            parameters=[config_file, {"robot_id": robot_id}],
+            parameters=[*config_params, {"robot_id": robot_id}],
         )
         strategy = Node(
             package="oxebots_strategy",
@@ -99,9 +108,16 @@ def generate_launch_description():
         description="YAML configuration file path",
     )
 
+    declare_require_gc_arg = DeclareLaunchArgument(
+        "require_gc",
+        default_value="",
+        description="Override require_gc in strategy (True/False)",
+    )
+
     return LaunchDescription([
         declare_invert_sides_arg, 
         declare_bt_xml_arg,
         declare_config_file_arg,
+        declare_require_gc_arg,
         OpaqueFunction(function=launch_setup)
     ])

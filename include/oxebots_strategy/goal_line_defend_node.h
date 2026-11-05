@@ -37,6 +37,8 @@ private:
   double last_target_y_ = -99999.0;
   double last_target_x_ = -99999.0;
   double last_target_w_ = -99999.0;
+  // Instante (s) do último objetivo publicado; o reenvio periódico mantém o watchdog do SafetyGate.
+  double last_goal_publish_s_ = -1.0;
 
   // Modo da última decisão (para registrar só quando muda)
   const char * last_mode_ = nullptr;

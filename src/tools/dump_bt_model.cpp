@@ -13,11 +13,14 @@
 #include "oxebots_strategy/align_to_ball_node.h"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/calculate_kick_off_pose.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_strategy/defender_nodes.hpp"
+#include "oxebots_strategy/game_conditions.hpp"
 #include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/goal_line_defend_node.h"
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_strategy/has_line_of_sight.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
 #include "oxebots_strategy/is_ball_close_condition.h"
 #include "oxebots_strategy/is_ball_closest_condition.h"
 #include "oxebots_strategy/is_ball_in_area_condition.h"
@@ -27,6 +30,7 @@
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/position_bisector_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "rclcpp/rclcpp.hpp"
@@ -62,6 +66,13 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
   factory.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
   factory.registerNodeType<oxebots_strategy::AimAt>("AimAt");
   factory.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
+  factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
+  factory.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", node);
+  factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
+  factory.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
+  factory.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
+  factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
+  factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
 
   factory.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
   factory.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");

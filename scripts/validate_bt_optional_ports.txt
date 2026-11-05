@@ -5,3 +5,4 @@ ShadowBall.penalty_area_depth   # cai para a blackboard raiz (defender_nodes.cpp
 MarkOpponent.penalty_area_depth # idem
 GoToClamped.penalty_area_depth  # idem
 Halt.reason                     # sem a porta, usa "pelo GC" (strategy_node.cpp)
+IsDataFresh.require_gc          # sem a porta, usa require_gc/use_gc da blackboard ou true (game_conditions.cpp)
