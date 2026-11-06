@@ -1,5 +1,5 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
-  <BehaviorTree ID="MainTree">
+<root main_tree_to_execute="TestTree" BTCPP_format="4">
+  <BehaviorTree ID="TestTree">
     <Sequence name="MainLogic">
 
       <!-- Robô 0: Chega a 100mm do alvo antes de liberar o 1 -->

@@ -2,6 +2,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 
+#include <cmath>
 #include <string>
 
 namespace oxebots_strategy
@@ -42,6 +43,42 @@ bool readString(BT::Blackboard * bb, const char * key, std::string & value)
   return bb && bb->get(key, value);
 }
 
+// Na BT.CPP 4.x, portas com valor padrão em providedPorts() são pré-preenchidas
+// em config().input_ports pelo parser XML com std::to_string(default_value)
+// (ex.: "150.000000") mesmo quando omitidas na tag XML. Esta função distingue
+// um atributo explícito no XML do valor padrão injetado automaticamente.
+bool hasExplicitPort(
+  const BT::PortsRemapping & ports, const char * port_name, double default_value)
+{
+  const auto it = ports.find(port_name);
+  return it != ports.end() && it->second != std::to_string(default_value);
+}
+
+bool isValidPhaseName(const std::string & phase)
+{
+  static const char * const kValidPhases[] = {
+    "HALT", "TIMEOUT", "STOP", "BALL_PLACEMENT", "PREPARE_KICKOFF",
+    "KICKOFF", "PREPARE_PENALTY", "PENALTY", "FREE_KICK", "RUN"};
+  for (const char * valid : kValidPhases) {
+    if (phase == valid) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isValidRoleName(const std::string & role)
+{
+  static const char * const kValidRoles[] = {
+    "goalkeeper", "attacker", "defender", "kicker", "idle"};
+  for (const char * valid : kValidRoles) {
+    if (role == valid) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool readPhase(BT::Blackboard * bb, std::string & phase)
 {
   if (!bb) {
@@ -53,19 +90,22 @@ bool readPhase(BT::Blackboard * bb, std::string & phase)
   // lança exceção na BT.CPP 4.x; nesse caso caímos no fallback.
   try {
     int phase_id = -1;
-    if (bb->get("phase", phase_id) && phase_id >= 0 && phase_id <= 9) {
-      static const char * const phase_names[] = {
-        "HALT", "TIMEOUT", "STOP", "BALL_PLACEMENT", "PREPARE_KICKOFF",
-        "KICKOFF", "PREPARE_PENALTY", "PENALTY", "FREE_KICK", "RUN"};
-      phase = phase_names[phase_id];
-      return true;
+    if (bb->get("phase", phase_id)) {
+      if (phase_id >= 0 && phase_id <= 9) {
+        static const char * const phase_names[] = {
+          "HALT", "TIMEOUT", "STOP", "BALL_PLACEMENT", "PREPARE_KICKOFF",
+          "KICKOFF", "PREPARE_PENALTY", "PENALTY", "FREE_KICK", "RUN"};
+        phase = phase_names[phase_id];
+        return true;
+      }
+      return false;
     }
   } catch (const std::exception &) {
     // Valor armazenado não é conversível para int — tenta string abaixo
   }
 
   // Fallback: alguém escreveu a fase como string diretamente
-  return bb->get("phase", phase);
+  return bb->get("phase", phase) && isValidPhaseName(phase);
 }
 
 }  // namespace
@@ -86,8 +126,8 @@ BT::PortsList CheckGameStateCondition::providedPorts()
 BT::NodeStatus CheckGameStateCondition::tick()
 {
   std::string expected;
-  if (!getInput("phase", expected) || expected.empty()) {
-    logError("CheckGameState: porta [phase] ausente ou vazia");
+  if (!getInput("phase", expected) || !isValidPhaseName(expected)) {
+    logError("CheckGameState: porta [phase] ausente ou inválida");
     return BT::NodeStatus::FAILURE;
   }
 
@@ -135,32 +175,48 @@ BT::PortsList IsDataFreshCondition::providedPorts()
     BT::InputPort<double>("max_gc_ms", 500.0, "Idade máxima do Game Controller em ms"),
     BT::InputPort<double>("max_pose_ms", 150.0, "Idade máxima da pose em ms"),
     BT::InputPort<double>("max_ball_ms", 300.0, "Idade máxima da bola em ms"),
-    BT::InputPort<bool>("require_gc", "Se falso, ignora a verificação de idade do GC")};
+    BT::InputPort<bool>(
+      "require_gc", "Opcional: se falso, ignora a verificação de idade do GC")};
 }
 
 BT::NodeStatus IsDataFreshCondition::tick()
 {
-  double max_gc_ms;
-  double max_pose_ms;
-  double max_ball_ms;
-  if (!getInput("max_gc_ms", max_gc_ms) ||
-      !getInput("max_pose_ms", max_pose_ms) ||
-      !getInput("max_ball_ms", max_ball_ms) ||
-      max_gc_ms < 0.0 || max_pose_ms < 0.0 || max_ball_ms < 0.0) {
-    logError("IsDataFresh: portas de limite ausentes ou inválidas");
-    return BT::NodeStatus::FAILURE;
-  }
-
   auto * bb = rootBB(config());
   if (!bb) {
     logError("IsDataFresh: Blackboard inexistente");
     return BT::NodeStatus::FAILURE;
   }
 
-  // Permite que o YAML (via Blackboard) sobrescreva os limites configurados
+  // Ordem de precedência para os limites:
+  // 1. Valores padrão das portas (500 / 150 / 300 ms)
+  // 2. Blackboard (parâmetros YAML carregados pelo strategy_node)
+  // 3. Portas explícitas no XML da BT (maior prioridade)
+  double max_gc_ms = 500.0;
+  double max_pose_ms = 150.0;
+  double max_ball_ms = 300.0;
   (void)bb->get("max_gc_ms", max_gc_ms);
   (void)bb->get("max_pose_ms", max_pose_ms);
   (void)bb->get("max_ball_ms", max_ball_ms);
+
+  const auto & ports = config().input_ports;
+  if (hasExplicitPort(ports, "max_gc_ms", 500.0) && !getInput("max_gc_ms", max_gc_ms)) {
+    logError("IsDataFresh: porta [max_gc_ms] inválida");
+    return BT::NodeStatus::FAILURE;
+  }
+  if (hasExplicitPort(ports, "max_pose_ms", 150.0) && !getInput("max_pose_ms", max_pose_ms)) {
+    logError("IsDataFresh: porta [max_pose_ms] inválida");
+    return BT::NodeStatus::FAILURE;
+  }
+  if (hasExplicitPort(ports, "max_ball_ms", 300.0) && !getInput("max_ball_ms", max_ball_ms)) {
+    logError("IsDataFresh: porta [max_ball_ms] inválida");
+    return BT::NodeStatus::FAILURE;
+  }
+
+  if (!std::isfinite(max_gc_ms) || !std::isfinite(max_pose_ms) || !std::isfinite(max_ball_ms) ||
+      max_gc_ms < 0.0 || max_pose_ms < 0.0 || max_ball_ms < 0.0) {
+    logError("IsDataFresh: limites de idade negativos ou inválidos");
+    return BT::NodeStatus::FAILURE;
+  }
 
   // Determina se o GC é obrigatório:
   // 1. Valor padrão: true
@@ -170,7 +226,10 @@ BT::NodeStatus IsDataFreshCondition::tick()
   if (!bb->get("require_gc", require_gc)) {
     (void)bb->get("use_gc", require_gc);
   }
-  (void)getInput("require_gc", require_gc);
+  if (ports.find("require_gc") != ports.end() && !getInput("require_gc", require_gc)) {
+    logError("IsDataFresh: porta [require_gc] inválida");
+    return BT::NodeStatus::FAILURE;
+  }
 
   double pose_age_ms;
   double ball_age_ms;
@@ -187,14 +246,16 @@ BT::NodeStatus IsDataFreshCondition::tick()
       logError("IsDataFresh: gc_age_ms ausente na Blackboard e require_gc=true");
       return BT::NodeStatus::FAILURE;
     }
-    gc_fresh = (gc_age_ms <= max_gc_ms);
+    gc_fresh = std::isfinite(gc_age_ms) && (gc_age_ms >= 0.0) && (gc_age_ms <= max_gc_ms);
     if (!gc_fresh) {
       logWarning("IsDataFresh: gc_age_ms excedeu max_gc_ms");
     }
   }
 
-  const bool pose_fresh = pose_age_ms <= max_pose_ms;
-  const bool ball_fresh = ball_age_ms <= max_ball_ms;
+  const bool pose_fresh =
+    std::isfinite(pose_age_ms) && (pose_age_ms >= 0.0) && (pose_age_ms <= max_pose_ms);
+  const bool ball_fresh =
+    std::isfinite(ball_age_ms) && (ball_age_ms >= 0.0) && (ball_age_ms <= max_ball_ms);
   if (!pose_fresh) {
     logWarning("IsDataFresh: pose_age_ms excedeu max_pose_ms");
   }
@@ -224,15 +285,15 @@ BT::PortsList HasRoleCondition::providedPorts()
 BT::NodeStatus HasRoleCondition::tick()
 {
   std::string expected_role;
-  if (!getInput("role", expected_role) || expected_role.empty()) {
-    logError("HasRole: porta [role] ausente ou vazia");
+  if (!getInput("role", expected_role) || !isValidRoleName(expected_role)) {
+    logError("HasRole: porta [role] ausente ou inválida");
     return BT::NodeStatus::FAILURE;
   }
 
   std::string current_role;
   auto * bb = rootBB(config());
-  if (!readString(bb, "role", current_role)) {
-    logError("HasRole: chave [role] ausente na Blackboard");
+  if (!readString(bb, "role", current_role) || !isValidRoleName(current_role)) {
+    logError("HasRole: chave [role] ausente ou inválida na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 

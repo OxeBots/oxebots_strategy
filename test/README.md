@@ -228,14 +228,15 @@ faz os achados aparecerem como novos: regrave quando mudar nomes de propósito.
 - **R1**: renomeie o `ID` da árvore para ser único (a duplicata nunca avisa em tempo de execução) (ou mova a árvore legada para fora de
   `behavior_trees/`). Atualize as referências `<SubTree ID>` e `main_tree_to_execute`.
 - **R5**: remova o atributo ou acrescente a porta à folha.
-- **R2/R3/R8**: registre o nó em `strategy_node.cpp` **e** em `src/tools/dump_bt_model.cpp`, e inclua
-  o `.cpp` no `CMakeLists.txt` (nas duas listas: `strategy_node` e `BT_LEAF_SOURCES`).
+- **R2/R3/R8**: registre o nó em `src/node_registry.cpp` e inclua o `.cpp` na lista única
+  `BT_LEAF_SOURCES` do `CMakeLists.txt`.
 
 ### Ao criar ou alterar uma folha
-Mantenha o `dump_bt_model.cpp` em dia: ele tem a sua própria lista de registros (e o
-`CMakeLists.txt`, a sua lista de fontes `BT_LEAF_SOURCES`). Se esquecer, a regra R8 avisa e, para
-uma folha nova, o link do `dump_bt_model` falha. O conserto de fundo é o registro único dos nós
-(tarefa A05 do backlog), que eliminará essa duplicação.
+O registro de todas as folhas é centralizado em `src/node_registry.cpp` (usado tanto por
+`strategy_node` quanto por `dump_bt_model` e `test_strategy_node`), e a lista de fontes fica em
+`BT_LEAF_SOURCES` no `CMakeLists.txt`. Para regenerar a paleta `TreeNodesModel` do Groot2 após
+adicionar ou alterar portas de uma folha, rode:
+`ros2 run oxebots_strategy dump_bt_model --groot > src/oxebots_strategy/behavior_trees/tree_nodes_model.xml`.
 
 ---
 

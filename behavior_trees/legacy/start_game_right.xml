@@ -1,4 +1,4 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
+<root main_tree_to_execute="StartGameRight" BTCPP_format="4">
 
   <TreeNodesModel>
     <Action ID="GoToPoint">
@@ -15,7 +15,7 @@
     </Condition>
   </TreeNodesModel>
 
-  <BehaviorTree ID="MainTree">
+  <BehaviorTree ID="StartGameRight">
     <Repeat num_cycles="-1">
       <Fallback name="RoleSelector">
         

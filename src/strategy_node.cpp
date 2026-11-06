@@ -17,38 +17,15 @@
 #include "behaviortree_cpp/bt_factory.h"
 #include "behaviortree_cpp/loggers/groot2_publisher.h"
 #include "behaviortree_cpp/blackboard.h"
-#include "oxebots_strategy/go_to_point_node.h"
-#include "oxebots_strategy/kick_ball_node.h"
-#include "oxebots_strategy/align_to_ball_node.h"
-#include "oxebots_strategy/update_ball_position_node.h"
-#include "oxebots_strategy/calculate_interception_node.h"
-#include "oxebots_strategy/is_ball_close_condition.h"
-#include "oxebots_strategy/goalkeeper_node.h"
-#include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/defender_nodes.hpp"
-#include "oxebots_strategy/goal_line_defend_node.h"
-#include "oxebots_strategy/is_ball_in_area_condition.h"
-#include "oxebots_strategy/is_ball_closest_condition.h"
-#include "oxebots_strategy/is_ball_in_our_half_condition.h"
-#include "oxebots_strategy/lateral_clear_node.h"
-#include "oxebots_strategy/position_bisector_node.h"
-#include "oxebots_strategy/smother_save_node.h"
-#include "oxebots_strategy/calculate_kick_off_pose.hpp"
-#include "oxebots_strategy/keep_distance.hpp"
-#include "oxebots_strategy/aim_at.hpp"
-#include "oxebots_strategy/has_line_of_sight.hpp"
-#include "oxebots_strategy/game_conditions.hpp"
-#include "oxebots_strategy/hold_position_node.hpp"
-#include "oxebots_strategy/set_motion_limit_node.hpp"
-#include "oxebots_strategy/compute_legal_slot_node.hpp"
-#include "oxebots_strategy/kick_once_node.hpp"
-#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
+#include "oxebots_strategy/node_registry.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "ssl_league_msgs/msg/referee.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <algorithm>
 #include <atomic>
@@ -59,6 +36,7 @@
 #include <fstream>
 #include <filesystem>
 #include <limits>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -114,9 +92,16 @@ public:
       std::bind(&StrategyNode::geometry_callback, this, std::placeholders::_1));
 
     override_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>("/robot_motion_override", 10);
+    active_branch_pub_ = this->create_publisher<std_msgs::msg::String>(
+      "/strategy/active_branch", rclcpp::QoS(10).transient_local().reliable());
   }
 
   BT::Blackboard::Ptr getBlackboard() const { return blackboard_; }
+  const std::string & getActiveBranch() const { return active_branch_; }
+  void setTree(BT::Tree && tree) {
+    tree_ = std::move(tree);
+    attachBranchObserver();
+  }
   void setLastGameState(const oxebots_interfaces::msg::GameState::SharedPtr& msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_game_state_ = msg;
@@ -144,128 +129,23 @@ public:
       
       std::string tree_path = this->get_parameter("bt_xml_path").as_string();
       if (tree_path.empty()) {
-        tree_path = package_share_directory + "/behavior_trees/master_strategy.xml";
+        tree_path = package_share_directory + "/behavior_trees/master_strategy_carry.xml";
       } else if (tree_path.find("/") == std::string::npos) {
         tree_path = package_share_directory + "/behavior_trees/" + tree_path;
       }
 
       RCLCPP_INFO(this->get_logger(), "Robô %d iniciando com árvore: %s", robot_id_, tree_path.c_str());
 
-      // Configura o contexto de controle utilizado pelos nós da defender_tree.
-      configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
-      factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::AlignToBallNode>("AlignToBall", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::CalculateInterceptionNode>("CalculateInterception", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::GoalLineDefendNode>("GoalLineDefend", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallInAreaCondition>("IsBallInArea", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallClosestCondition>("IsBallClosest", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallInOurHalfCondition>("IsBallInOurHalf", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::SmotherSaveNode>("SmotherSave", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::CalculateKickOffPose>("CalculateKickOffPose");
-      factory_.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
-      factory_.registerNodeType<oxebots_strategy::AimAt>("AimAt");
-      factory_.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
-      factory_.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
-      factory_.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
-      factory_.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
-      factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
-      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
-
-      // Nós da estratégia defensiva (defender_tree.xml)
-      factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
-      factory_.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
-      factory_.registerNodeType<ShadowBall>("ShadowBall");
-      factory_.registerNodeType<MarkOpponent>("MarkOpponent");
-      factory_.registerNodeType<GoToClamped>("GoToClamped");
-      factory_.registerSimpleCondition("IsValueTrue", [&](BT::TreeNode& node) {
-          bool val;
-          if (node.getInput("value", val)) return val ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          return BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<bool>("value") });
-
-      factory_.registerSimpleCondition("IsThisNodeID", [&](BT::TreeNode& node) {
-          unsigned int target_id;
-          if (!node.getInput("id", target_id)) return BT::NodeStatus::FAILURE;
-          return (static_cast<unsigned int>(robot_id_) == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<unsigned int>("id") });
-
-      factory_.registerSimpleCondition("IsMyRole", [&](BT::TreeNode& node) {
-          std::string role;
-          uint32_t my_id, target_id;
-          if (!node.getInput("role", role)) return BT::NodeStatus::FAILURE;
-          if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
-          if (role == "goalkeeper") {
-              if (blackboard_->get("goalkeeper_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          } else if (role == "attacker") {
-              if (blackboard_->get("attacker_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          } else if (role == "defender") {
-              if (blackboard_->get("defender_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          } else if (role == "kicker") {
-              if (blackboard_->get("kicker_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          }
-          return BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<std::string>("role") });
-
-      factory_.registerSimpleCondition("CheckGCCommand", [&](BT::TreeNode& node) {
-          int expected;
-          if (!node.getInput("expected", expected)) return BT::NodeStatus::FAILURE;
-          int current;
-          if (!blackboard_->get("gc_command", current)) return BT::NodeStatus::FAILURE;
-          return (current == expected) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<int>("expected") });
-
-      factory_.registerSimpleCondition("IsRobotId", [&](BT::TreeNode& node) {
-        uint32_t target_id, my_id;
-        if (!node.getInput("robot_id", target_id)) return BT::NodeStatus::FAILURE;
-        if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
-        return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<uint32_t>("robot_id") });
-
-      factory_.registerSimpleAction("Halt", [&](BT::TreeNode& node) {
-          std::string reason = "pelo GC";
-          std::string input_reason;
-          if (node.getInput("reason", input_reason)) {
-              if (input_reason == "idle") {
-                  reason = "por estar ocioso (sem papel)";
-              } else if (input_reason == "gc_halt") {
-                  reason = "por HALT do arbitro";
-              } else if (input_reason == "timeout") {
-                  reason = "por TIMEOUT";
-              } else if (input_reason == "stale_data") {
-                  reason = "por dados desatualizados (stale/modo degradado)";
-              } else {
-                  reason = "motivo: " + input_reason;
-              }
-          }
-          RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Robô %d parado %s", robot_id_, reason.c_str());
-
-          // Pede ao controlador central de movimento (movement_calculation_node) para zerar os
-          // comandos deste robô, em vez de publicar direto em /robot_commands: esse tópico agora
-          // tem um único escritor por robô (o controlador), que arbitra entre path-follow,
-          // AlignToBall, KickBall e Halt via /robot_motion_override.
-          auto override_msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
-          override_msg->robot_id = robot_id_;
-          override_msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
-          override_pub_->publish(std::move(override_msg));
-          return BT::NodeStatus::SUCCESS;
-      }, { BT::InputPort<std::string>("reason") });
+      oxebots_strategy::registerStrategyNodes(
+        factory_, shared_from_this(), blackboard_, override_pub_, robot_id_);
 
       // Registrar todas as árvores no diretório para permitir subárvores
       std::string bt_dir = package_share_directory + "/behavior_trees";
       if (fs::exists(bt_dir) && fs::is_directory(bt_dir)) {
           for (const auto & entry : fs::directory_iterator(bt_dir)) {
-              if (entry.path().extension() == ".xml" && entry.path().string() != tree_path) {
+              if (entry.path().extension() == ".xml" &&
+                  entry.path().string() != tree_path &&
+                  entry.path().filename() != "tree_nodes_model.xml") {
                   try {
                       RCLCPP_INFO(this->get_logger(), "Registrando subárvore: %s", entry.path().filename().string().c_str());
                       factory_.registerBehaviorTreeFromFile(entry.path().string());
@@ -278,6 +158,7 @@ public:
       }
 
       tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
+      attachBranchObserver();
 
       try {
         int port = (is_yellow_ ? 1677 : 1667) + robot_id_;
@@ -293,6 +174,62 @@ public:
       RCLCPP_ERROR(this->get_logger(), "EXCEÇÃO NO INIT: %s", e.what());
       return false;
     }
+  }
+
+  BT::NodeStatus tickOnce()
+  {
+    tick_selected_branch_.clear();
+    const BT::NodeStatus status = tree_.tickOnce();
+
+    std::string selected_branch;
+    for (BT::TreeNode * branch : root_branches_) {
+      if (branch != nullptr && branch->status() == BT::NodeStatus::RUNNING) {
+        selected_branch = branch->name();
+        break;
+      }
+    }
+    if (selected_branch.empty()) {
+      selected_branch = tick_selected_branch_;
+    }
+
+    if (!selected_branch.empty() && selected_branch != active_branch_) {
+      const std::string prev_branch = active_branch_.empty() ? "NONE" : active_branch_;
+      active_branch_ = selected_branch;
+
+      const std::string phase_str = currentPhaseString();
+      std::string role_str = "idle";
+      (void)blackboard_->get("role", role_str);
+      if (role_str.empty()) {
+        role_str = "idle";
+      }
+
+      const std::string reason = resolveTransitionReason(
+        prev_branch, active_branch_, phase_str, role_str);
+
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Transição de ramo [robô %d]: %s -> %s (fase=%s, papel=%s, motivo=%s)",
+        robot_id_,
+        prev_branch.c_str(),
+        active_branch_.c_str(),
+        phase_str.c_str(),
+        role_str.c_str(),
+        reason.c_str());
+
+      if (active_branch_pub_) {
+        std_msgs::msg::String msg;
+        msg.data =
+          "robot_id=" + std::to_string(robot_id_) +
+          " branch=" + active_branch_ +
+          " prev_branch=" + prev_branch +
+          " phase=" + phase_str +
+          " role=" + role_str +
+          " reason=" + reason;
+        active_branch_pub_->publish(msg);
+      }
+    }
+
+    return status;
   }
 
   void run()
@@ -311,7 +248,7 @@ public:
       if (has_data_ && has_geometry_) {
         try {
           refresh();
-          tree_.tickOnce();
+          tickOnce();
         } catch (const std::exception& e) {
           RCLCPP_ERROR(this->get_logger(), "Erro ao executar tick: %s", e.what());
         }
@@ -707,6 +644,124 @@ public:
     }
   }
 
+  void attachBranchObserver()
+  {
+    branch_subscriptions_.clear();
+    root_branches_.clear();
+    active_branch_.clear();
+    tick_selected_branch_.clear();
+
+    BT::TreeNode * root = tree_.rootNode();
+    while (auto * dec = dynamic_cast<BT::DecoratorNode *>(root)) {
+      root = dec->child();
+    }
+
+    auto * ctrl = dynamic_cast<BT::ControlNode *>(root);
+    if (!ctrl) {
+      return;
+    }
+
+    for (BT::TreeNode * child : ctrl->children()) {
+      if (!child) {
+        continue;
+      }
+      root_branches_.push_back(child);
+      branch_subscriptions_.push_back(
+        child->subscribeToStatusChange(
+          [this](
+            BT::TimePoint,
+            const BT::TreeNode & node,
+            BT::NodeStatus,
+            BT::NodeStatus status)
+          {
+            if (status == BT::NodeStatus::SUCCESS) {
+              tick_selected_branch_ = node.name();
+            }
+          }));
+    }
+  }
+
+  static std::string phaseIdToString(uint8_t phase)
+  {
+    using oxebots_interfaces::msg::GameState;
+    switch (phase) {
+      case GameState::PHASE_HALT: return "HALT";
+      case GameState::PHASE_TIMEOUT: return "TIMEOUT";
+      case GameState::PHASE_STOP: return "STOP";
+      case GameState::PHASE_BALL_PLACEMENT: return "BALL_PLACEMENT";
+      case GameState::PHASE_PREPARE_KICKOFF: return "PREPARE_KICKOFF";
+      case GameState::PHASE_KICKOFF: return "KICKOFF";
+      case GameState::PHASE_PREPARE_PENALTY: return "PREPARE_PENALTY";
+      case GameState::PHASE_PENALTY: return "PENALTY";
+      case GameState::PHASE_FREE_KICK: return "FREE_KICK";
+      case GameState::PHASE_RUN: return "RUN";
+      default: return "UNKNOWN";
+    }
+  }
+
+  std::string currentPhaseString() const
+  {
+    int phase = -1;
+    if (blackboard_ && blackboard_->get("phase", phase) && phase >= 0 && phase <= 255) {
+      return phaseIdToString(static_cast<uint8_t>(phase));
+    }
+    return "UNKNOWN";
+  }
+
+  std::string resolveTransitionReason(
+    const std::string & prev_branch,
+    const std::string & new_branch,
+    const std::string & phase_str,
+    const std::string & role_str) const
+  {
+    if (new_branch == "SafetyGuard") {
+      double pose_age = 1e9;
+      double ball_age = 1e9;
+      double gc_age = 1e9;
+      double max_pose = max_pose_ms_;
+      double max_ball = max_ball_ms_;
+      double max_gc = max_gc_ms_;
+      bool req_gc = require_gc_;
+      if (blackboard_) {
+        (void)blackboard_->get("pose_age_ms", pose_age);
+        (void)blackboard_->get("ball_age_ms", ball_age);
+        (void)blackboard_->get("gc_age_ms", gc_age);
+        (void)blackboard_->get("max_pose_ms", max_pose);
+        (void)blackboard_->get("max_ball_ms", max_ball);
+        (void)blackboard_->get("max_gc_ms", max_gc);
+        (void)blackboard_->get("require_gc", req_gc);
+      }
+      if (pose_age > max_pose) {
+        return "stale_pose";
+      }
+      if (ball_age > max_ball) {
+        return "stale_ball";
+      }
+      if (req_gc && gc_age > max_gc) {
+        return "stale_gc";
+      }
+      return "stale_data";
+    }
+
+    if (new_branch == "GoalkeeperRole" ||
+        new_branch == "AttackerRole" ||
+        new_branch == "DefenderTree" ||
+        new_branch == "DefenderRole")
+    {
+      return "role=" + role_str;
+    }
+
+    if (new_branch == "Halt") {
+      return "fallback_halt";
+    }
+
+    if (prev_branch == "SafetyGuard") {
+      return "data_fresh,phase=" + phase_str;
+    }
+
+    return "phase=" + phase_str;
+  }
+
   bool is_yellow_;
   bool invert_sides_;
   int robot_id_;
@@ -739,6 +794,11 @@ public:
   rclcpp::Subscription<ssl_league_msgs::msg::Referee>::SharedPtr gc_sub_;
   rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr active_branch_pub_;
+  std::vector<BT::TreeNode::StatusChangeSubscriber> branch_subscriptions_;
+  std::vector<BT::TreeNode *> root_branches_;
+  std::string active_branch_;
+  std::string tick_selected_branch_;
 
   // Buffer de mensagens e mutex para sincronização com a thread de tick
   std::mutex data_mutex_;
