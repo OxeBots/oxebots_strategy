@@ -38,6 +38,8 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("invert_sides", false);
     is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
+    this->declare_parameter("path_renews_watchdog", false);
+    path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
     
     this->declare_parameter("max_linear_speed", 1.0);
     this->declare_parameter("p_gain_linear", 2.0);
@@ -217,13 +219,11 @@ void PathFollowerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
 void PathFollowerNode::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_path_ = msg;
-    if (msg && !msg->poses.empty()) {
+    // Só objetivo (/robot_goal) e override vindos da árvore contam como intenção (SC-26). A rota do
+    // D* chega em timer mesmo com a árvore travada; só um gerador externo opta por renovar com ela.
+    if (path_renews_watchdog_ && msg && !msg->poses.empty()) {
         last_intent_time_ = std::chrono::steady_clock::now();
         has_received_intent_ = true;
-
-        if (last_override_msg_ && last_override_msg_->mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
-            last_override_msg_.reset();
-        }
     }
 }
 

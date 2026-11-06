@@ -16,6 +16,11 @@ Nenhuma das duas inicia ROS, publica tópicos ou mexe em robô. Rodam em segundo
 > Quando rodar: o harness, ao atualizar a BT.CPP, o ROS ou o ambiente de desenvolvimento, e antes de apostar numa
 > semântica nova (uma guarda, um `Retry`, um `Parallel`). O validador, **antes de todo PR que mexa
 > em XML de árvore ou em portas de folha**.
+>
+> O validador também roda dentro do `./test.sh` (e da CI) como o teste `test_validate_bt`
+> (`test/test_validate_bt.py`): ele usa o `dump_bt_model` compilado e o baseline, então só achados
+> novos reprovam. Ao aceitar um achado de propósito, regrave o baseline com `--write-baseline` e
+> revise o diff do arquivo antes de commitar.
 
 ---
 
