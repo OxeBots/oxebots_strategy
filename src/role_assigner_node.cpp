@@ -80,15 +80,25 @@ private:
 
     if (last_game_state_) {
       phase = last_game_state_->phase;
-      desired_gk_id = static_cast<int>(last_game_state_->our_goalkeeper_id);
-      is_restart_phase = 
-      (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_KICKOFF) ||
-      (phase == oxebots_interfaces::msg::GameState::PHASE_KICKOFF) || 
-      (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_PENALTY) ||
-      (phase == oxebots_interfaces::msg::GameState::PHASE_PENALTY) ||
-      (phase == oxebots_interfaces::msg::GameState::PHASE_FREE_KICK) ||
-      (phase == oxebots_interfaces::msg::GameState::PHASE_BALL_PLACEMENT);
+      // Se o GC estiver conectado e ativo, usa o goleiro do GC; caso contrário, faz fallback para o parâmetro
+      if (!last_game_state_->stale) {
+        desired_gk_id = static_cast<int>(last_game_state_->our_goalkeeper_id);
+      } else {
+        desired_gk_id = goalkeeper_id_;
+      }
+
+      const bool restart_phase_type =
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_KICKOFF) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_KICKOFF) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_PENALTY) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PENALTY) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_FREE_KICK) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_BALL_PLACEMENT);
+
+      // O cobrador só deve ser travado se o lance for a nosso favor
+      is_restart_phase = restart_phase_type && last_game_state_->we_favored;
     }
+
     // 1. Estimar velocidades (opcional, mas melhora o alinhamento cinético)
     Vector2D ball_pos = {msg->ball.x, msg->ball.y};
     last_ball_pos_ = ball_pos;
@@ -218,6 +228,9 @@ private:
     }
 
     last_attacker_id_ = attacker_id;
+
+    // Ordenação defensiva de active_ids para evitar saltos espúrios de epoch quando a ordem em allies variar
+    std::sort(active_ids.begin(), active_ids.end());
 
     // Monta a mensagem RoleAssignment completa
     oxebots_interfaces::msg::RoleAssignment out_msg;

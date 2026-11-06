@@ -39,11 +39,14 @@ protected:
     return r;
   }
 
-  static GameState::SharedPtr makeGameState(uint8_t phase, uint32_t gk_id = 0)
+  static GameState::SharedPtr makeGameState(
+    uint8_t phase, uint32_t gk_id = 0, bool we_favored = true, bool stale = false)
   {
     auto gs = std::make_shared<GameState>();
     gs->phase = phase;
     gs->our_goalkeeper_id = gk_id;
+    gs->we_favored = we_favored;
+    gs->stale = stale;
     return gs;
   }
 };
@@ -157,4 +160,47 @@ TEST_F(RoleAssignerNodeTest, P01_DynamicGoalkeeperFromGCAndSingleFieldRobot)
   EXPECT_EQ(roles.goalkeeper_id, 2u);
   EXPECT_EQ(roles.attacker_id, 0u);
   EXPECT_EQ(roles.defender_id, RoleAssignment::NO_ROBOT);
+}
+
+// ============================================================================
+// 4. Revisão PR: Reinício do oponente (we_favored=false), fallback stale e ordenação de active_ids
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, P01_OpponentRestartNoKickerStaleFallbackAndSortedActiveIds)
+{
+  rclcpp::NodeOptions opts;
+  opts.append_parameter_override("goalkeeper_id", 1);
+  auto node = std::make_shared<RoleAssignerNode>(opts);
+
+  // 1) Quando GC está stale=true, deve fazer fallback para o parâmetro goalkeeper_id (1), ignorando our_goalkeeper_id (0)
+  node->processGameState(makeGameState(GameState::PHASE_FREE_KICK, /*gk_id=*/0, /*we_favored=*/false, /*stale=*/true));
+
+  auto gd = std::make_shared<GameData>();
+  gd->ball.x = 0.0f;
+  gd->ball.y = 0.0f;
+  // Ordem invertida (2, 0, 1) para testar ordenação defensiva de active_ids
+  gd->robots.allies = {
+    makeRobot(2, -1500.0f, 0.0f),
+    makeRobot(0, -300.0f, 0.0f),
+    makeRobot(1, -2000.0f, 0.0f)
+  };
+  node->processGameData(gd);
+
+  auto roles1 = node->getLastPublishedRoles();
+  EXPECT_EQ(roles1.goalkeeper_id, 1u);
+  // 2) Como we_favored == false (falta do oponente), kicker_id deve ser NO_ROBOT
+  EXPECT_EQ(roles1.kicker_id, RoleAssignment::NO_ROBOT);
+  ASSERT_EQ(roles1.active_ids.size(), 3u);
+  EXPECT_EQ(roles1.active_ids[0], 0u);
+  EXPECT_EQ(roles1.active_ids[1], 1u);
+  EXPECT_EQ(roles1.active_ids[2], 2u);
+  EXPECT_EQ(roles1.epoch, 1u);
+
+  // 3) Mudar a ordem dos robôs em msg->robots.allies NÃO deve incrementar a epoch
+  gd->robots.allies = {
+    makeRobot(1, -2000.0f, 0.0f),
+    makeRobot(0, -300.0f, 0.0f),
+    makeRobot(2, -1500.0f, 0.0f)
+  };
+  node->processGameData(gd);
+  EXPECT_EQ(node->getLastPublishedRoles().epoch, 1u);
 }
