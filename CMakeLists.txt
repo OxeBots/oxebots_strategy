@@ -380,6 +380,24 @@ if(BUILD_TESTING)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
 
+  # E03: geometria do corredor de ball placement e cenário SC-11.
+  ament_add_gtest(test_avoid_placement_corridor
+    test/test_avoid_placement_corridor.cpp
+    src/avoid_placement_corridor_node.cpp
+    src/hold_position_node.cpp
+    src/set_motion_limit_node.cpp
+  )
+  ament_target_dependencies(
+    test_avoid_placement_corridor
+    rclcpp
+    oxebots_interfaces
+    behaviortree_cpp
+    std_msgs
+  )
+  target_include_directories(test_avoid_placement_corridor PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
   # E10: defensor agnóstico de lado (IsBallInOpponentField, clamp da área, troca de papel).
   ament_add_gtest(test_defender_nodes
     test/test_defender_nodes.cpp

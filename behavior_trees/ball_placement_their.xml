@@ -4,23 +4,21 @@
   <BehaviorTree ID="BallPlacementTheirTree">
     <ReactiveSequence name="AvoidCorridor">
       <SetMotionLimit limit_mps="0.75"/>
-      <ReactiveFallback name="PlacementAction">
-        <Inverter>
-          <AvoidPlacementCorridor
-            robot_id="{robot_id}"
-            robot_x="{robot_x}"
-            robot_y="{robot_y}"
-            robot_yaw="{robot_yaw}"
-            ball_x="{ball_x}"
-            ball_y="{ball_y}"
-            designated_x="{designated_x}"
-            designated_y="{designated_y}"
-            has_designated="{has_designated}"
-            margin_mm="550.0"
-            max_speed="0.75"/>
-        </Inverter>
+      <ReactiveSequence name="PlacementAction">
+        <AvoidPlacementCorridor
+          robot_id="{robot_id}"
+          robot_x="{robot_x}"
+          robot_y="{robot_y}"
+          robot_yaw="{robot_yaw}"
+          ball_x="{ball_x}"
+          ball_y="{ball_y}"
+          designated_x="{designated_x}"
+          designated_y="{designated_y}"
+          has_designated="{has_designated}"
+          margin_mm="550.0"
+          max_speed="0.75"/>
         <HoldPosition robot_id="{robot_id}"/>
-      </ReactiveFallback>
+      </ReactiveSequence>
     </ReactiveSequence>
   </BehaviorTree>
 </root>
