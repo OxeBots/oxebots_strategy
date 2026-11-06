@@ -207,3 +207,181 @@ TEST_F(StrategyNodeBlackboardTest, RefreshComputesStampsAndPoses)
     EXPECT_GE(ball_age_ms, 0.0);
     EXPECT_LT(ball_age_ms, 1000.0);
 }
+
+// ============================================================================
+// 4. Observabilidade de Transição de Ramo (/strategy/active_branch) — A04
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, BranchTransitionPublishesAndUpdatesActiveBranch)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    std::vector<std::string> published_transitions;
+    auto sub_node = std::make_shared<rclcpp::Node>("test_active_branch_listener");
+    auto sub = sub_node->create_subscription<std_msgs::msg::String>(
+        "/strategy/active_branch",
+        rclcpp::QoS(10).transient_local().reliable(),
+        [&published_transitions](const std_msgs::msg::String::SharedPtr msg) {
+            published_transitions.push_back(msg->data);
+        });
+    auto gd_pub = sub_node->create_publisher<GameData>("/game_data", 10);
+
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(sub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+
+    for (int i = 0; i < 50 && (gd_pub->get_subscription_count() < 3 || sub->get_publisher_count() < 1); ++i) {
+        spin_both();
+    }
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->attacker_id = 2;
+    roles->defender_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 0.0f;
+    gd->ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -1200.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    // Tick 1: sem GameState (gc_age_ms = 1e9) -> SafetyGuard (stale_gc)
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "SafetyGuard");
+    ASSERT_EQ(published_transitions.size(), 1u);
+    EXPECT_EQ(
+        published_transitions.back(),
+        "robot_id=1 branch=SafetyGuard prev_branch=NONE phase=HALT role=defender reason=stale_gc");
+
+    // Tick 2: permanece em SafetyGuard -> nenhuma nova mensagem publicada
+    node->setLastGameData(gd);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "SafetyGuard");
+    EXPECT_EQ(published_transitions.size(), 1u);
+
+    // Tick 3: chega GameState fresco com PHASE_STOP -> transição SafetyGuard -> StopBranch
+    auto gs = makeGameState(false);
+    gs->header.stamp = node->now();
+    gs->phase = GameState::PHASE_STOP;
+    node->setLastGameState(gs);
+    node->setLastGameData(gd);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "StopBranch");
+    ASSERT_EQ(published_transitions.size(), 2u);
+    EXPECT_EQ(
+        published_transitions.back(),
+        "robot_id=1 branch=StopBranch prev_branch=SafetyGuard phase=STOP role=defender reason=data_fresh,phase=STOP");
+
+    // Tick 4: continua em PHASE_STOP (ramo assíncrono em RUNNING) -> não republica
+    gs->header.stamp = node->now();
+    node->setLastGameState(gs);
+    node->setLastGameData(gd);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "StopBranch");
+    EXPECT_EQ(published_transitions.size(), 2u);
+
+    // Tick 5: muda para PHASE_HALT -> transição StopBranch -> HaltBranch
+    gs->header.stamp = node->now();
+    gs->phase = GameState::PHASE_HALT;
+    node->setLastGameState(gs);
+    node->setLastGameData(gd);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "HaltBranch");
+    ASSERT_EQ(published_transitions.size(), 3u);
+    EXPECT_EQ(
+        published_transitions.back(),
+        "robot_id=1 branch=HaltBranch prev_branch=StopBranch phase=HALT role=defender reason=phase=HALT");
+
+    // Tick 6: muda para PHASE_RUN -> transição HaltBranch -> RunBranch
+    gs->header.stamp = node->now();
+    gs->phase = GameState::PHASE_RUN;
+    node->setLastGameState(gs);
+    node->setLastGameData(gd);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "RunBranch");
+    ASSERT_EQ(published_transitions.size(), 4u);
+    EXPECT_EQ(
+        published_transitions.back(),
+        "robot_id=1 branch=RunBranch prev_branch=HaltBranch phase=RUN role=defender reason=phase=RUN");
+}
+
+// ============================================================================
+// 5. Registro Único de Nós e TreeNodesModel para Groot2 — A05
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, NodeRegistryAndTreeNodesModelForGroot2)
+{
+    auto ros_node = std::make_shared<rclcpp::Node>("test_node_registry");
+    BT::BehaviorTreeFactory factory;
+    oxebots_strategy::registerStrategyNodes(factory, ros_node);
+
+    const std::string generated_xml = oxebots_strategy::generateTreeNodesModelXML(factory, false);
+    EXPECT_NE(generated_xml.find("<TreeNodesModel>"), std::string::npos);
+
+    const auto & builtin = factory.builtinNodes();
+    const auto & manifests = factory.manifests();
+
+    const std::string share_dir = ament_index_cpp::get_package_share_directory("oxebots_strategy");
+    const fs::path model_path = fs::path(share_dir) / "behavior_trees" / "tree_nodes_model.xml";
+    ASSERT_TRUE(fs::exists(model_path)) << "Arquivo ausente: " << model_path.string();
+
+    std::ifstream file_in(model_path);
+    const std::string file_xml(
+        (std::istreambuf_iterator<char>(file_in)),
+        std::istreambuf_iterator<char>());
+    EXPECT_NE(file_xml.find("<TreeNodesModel>"), std::string::npos);
+
+    size_t custom_count = 0;
+    for (const auto & [id, manifest] : manifests) {
+        (void)manifest;
+        if (builtin.count(id) > 0) {
+            continue;
+        }
+        ++custom_count;
+        const std::string id_attr = "ID=\"" + id + "\"";
+        EXPECT_NE(generated_xml.find(id_attr), std::string::npos)
+            << "Nó ausente no XML gerado: " << id;
+        EXPECT_NE(file_xml.find(id_attr), std::string::npos)
+            << "Nó ausente em tree_nodes_model.xml: " << id;
+    }
+    EXPECT_GE(custom_count, 32u);
+}

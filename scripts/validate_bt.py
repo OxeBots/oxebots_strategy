@@ -264,20 +264,26 @@ def validate(args, nodes, builtin):
                 'R7', 'aviso', use[0], '', f'out|{key}',
                 f'chave {{{key}}} é escrita por <{use[1]}> e nunca lida'))
 
-    # ---- R8: registro do strategy_node.cpp x dump_bt_model
+    # ---- R8: registro do strategy_node.cpp / node_registry.cpp x dump_bt_model
     strategy_cpp = Path(args.strategy_node)
-    if strategy_cpp.is_file():
-        registered = set(REGISTER_RE.findall(strategy_cpp.read_text(encoding='utf-8')))
+    node_registry_cpp = Path(args.src) / 'node_registry.cpp'
+    reg_sources = []
+    for candidate in (strategy_cpp, node_registry_cpp):
+        if candidate.is_file() and candidate.resolve() not in {p.resolve() for p in reg_sources}:
+            reg_sources.append(candidate)
+    if reg_sources:
+        reg_text = '\n'.join(p.read_text(encoding='utf-8') for p in reg_sources)
+        registered = set(REGISTER_RE.findall(reg_text))
         in_model = set(nodes) - builtin
         for missing in sorted(registered - in_model):
             findings.append(Finding(
                 'R8', 'erro', strategy_cpp.name, '', f'falta|{missing}',
-                f'"{missing}" é registrado no strategy_node.cpp mas não no dump_bt_model.cpp; '
-                'atualize a lista do dump'))
+                f'"{missing}" é registrado no C++ mas não no dump_bt_model; '
+                'atualize o registro'))
         for extra in sorted(in_model - registered):
             findings.append(Finding(
                 'R8', 'aviso', strategy_cpp.name, '', f'sobra|{extra}',
-                f'"{extra}" está no dump_bt_model.cpp mas não no strategy_node.cpp'))
+                f'"{extra}" está no dump_bt_model mas não no registro C++'))
     return findings
 
 

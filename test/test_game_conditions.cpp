@@ -85,6 +85,28 @@ TEST(GameConditionsTest, CheckGameStateFailsForDifferentOrMissingPhase)
        </root>)",
     missing_blackboard);
   EXPECT_EQ(missing_tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // Fase numérica fora da faixa [0..9] (ex.: -1 no startup) deve falhar
+  auto invalid_id_bb = BT::Blackboard::create();
+  invalid_id_bb->set("phase", -1);
+  auto invalid_id_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <CheckGameState phase="HALT"/>
+         </BehaviorTree>
+       </root>)",
+    invalid_id_bb);
+  EXPECT_EQ(invalid_id_tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // Nome de fase inválido na porta XML deve falhar
+  auto invalid_port_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <CheckGameState phase="FASE_INEXISTENTE"/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+  EXPECT_EQ(invalid_port_tree.tickOnce(), BT::NodeStatus::FAILURE);
 }
 
 TEST(GameConditionsTest, WeAreFavoredReadsBlackboard)
@@ -104,6 +126,16 @@ TEST(GameConditionsTest, WeAreFavoredReadsBlackboard)
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
   blackboard->set("we_favored", false);
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  auto empty_bb = BT::Blackboard::create();
+  auto missing_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <WeAreFavored/>
+         </BehaviorTree>
+       </root>)",
+    empty_bb);
+  EXPECT_EQ(missing_tree.tickOnce(), BT::NodeStatus::FAILURE);
 }
 
 TEST(GameConditionsTest, IsDataFreshAppliesDocumentedDefaults)
@@ -173,6 +205,30 @@ TEST(GameConditionsTest, IsDataFreshReadsRequireGCAndLimitsFromBlackboard)
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
 }
 
+TEST(GameConditionsTest, IsDataFreshExplicitPortOverridesBlackboardLimits)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  // Como no strategy_node, a Blackboard tem os limites padrão inicializados
+  blackboard->set("max_gc_ms", 500.0);
+  blackboard->set("max_pose_ms", 150.0);
+  blackboard->set("max_ball_ms", 300.0);
+  blackboard->set("gc_age_ms", 100.0);
+  blackboard->set("pose_age_ms", 200.0);
+  blackboard->set("ball_age_ms", 100.0);
+
+  // Porta explícita max_pose_ms="250.0" no XML deve ter precedência sobre os 150.0 da Blackboard
+  auto tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsDataFresh max_pose_ms="250.0"/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+}
+
 TEST(GameConditionsTest, HasRoleMatchesCurrentRole)
 {
   auto factory = makeFactory();
@@ -190,6 +246,59 @@ TEST(GameConditionsTest, HasRoleMatchesCurrentRole)
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
   blackboard->set("role", std::string("defender"));
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // Papel ausente na Blackboard ou inválido na porta XML deve falhar
+  auto empty_bb = BT::Blackboard::create();
+  auto missing_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <HasRole role="attacker"/>
+         </BehaviorTree>
+       </root>)",
+    empty_bb);
+  EXPECT_EQ(missing_tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  auto invalid_role_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <HasRole role="papel_invalido"/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+  EXPECT_EQ(invalid_role_tree.tickOnce(), BT::NodeStatus::FAILURE);
+}
+
+TEST(GameConditionsTest, ConditionsReadRootBlackboardFromInsideSubTreeWithoutAutoremap)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("phase", 4);  // PREPARE_KICKOFF
+  blackboard->set("we_favored", true);
+  blackboard->set("role", std::string("kicker"));
+  blackboard->set("gc_age_ms", 50.0);
+  blackboard->set("pose_age_ms", 20.0);
+  blackboard->set("ball_age_ms", 30.0);
+
+  const std::string xml_text = R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="ChildSubTree">
+        <Sequence>
+          <IsDataFresh/>
+          <CheckGameState phase="PREPARE_KICKOFF"/>
+          <WeAreFavored/>
+          <HasRole role="kicker"/>
+        </Sequence>
+      </BehaviorTree>
+      <BehaviorTree ID="Main">
+        <SubTree ID="ChildSubTree"/>
+      </BehaviorTree>
+    </root>
+  )";
+
+  factory.registerBehaviorTreeFromText(xml_text);
+  auto tree = factory.createTree("Main", blackboard);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
 }
 
 // ============================================================================

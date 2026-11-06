@@ -1,10 +1,10 @@
 <root BTCPP_format="4">
-    <include path="free_kick.xml"/>
+    <include path="../free_kick.xml"/>
     <include path="kick_in.xml"/>
-    <include path="corner_kick.xml"/>
+    <include path="../corner_kick.xml"/>
     <include path="simple_attack.xml"/>
 
-    <BehaviorTree ID="MainTree">
+    <BehaviorTree ID="GameManagerTree">
         <Fallback name="GameStateSelector">
             <Sequence name="FoulState">
                 <IsValueTrue value="is_free_kick"/>

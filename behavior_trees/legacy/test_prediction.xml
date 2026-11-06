@@ -1,6 +1,6 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
+<root main_tree_to_execute="TestPrediction" BTCPP_format="4">
 
-  <BehaviorTree ID="MainTree">
+  <BehaviorTree ID="TestPrediction">
     <ReactiveFallback name="TestRoot">
       <!-- Apenas o nó do robô ID 1 roda a lógica de teste -->
       <ReactiveSequence name="Robot1Logic">

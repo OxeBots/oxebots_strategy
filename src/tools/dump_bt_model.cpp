@@ -1,13 +1,17 @@
-// Despeja o TreeNodesModel (portas e padrões de todas as folhas) para o validate_bt.py.
+// Despeja o TreeNodesModel (portas e padrões de todas as folhas) para o validate_bt.py e Groot2.
 //
-// Os registros abaixo espelham os de StrategyNode::init() em strategy_node.cpp. Os nós só são
-// registrados (o manifesto vem de providedPorts()); nenhum é instanciado, então não há robô,
-// tópico nem blackboard envolvidos. Se uma folha for registrada no strategy_node.cpp e não
-// aqui, o validate_bt.py avisa (regra R8).
+// Usa o registro único de oxebots_strategy::registerStrategyNodes (src/node_registry.cpp).
+// Sem argumentos: imprime todos os nós (incluindo os nativos da biblioteca) + comentário
+//   <!-- builtin_nodes: ... --> para o scripts/validate_bt.py.
+// Com --groot: imprime apenas as folhas customizadas do projeto em formato TreeNodesModel XML
+//   para importação direta no Groot2.
+#include <csignal>
 #include <iostream>
 #include <memory>
+#include <string>
 
 #include "behaviortree_cpp/bt_factory.h"
+<<<<<<< HEAD
 #include "behaviortree_cpp/xml_parsing.h"
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/align_to_ball_node.h"
@@ -98,20 +102,39 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
 
 }  // namespace
 
+=======
+#include "oxebots_strategy/node_registry.hpp"
+#include "rclcpp/rclcpp.hpp"
+
+>>>>>>> ffb1c15ed369bf5f8c4e0270072b9e4777833d97
 int main(int argc, char ** argv)
 {
+#ifdef SIGPIPE
+  std::signal(SIGPIPE, SIG_IGN);
+#endif
+  bool groot_only = false;
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--groot") {
+      groot_only = true;
+    }
+  }
+
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("dump_bt_model");
 
   BT::BehaviorTreeFactory factory;
-  register_all(factory, node);
+  oxebots_strategy::registerStrategyNodes(factory, node);
 
-  std::cout << BT::writeTreeNodesModelXML(factory, true) << "\n";
-  std::cout << "<!-- builtin_nodes:";
-  for (const auto & id : factory.builtinNodes()) {
-    std::cout << ' ' << id;
+  if (groot_only) {
+    std::cout << oxebots_strategy::generateTreeNodesModelXML(factory, false) << "\n";
+  } else {
+    std::cout << oxebots_strategy::generateTreeNodesModelXML(factory, true) << "\n";
+    std::cout << "<!-- builtin_nodes:";
+    for (const auto & id : factory.builtinNodes()) {
+      std::cout << ' ' << id;
+    }
+    std::cout << " -->\n";
   }
-  std::cout << " -->\n";
 
   rclcpp::shutdown();
   return 0;

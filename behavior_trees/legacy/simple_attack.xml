@@ -1,4 +1,4 @@
-<root main_tree_to_execute="MainTree" BTCPP_format="4">
+<root main_tree_to_execute="SimpleAttack" BTCPP_format="4">
 
 
 
@@ -39,7 +39,7 @@
     </ReactiveFallback>
   </BehaviorTree>
 
-  <BehaviorTree ID="MainTree">
+  <BehaviorTree ID="SimpleAttack">
     <ReactiveFallback name="MainRoot">
       
       <!-- 1. BLOCO DO GOLEIRO (Execução Imediata e Exclusiva) -->
