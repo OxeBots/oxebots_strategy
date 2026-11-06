@@ -67,9 +67,10 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   std::lock_guard<std::mutex> lock(data_mutex_);
 
   if (!last_ball_pred_ || !last_robot_pred_) {
+    // FAILURE com log (E09): antes era RUNNING mudo, que prendia o atacante sem sinal de erro.
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-      "Nenhum dado predito (ball/robot) recebido, aguardando predições...");
-    return BT::NodeStatus::RUNNING;
+      "Nenhum dado predito (ball/robot) recebido; FAILURE.");
+    return BT::NodeStatus::FAILURE;
   }
 
   unsigned int robot_id;
@@ -91,8 +92,8 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
 
   if (!found_robot) {
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-      "Robo %u nao encontrado nas predicoes de aliados!", robot_id);
-    return BT::NodeStatus::RUNNING;
+      "Robo %u nao encontrado nas predicoes de aliados; FAILURE.", robot_id);
+    return BT::NodeStatus::FAILURE;
   }
 
   // Posição e velocidade atuais do robô (em mm e mm/s)

@@ -46,19 +46,34 @@ BT::NodeStatus UpdateBallPositionNode::onStart()
 BT::NodeStatus UpdateBallPositionNode::onRunning()
 {
   std::lock_guard<std::mutex> lock(data_mutex_);
-  // Se ainda não recebemos dados da visão, avisa e continua esperando
+  // Sem dados da visão, FAILURE com log (E09). Antes devolvia RUNNING mudo, o que travava a
+  // árvore do atacante sem nenhum sinal; com FAILURE o RetryUntilSuccessful repete no tick seguinte
+  // e o problema aparece no log.
   if (!last_game_data_) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000, "Nenhum dado de jogo (last_game_data) recebido, aguardando...");
-    return BT::NodeStatus::RUNNING;
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000, "Nenhum dado de jogo (last_game_data) recebido; FAILURE.");
+    return BT::NodeStatus::FAILURE;
   }
-  
+
   // Extrai a posição atual da bola e envia para as portas de saída
   double ball_x = last_game_data_->ball.x;
   double ball_y = last_game_data_->ball.y;
 
   setOutput("ball_x", ball_x);
   setOutput("ball_y", ball_y);
-  setOutput("ball_in_enemy_half", (ball_x > 0.0));
+
+  // "Campo adversário" = lado oposto ao nosso gol (my_goal_x, da geometria/GameState), não x > 0:
+  // o x > 0 só vale para o time que defende o gol de x negativo e quebra na troca de lados. Sem
+  // my_goal_x na blackboard (não deveria acontecer: o strategy_node só roda a árvore com geometria),
+  // cai na regra antiga e avisa.
+  double my_goal_x = 0.0;
+  auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+  if (root_bb && root_bb->get("my_goal_x", my_goal_x) && my_goal_x != 0.0) {
+    setOutput("ball_in_enemy_half", (ball_x * my_goal_x < 0.0));
+  } else {
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+      "UpdateBallPosition: my_goal_x ausente na blackboard; ball_in_enemy_half usa a regra antiga (x > 0).");
+    setOutput("ball_in_enemy_half", (ball_x > 0.0));
+  }
 
   // --- Calcular Ponto Atrás da Bola (Pre-Kick) ---
   // Este ponto é onde o robô deve se posicionar para chutar a bola em direção ao gol

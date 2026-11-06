@@ -595,6 +595,9 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     geometry_sub_ = create_subscription<oxebots_interfaces::msg::SSLGeometryData>(
     "/field_geometry", qos, std::bind(&DStarPlannerNode::geometry_callback, this, std::placeholders::_1));
 
+    game_state_sub_ = create_subscription<oxebots_interfaces::msg::GameState>(
+      "/game_state", qos, std::bind(&DStarPlannerNode::game_state_callback, this, std::placeholders::_1));
+
     planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / planning_rate_hz_)),
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
@@ -624,9 +627,14 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
         penalty_width = last_geometry_->field.penalty_area_width / 1000.0;
     }
 
+    // "effective_is_yellow" == nosso gol em x positivo. O GameState (GC) acompanha a troca de lados do 2o
+    // tempo; is_yellow_/invert_sides_ são só o padrão enquanto ele não chega.
     bool effective_is_yellow = is_yellow_;
     if (invert_sides_) {
         effective_is_yellow = !is_yellow_;
+    }
+    if (own_goal_positive_x_.has_value()) {
+        effective_is_yellow = *own_goal_positive_x_;
     }
 
     PenaltyAreaBounds bounds;
@@ -719,6 +727,20 @@ void DStarPlannerNode::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPt
     }
 
     applyMapWithPenaltyBounds(raw_map_data_);
+}
+
+void DStarPlannerNode::game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg)
+{
+    if (!msg) return;
+    std::lock_guard<std::mutex> lock(node_mutex_);
+    const bool changed = !own_goal_positive_x_.has_value() || *own_goal_positive_x_ != msg->our_goal_positive_x;
+    own_goal_positive_x_ = msg->our_goal_positive_x;
+    // Troca de lados: as paredes de área já desenhadas no grid ficam no lado errado; redesenha.
+    if (changed && raw_map_data_ && last_geometry_) {
+        RCLCPP_INFO(get_logger(), "D* [Robô %d]: lado do campo mudou (nosso gol em x %s); redesenhando as áreas.",
+                    robot_id_, msg->our_goal_positive_x ? "positivo" : "negativo");
+        applyMapWithPenaltyBounds(raw_map_data_);
+    }
 }
 
 void DStarPlannerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg)

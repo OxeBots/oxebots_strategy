@@ -1,23 +1,33 @@
 <root main_tree_to_execute="DefenderTree" BTCPP_format="4">
+  <!--
+    E10 — árvore do defensor, agnóstica de lado e de cor.
+     - O papel é verificado com HasRole (blackboard), em uma ReactiveSequence: o defensor é
+       interrompido no tick em que perde o papel e assume no mesmo tick em que ganha.
+     - "Campo adversário" é decidido por my_goal_x (do GameState / geometria), não pela cor do
+       time: na troca de lados (segundo tempo) a árvore continua certa sem alteração.
+     - Todos os alvos do defensor ficam FORA da pequena área própria (margem de 200 mm). Só o
+       goleiro pode estar na própria área (R-22); sem profundidade da área o nó falha em vez de
+       supor um valor (SC-17).
+  -->
   <BehaviorTree ID="DefenderTree">
 
-    <Sequence name="SelectedDefenderOnly">
-      <IsMyRole role="defender"/>
+    <ReactiveSequence name="SelectedDefenderOnly">
+      <HasRole role="defender"/>
 
       <ReactiveFallback name="Root">
 
         <!-- ============================================================ -->
         <!-- Estágio 1: Bola no campo adversário                          -->
-        <!-- Zagueiro acompanha bola prevista a distância fixa,           -->
-        <!-- nunca cruza o meio-campo e nunca entra na pequena área       -->
+        <!-- Zagueiro fica na linha bola->gol (ângulo, como o goleiro),   -->
+        <!-- fora da pequena área e sem cruzar o meio-campo               -->
         <!-- ============================================================ -->
-        <Sequence name="BallInOpponentField">
-          <IsBallInOpponentField ball_x="{ball_x}" is_yellow="{is_yellow}"/>
+        <ReactiveSequence name="BallInOpponentField">
+          <IsBallInOpponentField ball_x="{ball_x}" my_goal_x="{my_goal_x}"/>
           <ShadowBall
             ball="{ball}"
             ball_vel="{ball_vel}"
             my_goal_x="{my_goal_x}"/>
-        </Sequence>
+        </ReactiveSequence>
 
         <!-- ============================================================ -->
         <!-- Estágio 2: Bola no nosso campo                               -->
@@ -27,25 +37,25 @@
           <!-- 2.1: Oponente com posse de bola                            -->
           <!-- Marca o oponente: posiciona entre bola e gol a dist. fixa  -->
           <!-- Nunca avança sobre o oponente, nunca entra na pequena área  -->
-          <Sequence name="OpponentHasPossession">
+          <ReactiveSequence name="OpponentHasPossession">
             <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
             <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}"/>
-          </Sequence>
+          </ReactiveSequence>
 
           <!-- 2.2: Oponente sem posse de bola                            -->
-          <!-- Em vez de brigar pela bola, o zagueiro faz ShadowBall      -->
-          <!-- na nossa zaga para cobrir o goleiro                        -->
+          <!-- Em vez de brigar pela bola, o zagueiro cobre o ângulo do   -->
+          <!-- gol (ShadowBall, raio menor) para ajudar o goleiro         -->
           <ShadowBall
             ball="{ball}"
             ball_vel="{ball_vel}"
             my_goal_x="{my_goal_x}"
-            follow_distance="1000.0"/>
+            ratio="0.35"/>
 
         </ReactiveFallback>
 
       </ReactiveFallback>
 
-    </Sequence>
+    </ReactiveSequence>
 
   </BehaviorTree>
 </root>

@@ -22,12 +22,14 @@
 #include "oxebots_strategy/is_ball_in_our_half_condition.h"
 #include "oxebots_strategy/keep_distance.hpp"
 #include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/kick_once_node.hpp"
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/position_bisector_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 
 namespace oxebots_strategy
 {
@@ -88,6 +90,8 @@ void registerStrategyNodes(
   factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
   factory.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", node);
   factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
+  factory.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", node);
+  factory.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
 
   // Nós da estratégia defensiva (defender_tree.xml)
   factory.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
