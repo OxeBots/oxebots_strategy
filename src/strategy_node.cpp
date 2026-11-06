@@ -39,6 +39,7 @@
 #include "oxebots_strategy/has_line_of_sight.hpp"
 #include "oxebots_strategy/game_conditions.hpp"
 #include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
 #include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_strategy/kick_once_node.hpp"
@@ -176,6 +177,8 @@ public:
       factory_.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
       factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
       factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::AvoidPlacementCorridorNode>(
+        "AvoidPlacementCorridor", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", shared_from_this());

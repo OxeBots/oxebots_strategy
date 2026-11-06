@@ -11,6 +11,7 @@
 #include "behaviortree_cpp/xml_parsing.h"
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/align_to_ball_node.h"
+#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/calculate_kick_off_pose.hpp"
 #include "oxebots_strategy/compute_legal_slot_node.hpp"
@@ -69,6 +70,8 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
   factory.registerNodeType<oxebots_strategy::AimAt>("AimAt");
   factory.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
   factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
+  factory.registerNodeType<oxebots_strategy::AvoidPlacementCorridorNode>(
+    "AvoidPlacementCorridor", node);
   factory.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", node);
   factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
   factory.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
