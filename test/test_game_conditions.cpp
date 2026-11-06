@@ -227,6 +227,21 @@ TEST(GameConditionsTest, IsDataFreshExplicitPortOverridesBlackboardLimits)
     blackboard);
 
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // Mesmo se o XML tiver literalmente "500.000000" (formato salvo pelo Groot2),
+  // a porta explícita deve prevalecer sobre um limite menor na Blackboard
+  blackboard->set("max_gc_ms", 100.0);
+  blackboard->set("gc_age_ms", 250.0);
+  blackboard->set("pose_age_ms", 100.0);
+  auto groot_tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsDataFresh max_gc_ms="500.000000"/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  EXPECT_EQ(groot_tree.tickOnce(), BT::NodeStatus::SUCCESS);
 }
 
 TEST(GameConditionsTest, HasRoleMatchesCurrentRole)

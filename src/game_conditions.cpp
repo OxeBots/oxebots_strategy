@@ -43,17 +43,6 @@ bool readString(BT::Blackboard * bb, const char * key, std::string & value)
   return bb && bb->get(key, value);
 }
 
-// Na BT.CPP 4.x, portas com valor padrão em providedPorts() são pré-preenchidas
-// em config().input_ports pelo parser XML com std::to_string(default_value)
-// (ex.: "150.000000") mesmo quando omitidas na tag XML. Esta função distingue
-// um atributo explícito no XML do valor padrão injetado automaticamente.
-bool hasExplicitPort(
-  const BT::PortsRemapping & ports, const char * port_name, double default_value)
-{
-  const auto it = ports.find(port_name);
-  return it != ports.end() && it->second != std::to_string(default_value);
-}
-
 bool isValidPhaseName(const std::string & phase)
 {
   static const char * const kValidPhases[] = {
@@ -172,9 +161,12 @@ IsDataFreshCondition::IsDataFreshCondition(
 BT::PortsList IsDataFreshCondition::providedPorts()
 {
   return {
-    BT::InputPort<double>("max_gc_ms", 500.0, "Idade máxima do Game Controller em ms"),
-    BT::InputPort<double>("max_pose_ms", 150.0, "Idade máxima da pose em ms"),
-    BT::InputPort<double>("max_ball_ms", 300.0, "Idade máxima da bola em ms"),
+    BT::InputPort<double>(
+      "max_gc_ms", "Opcional: idade máxima do Game Controller em ms (padrão 500.0)"),
+    BT::InputPort<double>(
+      "max_pose_ms", "Opcional: idade máxima da pose em ms (padrão 150.0)"),
+    BT::InputPort<double>(
+      "max_ball_ms", "Opcional: idade máxima da bola em ms (padrão 300.0)"),
     BT::InputPort<bool>(
       "require_gc", "Opcional: se falso, ignora a verificação de idade do GC")};
 }
@@ -188,7 +180,7 @@ BT::NodeStatus IsDataFreshCondition::tick()
   }
 
   // Ordem de precedência para os limites:
-  // 1. Valores padrão das portas (500 / 150 / 300 ms)
+  // 1. Valores padrão (500 / 150 / 300 ms)
   // 2. Blackboard (parâmetros YAML carregados pelo strategy_node)
   // 3. Portas explícitas no XML da BT (maior prioridade)
   double max_gc_ms = 500.0;
@@ -199,15 +191,15 @@ BT::NodeStatus IsDataFreshCondition::tick()
   (void)bb->get("max_ball_ms", max_ball_ms);
 
   const auto & ports = config().input_ports;
-  if (hasExplicitPort(ports, "max_gc_ms", 500.0) && !getInput("max_gc_ms", max_gc_ms)) {
+  if (ports.find("max_gc_ms") != ports.end() && !getInput("max_gc_ms", max_gc_ms)) {
     logError("IsDataFresh: porta [max_gc_ms] inválida");
     return BT::NodeStatus::FAILURE;
   }
-  if (hasExplicitPort(ports, "max_pose_ms", 150.0) && !getInput("max_pose_ms", max_pose_ms)) {
+  if (ports.find("max_pose_ms") != ports.end() && !getInput("max_pose_ms", max_pose_ms)) {
     logError("IsDataFresh: porta [max_pose_ms] inválida");
     return BT::NodeStatus::FAILURE;
   }
-  if (hasExplicitPort(ports, "max_ball_ms", 300.0) && !getInput("max_ball_ms", max_ball_ms)) {
+  if (ports.find("max_ball_ms") != ports.end() && !getInput("max_ball_ms", max_ball_ms)) {
     logError("IsDataFresh: porta [max_ball_ms] inválida");
     return BT::NodeStatus::FAILURE;
   }

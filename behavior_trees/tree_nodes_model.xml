@@ -118,9 +118,9 @@
       <input_port name="ball_x" type="double"/>
     </Condition>
     <Condition ID="IsDataFresh">
-      <input_port name="max_gc_ms" default="500.000000" type="double">Idade máxima do Game Controller em ms</input_port>
-      <input_port name="max_pose_ms" default="150.000000" type="double">Idade máxima da pose em ms</input_port>
-      <input_port name="max_ball_ms" default="300.000000" type="double">Idade máxima da bola em ms</input_port>
+      <input_port name="max_gc_ms" type="double">Opcional: idade máxima do Game Controller em ms (padrão 500.0)</input_port>
+      <input_port name="max_pose_ms" type="double">Opcional: idade máxima da pose em ms (padrão 150.0)</input_port>
+      <input_port name="max_ball_ms" type="double">Opcional: idade máxima da bola em ms (padrão 300.0)</input_port>
       <input_port name="require_gc" type="bool">Opcional: se falso, ignora a verificação de idade do GC</input_port>
     </Condition>
     <Condition ID="IsMyRole">
