@@ -22,7 +22,8 @@ void sendToController(const Pose2D& target);
 // Condições
 // ---------------------------------------------------------------------------
 
-/// Verifica se a bola está no campo adversário.
+/// Verifica se a bola está no campo adversário, ou seja, do lado oposto ao nosso gol
+/// (porta `my_goal_x`, padrão {my_goal_x} da blackboard). Não depende da cor do time.
 class IsBallInOpponentField : public BT::ConditionNode {
 public:
     using BT::ConditionNode::ConditionNode;
@@ -42,8 +43,9 @@ public:
 // Ações
 // ---------------------------------------------------------------------------
 
-/// Estágio 1: Acompanha a bola a distância fixa quando ela está no campo
-/// adversário. Nunca cruza o meio-campo e nunca entra na pequena área.
+/// Estágios 1 e 2.2: posiciona o defensor na linha bola -> centro do gol, a um raio fora da
+/// pequena área (cobre o ângulo do gol como o PositionBisector do goleiro). Nunca cruza o
+/// meio-campo e nunca entra na pequena área.
 class ShadowBall : public BT::SyncActionNode {
 public:
     using BT::SyncActionNode::SyncActionNode;

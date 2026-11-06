@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!--
+  Árvore de TESTE do E08 (não entra em jogo): o robô 2 executa a RestartKickerTree contra o gol
+  adversário; os demais robôs ficam parados (a árvore devolve SUCCESS sem publicar nada).
+
+  Uso (com a bola parada em qualquer lugar do campo, sem GC):
+    ./run_match.sh require_gc:=false bt_xml:=test_restart_kicker.xml
+
+  Ao terminar (SUCCESS ou FAILURE) o strategy_node reinicia a árvore no tick seguinte, então o robô
+  volta a buscar a bola e chuta de novo: serve para repetir o teste sem reiniciar o launch.
+  Ao ler os logs procure: "erro de alinhamento", "chute confirmado" e "bola não se moveu".
+-->
+<root BTCPP_format="4" main_tree_to_execute="TestRestartKicker">
+  <BehaviorTree ID="TestRestartKicker">
+    <Fallback name="OnlyRobot2">
+      <Sequence name="Robot2Kicks">
+        <IsThisNodeID id="2"/>
+        <SubTree ID="RestartKickerTree" _autoremap="true"
+                 target_x="{opponent_goal_x}" target_y="{opponent_goal_y}" kick_speed="2.5"/>
+      </Sequence>
+      <AlwaysSuccess/>
+    </Fallback>
+  </BehaviorTree>
+</root>

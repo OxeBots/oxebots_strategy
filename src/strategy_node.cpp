@@ -41,6 +41,8 @@
 #include "oxebots_strategy/hold_position_node.hpp"
 #include "oxebots_strategy/set_motion_limit_node.hpp"
 #include "oxebots_strategy/compute_legal_slot_node.hpp"
+#include "oxebots_strategy/kick_once_node.hpp"
+#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -177,6 +179,8 @@ public:
       factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
       factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", shared_from_this());
+      factory_.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
 
       // Nós da estratégia defensiva (defender_tree.xml)
       factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
@@ -619,19 +623,45 @@ public:
         blackboard_->set("pose_age_ms", std::numeric_limits<double>::infinity());
       }
 
-      // Estimação de velocidade da bola
-      double ball_vx = 0.0;
-      double ball_vy = 0.0;
-      if (has_last_ball_) {
+      // Estimação de velocidade da bola (mm/s). O game_data chega várias vezes por quadro de visão
+      // com a MESMA posição (~60% das mensagens), então derivar a cada refresh dava velocidades que
+      // alternavam entre 0 e o dobro do valor real. Aqui a velocidade só é atualizada quando a posição
+      // MUDOU, usando o tempo desde a última posição distinta, e passa por um filtro passa-baixa.
+      // Posição parada por mais de kBallStillS -> velocidade 0; salto absurdo (bola teletransportada
+      // ou leitura ruim) -> reancora sem gerar velocidade.
+      constexpr double kBallMinDtS = 0.008;
+      constexpr double kBallStillS = 0.10;
+      constexpr double kBallMaxSpeedMmS = 8000.0;
+      constexpr double kBallVelAlpha = 0.5;
+      if (!has_last_ball_) {
+        last_ball_ = Pose2D{ball_x, ball_y, 0.0};
+        last_ball_time_ = now_time;
+        has_last_ball_ = true;
+        ball_vx_filt_ = 0.0;
+        ball_vy_filt_ = 0.0;
+      } else {
         const double dt = (now_time - last_ball_time_).seconds();
-        if (dt > 1e-4) {
-          ball_vx = (ball_x - last_ball_.x) / dt;
-          ball_vy = (ball_y - last_ball_.y) / dt;
+        if (ball_x != last_ball_.x || ball_y != last_ball_.y) {
+          if (dt > kBallMinDtS) {
+            const double raw_vx = (ball_x - last_ball_.x) / dt;
+            const double raw_vy = (ball_y - last_ball_.y) / dt;
+            if (std::hypot(raw_vx, raw_vy) > kBallMaxSpeedMmS) {
+              ball_vx_filt_ = 0.0;
+              ball_vy_filt_ = 0.0;
+            } else {
+              ball_vx_filt_ = kBallVelAlpha * raw_vx + (1.0 - kBallVelAlpha) * ball_vx_filt_;
+              ball_vy_filt_ = kBallVelAlpha * raw_vy + (1.0 - kBallVelAlpha) * ball_vy_filt_;
+            }
+            last_ball_ = Pose2D{ball_x, ball_y, 0.0};
+            last_ball_time_ = now_time;
+          }
+        } else if (dt > kBallStillS) {
+          ball_vx_filt_ = 0.0;
+          ball_vy_filt_ = 0.0;
         }
       }
-      last_ball_ = Pose2D{ball_x, ball_y, 0.0};
-      last_ball_time_ = now_time;
-      has_last_ball_ = true;
+      const double ball_vx = ball_vx_filt_;
+      const double ball_vy = ball_vy_filt_;
 
       // Distâncias e controle de posse
       double min_ally_dist = std::numeric_limits<double>::infinity();
@@ -694,6 +724,8 @@ public:
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};
   rclcpp::Time last_ball_time_;
+  double ball_vx_filt_{0.0};
+  double ball_vy_filt_{0.0};
 
   std::atomic<bool> has_data_{false};
   std::atomic<bool> has_geometry_{false};

@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!--
+  E08 — cobrança de reinício reutilizável (Capítulo 18): kick-off, pênalti e free kick que o nosso
+  time bate compartilham esta sequência.
+
+  Portas (passadas por quem chama, no <SubTree>):
+    target_x, target_y  alvo do chute em mm (por padrão, o gol adversário)
+    kick_speed          velocidade do chute em m/s (opcional; sem a porta vale 2.5; máximo 3.0)
+
+  Resultado: SUCCESS quando a bola se moveu >= 50 mm; FAILURE se o robô não conseguiu chutar (a bola
+  foi tocada no caminho, ou passaram 10 s sem a bola se mover). Quem chama trata o FAILURE (a
+  RestartKickerTree não tenta de novo).
+
+  Passos:
+   1. UpdateBallPosition calcula o ponto de pré-chute: 400 mm atrás da bola, na reta alvo->bola.
+   2. GoToPoint leva o robô até lá, de frente para o alvo. Falha de propósito se a bola chegar a
+      150 mm (foi tocada no caminho), para o chamador recomeçar do zero.
+   3. Aproximação e chute. O controlador só avança ~100 mm durante o disparo, então o KickOnce só
+      pode ser pedido com o robô encostado na bola e alinhado: IsBallClose (<= 140 mm e <= 10 graus)
+      libera o chute; até lá o robô avança devagar (0.5 m/s) em linha reta na direção da bola.
+      O "Shoot" é Sequence comum DE PROPÓSITO: depois que o KickOnce começa, a Sequence não
+      reavalia o IsBallClose, que deixaria de valer assim que o robô avança e a bola se afasta.
+-->
+<root BTCPP_format="4">
+  <BehaviorTree ID="RestartKickerTree">
+    <Sequence name="AlignThenKick">
+      <UpdateBallPosition robot_id="{robot_id}" goal_x="{target_x}" goal_y="{target_y}"
+                          pre_kick_x="{pkx}" pre_kick_y="{pky}"/>
+
+      <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}"
+                 face_x="{target_x}" face_y="{target_y}" tolerance="50.0"
+                 ball_contact_threshold_mm="150.0"/>
+
+      <ReactiveFallback name="ApproachAndKick">
+        <Sequence name="Shoot">
+          <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+          <KickOnce robot_id="{robot_id}" target_x="{target_x}" target_y="{target_y}"
+                    kick_speed="{kick_speed}" timeout_s="10.0" ball_moved_mm="50.0"/>
+        </Sequence>
+        <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}"
+                   face_x="{target_x}" face_y="{target_y}" tolerance="0.0"
+                   planner="straight_line" max_speed="0.5"/>
+      </ReactiveFallback>
+    </Sequence>
+  </BehaviorTree>
+</root>

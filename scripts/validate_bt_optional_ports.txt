@@ -2,7 +2,9 @@
 # O validador (R4) não exige estas portas no XML. Formato: Nó.porta  # motivo
 # Portas cuja descrição contém "Opcional" já são reconhecidas sozinhas.
 ShadowBall.penalty_area_depth   # cai para a blackboard raiz (defender_nodes.cpp)
+ShadowBall.penalty_area_width   # idem (blackboard raiz)
 MarkOpponent.penalty_area_depth # idem
+MarkOpponent.penalty_area_width # idem (blackboard raiz)
 GoToClamped.penalty_area_depth  # idem
 Halt.reason                     # sem a porta, usa "pelo GC" (strategy_node.cpp)
 IsDataFresh.require_gc          # sem a porta, usa require_gc/use_gc da blackboard ou true (game_conditions.cpp)

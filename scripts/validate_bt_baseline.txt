@@ -108,10 +108,14 @@ R7|kick_technical_challenge4.xml|out|dummy_y1
 R7|kick_technical_challenge4.xml|out|dummy_y2
 R7|master_strategy.xml|out|int_pk_x
 R7|master_strategy.xml|out|int_pk_y
-R7|master_strategy_carry.xml|out|int_pk_x
-R7|master_strategy_carry.xml|out|int_pk_y
+R7|attacker_tree.xml|out|int_pk_x
+R7|attacker_tree.xml|out|int_pk_y
 R7|simple_attack.xml|out|int_pk_x
 R7|simple_attack.xml|out|int_pk_y
 R7|test_prediction.xml|out|int_pk_x
 R7|test_prediction.xml|out|int_pk_y
 R7|throw_in.xml|out|dummy_ready
+# portas da RestartKickerTree: quem escreve são os chamadores (kick-off, pênalti e free kick: E05 a E07)
+R6|restart_kicker.xml|key|kick_speed
+R6|restart_kicker.xml|key|target_x
+R6|restart_kicker.xml|key|target_y
