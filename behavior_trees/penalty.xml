@@ -48,10 +48,10 @@
             <!-- ========================================== -->
             <!-- 2. GOLEIRO (Fica na nossa meta)            -->
             <!-- ========================================== -->
-            <Sequence name="GoalkeeperPenalty">
-                <IsRobotId robot_id="0"/>
-                <Goalkeeper robot_id="{robot_id}"/>
-            </Sequence>
+            <ReactiveSequence name="GoalkeeperPenalty">
+                <HasRole role="goalkeeper"/>
+                <Goalkeeper robot_id="{robot_id}" mode="penalty_def"/>
+            </ReactiveSequence>
 
             <!-- ========================================== -->
             <!-- 3. OUTROS ROBÔS (Zagueiros / Reservas)     -->

@@ -9,14 +9,19 @@
                                ball_y="{ball_y}" />
            
            <Fallback name="RobotRoleGuard">
-               <!-- APENAS o Robô 0 executa a lógica de goleiro -->
-               <Sequence name="GoalkeeperLogic">
-                   <IsRobotId robot_id="0" />
+               <!-- APENAS o goleiro designado (via GC / HasRole) executa a lógica de goleiro (SC-17) -->
+               <ReactiveSequence name="GoalkeeperLogic">
+                   <HasRole role="goalkeeper" />
                    <ReactiveFallback name="ReactiveGoalkeeper">
 
-                       <!-- 1. Bola dentro da área: buscar a bola e chutar (passe para aliado livre ou afastar para a frente) -->
+                       <!-- 1. Bola dentro da área (ou retida > 8s na área própria, SC-25): buscar a bola e chutar -->
                        <ReactiveSequence name="State3_BallInArea">
-                           <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
+                           <Fallback name="InAreaOrHeldTimeout">
+                               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
+                               <Inverter>
+                                   <BallHeldTimer max_s="8.0" area="own_defense" />
+                               </Inverter>
+                           </Fallback>
                            <Sequence name="ApproachAndKick">
                                <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" allow_leave_area="true" kick_speed="{gk_kick_speed}" />
                                <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
@@ -36,9 +41,9 @@
                        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />
 
                    </ReactiveFallback>
-               </Sequence>
+               </ReactiveSequence>
 
-               <!-- Outros robôs (1 e 2) ficam parados quando esta árvore é a principal -->
+               <!-- Outros robôs ficam parados quando esta árvore é a principal -->
                <Halt reason="not_the_goalkeeper" />
            </Fallback>
        </Sequence>

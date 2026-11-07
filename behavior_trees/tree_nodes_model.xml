@@ -14,6 +14,10 @@
       <input_port name="max_angular_speed" default="3.000000" type="double">Velocidade angular máxima (rad/s)</input_port>
       <input_port name="p_gain" default="4.000000" type="double">Ganho proporcional do controle de giro</input_port>
     </Action>
+    <Condition ID="BallHeldTimer">
+      <input_port name="max_s" default="8.000000" type="double">Tempo máximo (s) que a bola pode ficar parada na área antes de falhar</input_port>
+      <input_port name="area" default="own_defense" type="std::string">Área monitorada: own_defense ou opp_defense</input_port>
+    </Condition>
     <Action ID="CalculateInterception">
       <input_port name="robot_id" type="unsigned int"/>
       <input_port name="goal_x" default="0.000000" type="double">X do gol alvo</input_port>
@@ -77,8 +81,10 @@
       <input_port name="ball_y" type="double"/>
     </Action>
     <Action ID="Goalkeeper">
-      <input_port name="robot_id" default="0" type="unsigned int">ID do robô goleiro</input_port>
+      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robô goleiro</input_port>
       <input_port name="kick_speed" default="3.000000" type="double">Velocidade do chute em m/s</input_port>
+      <input_port name="mode" default="normal" type="std::string">Modo de operação do goleiro: normal, penalty_def ou hold</input_port>
+      <input_port name="max_hold_s" default="8.000000" type="double">Tempo máximo (s) com a bola na área antes de forçar afastamento urgente (regra dos 10 s)</input_port>
     </Action>
     <Action ID="Halt">
       <input_port name="reason" default="idle" type="std::string">Opcional: motivo da parada (gc_halt, timeout, stale_data, idle)</input_port>
@@ -174,6 +180,11 @@
       <input_port name="penalty_area_depth" type="double">Profundidade da pequena área a partir da linha de fundo (mm)</input_port>
       <input_port name="penalty_area_width" type="double">Largura da pequena área (mm); sem a porta vale {penalty_area_width} da blackboard</input_port>
       <input_port name="y_limit" default="1200.000000" type="double">Limite lateral do defensor em Y (mm)</input_port>
+    </Action>
+    <Action ID="PenaltyKeeperLine">
+      <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô goleiro (padrão {robot_id} da blackboard)</input_port>
+      <input_port name="side" default="defend" type="std::string">Lado de atuação no pênalti (defend)</input_port>
+      <input_port name="line_offset_mm" default="90.000000" type="double">Distância (mm) da linha de gol para dentro do campo (padrão 90 mm = 1 raio do robô)</input_port>
     </Action>
     <Action ID="PositionBisector">
       <input_port name="robot_id" type="unsigned int"/>

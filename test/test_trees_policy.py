@@ -23,6 +23,7 @@ PRODUCTION = [
     'master_strategy_el.xml',
     'attacker_tree.xml',
     'defender_tree.xml',
+    'goalkeeper_tree.xml',
     'restart_kicker.xml',
     'stop.xml',
 ]
@@ -76,6 +77,18 @@ def test_atacante_no_mestre_usa_hasrole_e_a_subarvore():
     children = list(role)
     assert children[0].tag == 'HasRole' and children[0].attrib.get('role') == 'attacker'
     assert children[1].tag == 'SubTree' and children[1].attrib.get('ID') == 'AttackerTree'
+
+
+def test_goleiro_usa_hasrole_sem_robot_id_fixo():
+    root = load('master_strategy_carry.xml')
+    gk_role = next(el for el in root.iter('ReactiveSequence') if el.attrib.get('name') == 'GoalkeeperRole')
+    children = list(gk_role)
+    assert children[0].tag == 'HasRole' and children[0].attrib.get('role') == 'goalkeeper'
+    assert children[1].tag == 'SubTree' and children[1].attrib.get('ID') == 'GoalkeeperTree'
+
+    gk_tree = load('goalkeeper_tree.xml')
+    assert [el.attrib.get('role') for el in gk_tree.iter('HasRole')] == ['goalkeeper']
+    assert not list(gk_tree.iter('IsRobotId'))
 
 
 def test_arvore_do_atacante_nao_tem_guarda_de_papel():

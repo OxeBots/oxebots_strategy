@@ -3,10 +3,10 @@
         <Fallback name="FreeKickRoles">
             
             <!-- 1. GOLEIRO: Continua na meta -->
-            <Sequence name="GoalkeeperRole">
-                <IsRobotId robot_id="0"/>
+            <ReactiveSequence name="GoalkeeperRole">
+                <HasRole role="goalkeeper"/>
                 <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-            </Sequence>
+            </ReactiveSequence>
 
             <!-- 2. COBRADOR (Atacante) -->
             <Sequence name="KickerRole">

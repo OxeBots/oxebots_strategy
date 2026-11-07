@@ -72,7 +72,7 @@
 
       <!-- JOGO ROLANDO -->
       <ReactiveSequence name="GoalkeeperRole">
-        <IsRobotId robot_id="0" />
+        <HasRole role="goalkeeper" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
