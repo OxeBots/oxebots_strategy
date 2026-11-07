@@ -29,10 +29,18 @@
         <SubTree ID="StopSubTree" _autoremap="true"/>
       </ReactiveSequence>
 
-      <!-- Fases ainda não implementadas: parada segura -->
+      <!-- BALL_PLACEMENT: só o time favorecido pode posicionar; E04 ainda não existe. -->
       <ReactiveSequence name="BallPlacementBranch">
         <CheckGameState phase="BALL_PLACEMENT"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback name="BallPlacementAction">
+          <ReactiveSequence name="BallPlacementTheirBranch">
+            <Inverter>
+              <WeAreFavored/>
+            </Inverter>
+            <SubTree ID="BallPlacementTheirTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <Halt reason="ball_placement_our_not_implemented"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="PrepareKickoffBranch">

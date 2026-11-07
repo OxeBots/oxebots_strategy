@@ -43,6 +43,7 @@ set(BT_LEAF_SOURCES
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
   src/hold_position_node.cpp
+  src/avoid_placement_corridor_node.cpp
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
   src/kick_once_node.cpp
@@ -340,6 +341,24 @@ if(BUILD_TESTING)
   )
   ament_target_dependencies(test_kick_once rclcpp behaviortree_cpp oxebots_interfaces)
   target_include_directories(test_kick_once PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # E03: geometria do corredor de ball placement e cenário SC-11.
+  ament_add_gtest(test_avoid_placement_corridor
+    test/test_avoid_placement_corridor.cpp
+    src/avoid_placement_corridor_node.cpp
+    src/hold_position_node.cpp
+    src/set_motion_limit_node.cpp
+  )
+  ament_target_dependencies(
+    test_avoid_placement_corridor
+    rclcpp
+    oxebots_interfaces
+    behaviortree_cpp
+    std_msgs
+  )
+  target_include_directories(test_avoid_placement_corridor PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
 
