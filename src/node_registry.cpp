@@ -140,12 +140,20 @@ void registerStrategyNodes(
       if (!bb || !bb->get("robot_id", my_id)) {
         return BT::NodeStatus::FAILURE;
       }
-      if (role == "attacker") {
+      if (role == "goalkeeper") {
+        if (bb->get("goalkeeper_id", target_id)) {
+          return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+        }
+      } else if (role == "attacker") {
         if (bb->get("attacker_id", target_id)) {
           return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
         }
       } else if (role == "defender") {
         if (bb->get("defender_id", target_id)) {
+          return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+        }
+      } else if (role == "kicker") {
+        if (bb->get("kicker_id", target_id)) {
           return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
         }
       }

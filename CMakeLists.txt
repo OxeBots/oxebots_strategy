@@ -83,6 +83,18 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  ament_add_gtest(test_role_assigner_node
+    test/test_role_assigner_node.cpp
+  )
+  ament_target_dependencies(test_role_assigner_node
+    rclcpp
+    oxebots_interfaces
+  )
+  target_include_directories(test_role_assigner_node PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
   ament_add_gtest(test_strategy_node
     test/test_strategy_node.cpp
     src/go_to_point_node.cpp

@@ -291,12 +291,28 @@ BT::NodeStatus HasRoleCondition::tick()
   }
 
   std::string current_role;
-  if (!readString(rootBB(config()), "role", current_role) || !isValidRoleName(current_role)) {
+  auto * bb = rootBB(config());
+  if (!readString(bb, "role", current_role) || !isValidRoleName(current_role)) {
     logError("HasRole: chave [role] ausente ou inválida na Blackboard");
     return BT::NodeStatus::FAILURE;
   }
 
-  return boolStatus(current_role == expected_role);
+  if (current_role == expected_role) {
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  if (expected_role == "kicker" && bb) {
+    bool is_kicker = false;
+    if (bb->get("is_kicker", is_kicker) && is_kicker) {
+      return BT::NodeStatus::SUCCESS;
+    }
+    uint32_t my_id = 0, kicker_id = 999;
+    if (bb->get("robot_id", my_id) && bb->get("kicker_id", kicker_id) && my_id == kicker_id) {
+      return BT::NodeStatus::SUCCESS;
+    }
+  }
+
+  return BT::NodeStatus::FAILURE;
 }
 
 }  // namespace oxebots_strategy

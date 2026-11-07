@@ -1,5 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <oxebots_interfaces/msg/game_data.hpp>
+#include <oxebots_interfaces/msg/game_state.hpp>
 #include <oxebots_interfaces/msg/role_assignment.hpp>
 #include <cmath>
 #include <algorithm>
@@ -9,7 +10,8 @@
 class RoleAssignerNode : public rclcpp::Node
 {
 public:
-  RoleAssignerNode() : Node("role_assigner_node")
+  explicit RoleAssignerNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
+  : Node("role_assigner_node", options)
   {
     // Parâmetros configuráveis
     this->declare_parameter<int>("goalkeeper_id", 0);
@@ -34,14 +36,30 @@ public:
     receive_distance_mm_ = this->get_parameter("receive_distance_mm").as_double();
     
     last_role_change_time_ = this->now();
-
-    role_pub_ = this->create_publisher<oxebots_interfaces::msg::RoleAssignment>("/role_assignment", 10);
+    auto role_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
+    role_pub_ = this->create_publisher<oxebots_interfaces::msg::RoleAssignment>("/role_assignment", role_qos);
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
       "game_data", 10, std::bind(&RoleAssignerNode::game_callback, this, std::placeholders::_1));
+    game_state_sub_ = this->create_subscription<oxebots_interfaces::msg::GameState>("/game_state", role_qos, std::bind(&RoleAssignerNode::game_state_callback, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Role Assigner ZJUNlict iniciado.");
     RCLCPP_INFO(this->get_logger(), "Goleiro ID: %d, w1: %.2f, w2: %.2f, Amarelo: %s", 
                 goalkeeper_id_, w1_, w2_, this->get_parameter("is_yellow_team").as_bool() ? "Sim" : "Não");
+  }
+
+  void processGameState(const oxebots_interfaces::msg::GameState::SharedPtr msg)
+  {
+    game_state_callback(msg);
+  }
+
+  void processGameData(const oxebots_interfaces::msg::GameData::SharedPtr msg)
+  {
+    game_callback(msg);
+  }
+
+  oxebots_interfaces::msg::RoleAssignment getLastPublishedRoles() const
+  {
+    return last_published_roles_;
   }
 
 private:
@@ -49,7 +67,9 @@ private:
     double x, y;
     double norm() const { return std::sqrt(x * x + y * y); }
   };
-
+  void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg) {
+    last_game_state_ = msg;
+  }
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
   {
     auto now = this->now();
@@ -60,6 +80,32 @@ private:
     last_time_ = now;
 
     if (dt <= 0.0001) dt = 0.016; // Fallback para ~60Hz e proteção contra dt zero
+    constexpr uint32_t kNoRobot = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
+
+    uint8_t phase = oxebots_interfaces::msg::GameState::PHASE_RUN;
+    int desired_gk_id = goalkeeper_id_;
+    bool is_restart_phase = false;
+
+    if (last_game_state_) {
+      phase = last_game_state_->phase;
+      // Se o GC estiver conectado e ativo, usa o goleiro do GC; caso contrário, faz fallback para o parâmetro
+      if (!last_game_state_->stale) {
+        desired_gk_id = static_cast<int>(last_game_state_->our_goalkeeper_id);
+      } else {
+        desired_gk_id = goalkeeper_id_;
+      }
+
+      const bool restart_phase_type =
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_KICKOFF) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_KICKOFF) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PREPARE_PENALTY) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_PENALTY) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_FREE_KICK) ||
+        (phase == oxebots_interfaces::msg::GameState::PHASE_BALL_PLACEMENT);
+
+      // O cobrador só deve ser travado se o lance for a nosso favor
+      is_restart_phase = restart_phase_type && last_game_state_->we_favored;
+    }
 
     // 1. Estimar velocidades (opcional, mas melhora o alinhamento cinético)
     Vector2D ball_pos = {msg->ball.x, msg->ball.y};
@@ -96,13 +142,18 @@ private:
       ball_in_flight_ = false;
     }
 
+    std::vector<uint32_t> active_ids;
     std::vector<uint32_t> eligible_ids;
     std::map<uint32_t, double> costs;
     std::map<uint32_t, double> ball_dists_mm;
-
+    uint32_t active_goalkeeper_id = kNoRobot;
     for (const auto & robot : msg->robots.allies) {
       uint32_t id = robot.id;
-      if (static_cast<int>(id) == goalkeeper_id_) continue;
+      active_ids.push_back(id);
+      if (static_cast<int>(id) == desired_gk_id) {
+        active_goalkeeper_id = id;
+        continue;
+      }
 
       Vector2D r_pos = {robot.x, robot.y};
       
@@ -145,7 +196,7 @@ private:
       double cost = w1_ * r + w2_ * (1.0 - cos_theta);
       
       // Bônus de Adesão (Stickiness): Quem já é o atacante tem um "desconto" no custo
-      if (id == last_attacker_id_) {
+      if (!is_restart_phase && id == last_attacker_id_) {
           cost -= hysteresis_;
       }
 
@@ -153,76 +204,123 @@ private:
       eligible_ids.push_back(id);
     }
 
-    if (eligible_ids.empty()) return;
+    // Ordena os robôs de linha elegíveis pelo menor custo
+    std::sort(eligible_ids.begin(), eligible_ids.end(), [&](uint32_t a, uint32_t b) {
+      return costs[a] < costs[b];
+    });
 
-    uint32_t attacker_id = 0;
-    uint32_t defender_id = 0;
+    uint32_t attacker_id = kNoRobot;
+    uint32_t defender_id = kNoRobot;
+    uint32_t kicker_id = kNoRobot;
 
-    if (eligible_ids.size() == 1) {
-      attacker_id = eligible_ids[0];
-      defender_id = goalkeeper_id_; // Fallback
+    if (is_restart_phase) {
+      // Verifica se o cobrador já travado continua ativo entre os elegíveis
+      bool locked_still_eligible =
+        (locked_kicker_id_ != kNoRobot) &&
+        (std::find(eligible_ids.begin(), eligible_ids.end(), locked_kicker_id_) != eligible_ids.end());
+
+      if (!locked_still_eligible) {
+        locked_kicker_id_ = eligible_ids.empty() ? kNoRobot : eligible_ids[0];
+      }
+
+      kicker_id = locked_kicker_id_;
+      attacker_id = locked_kicker_id_;
+
+      // Defensor é o próximo robô elegível diferente do cobrador
+      for (uint32_t cand : eligible_ids) {
+        if (cand != attacker_id) {
+          defender_id = cand;
+          break;
+        }
+      }
     } else {
-      // Ordenação pura por custo (sem swaps baseados em lado do campo)
-      std::sort(eligible_ids.begin(), eligible_ids.end(), [&](uint32_t a, uint32_t b) {
-        return costs[a] < costs[b];
-      });
+      // Fora de reinício: destrava o cobrador
+      locked_kicker_id_ = kNoRobot;
+      kicker_id = kNoRobot;
 
-      uint32_t best_candidate = eligible_ids[0];
-      uint32_t second_best = eligible_ids[1];
+      if (eligible_ids.size() == 1) {
+        attacker_id = eligible_ids[0];
+        defender_id = kNoRobot;
+      } else if (eligible_ids.size() >= 2) {
+        uint32_t best_candidate = eligible_ids[0];
+        uint32_t second_best = eligible_ids[1];
+        double time_since_change = (now - last_role_change_time_).seconds();
 
-      // Aplicação de Histerese Temporal (Cooldown de trocas)
-      double time_since_change = (now - last_role_change_time_).seconds();
+        bool last_attacker_eligible =
+          (last_attacker_id_ != kNoRobot) &&
+          (std::find(eligible_ids.begin(), eligible_ids.end(), last_attacker_id_) != eligible_ids.end());
 
-      // Se o último atacante saiu da lista (robô perdido), não há papel a manter: reatribui.
-      const bool last_attacker_present =
-        std::find(eligible_ids.begin(), eligible_ids.end(), last_attacker_id_) != eligible_ids.end();
-
-      if (last_attacker_id_ != 999 && last_attacker_present && best_candidate != last_attacker_id_) {
-        // Quem vai assumir já está em cima da bola (recepcionou) e a bola quase parou: não há mais o que
-        // proteger. A condição de velocidade é essencial: o defensor que marca o chutador fica a ~400 mm
-        // dele, e a bola chutada passa a menos de receive_distance_mm dele a alta velocidade; sem ela a
-        // troca saía no meio do chute e o defensor largava a linha bola-gol.
-        const bool candidate_has_ball =
-          ball_dists_mm[best_candidate] < receive_distance_mm_ &&
-          ball_speed_mps_ < kReceiveMaxSpeedFrac * ball_flight_speed_mps_;
-        const bool frozen = ball_in_flight_ && !candidate_has_ball;
-        if (time_since_change < time_hysteresis_ || frozen) {
-            // Cooldown não passou, ou a bola está em voo (chute): manter o papel anterior. Trocar
-            // durante o chute faz o defensor largar a linha bola-gol para ir buscar a bola.
+        if (last_attacker_eligible && best_candidate != last_attacker_id_) {
+          // Quem vai assumir já está em cima da bola (recepcionou) e a bola quase parou: não há mais o que
+          // proteger. A condição de velocidade é essencial: o defensor que marca o chutador fica a ~400 mm
+          // dele, e a bola chutada passa a menos de receive_distance_mm dele a alta velocidade; sem ela a
+          // troca saía no meio do chute e o defensor largava a linha bola-gol.
+          const bool candidate_has_ball =
+            ball_dists_mm[best_candidate] < receive_distance_mm_ &&
+            ball_speed_mps_ < kReceiveMaxSpeedFrac * ball_flight_speed_mps_;
+          const bool frozen = ball_in_flight_ && !candidate_has_ball;
+          if (time_since_change < time_hysteresis_ || frozen) {
             if (frozen) {
               RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                 "Bola em voo (%.2f m/s): papéis congelados (atacante=%u).", ball_speed_mps_, last_attacker_id_);
             }
             attacker_id = last_attacker_id_;
             defender_id = (attacker_id == eligible_ids[0]) ? eligible_ids[1] : eligible_ids[0];
-        } else {
-            // Cooldown passou e o custo do novo candidato é menor (já contando a histerese de custo)
+          } else {
             attacker_id = best_candidate;
             defender_id = second_best;
             last_role_change_time_ = now;
             RCLCPP_INFO(this->get_logger(), "TROCA DE PAPEL: Novo Atacante = %u", attacker_id);
+          }
+        } else {
+          attacker_id = best_candidate;
+          defender_id = second_best;
+          if (!last_attacker_eligible) last_role_change_time_ = now;
         }
-      } else {
-        attacker_id = best_candidate;
-        defender_id = second_best;
-        if (last_attacker_id_ == 999) last_role_change_time_ = now; // Inicialização
       }
     }
 
     last_attacker_id_ = attacker_id;
 
-    // Publicação
+    // Ordenação defensiva de active_ids para evitar saltos espúrios de epoch quando a ordem em allies variar
+    std::sort(active_ids.begin(), active_ids.end());
+
+    // Monta a mensagem RoleAssignment completa
     oxebots_interfaces::msg::RoleAssignment out_msg;
+    out_msg.goalkeeper_id = active_goalkeeper_id;
     out_msg.attacker_id = attacker_id;
     out_msg.defender_id = defender_id;
+    out_msg.kicker_id = kicker_id;
+    out_msg.active_ids = active_ids;
+
+    // Incrementa epoch sempre que houver mudança em qualquer papel ou lista de ativos
+    bool roles_changed = !has_published_roles_ ||
+      last_published_roles_.goalkeeper_id != out_msg.goalkeeper_id ||
+      last_published_roles_.attacker_id != out_msg.attacker_id ||
+      last_published_roles_.defender_id != out_msg.defender_id ||
+      last_published_roles_.kicker_id != out_msg.kicker_id ||
+      last_published_roles_.active_ids != out_msg.active_ids;
+
+    if (roles_changed) {
+      epoch_++;
+      has_published_roles_ = true;
+    }
+    out_msg.epoch = epoch_;
+    last_published_roles_ = out_msg;
+
     role_pub_->publish(out_msg);
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                 "Roles: Atacante=%u (C:%.2f), Defensor=%u (C:%.2f)", 
-                 attacker_id, costs[attacker_id], defender_id, costs[defender_id]);
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "Roles [epoch=%u]: GK=%u, ATT=%u, DEF=%u, KICK=%u (ativos=%zu)",
+      out_msg.epoch, out_msg.goalkeeper_id, out_msg.attacker_id,
+      out_msg.defender_id, out_msg.kicker_id, out_msg.active_ids.size());
   }
 
   int goalkeeper_id_;
+  uint32_t locked_kicker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
+  uint32_t epoch_ = 0;
+  oxebots_interfaces::msg::RoleAssignment last_published_roles_;
+  bool has_published_roles_ = false;
   double w1_, w2_, hysteresis_, time_hysteresis_;
   double ball_flight_speed_mps_ = 1.0;
   double receive_distance_mm_ = 300.0;
@@ -231,16 +329,17 @@ private:
   bool ball_in_flight_ = false;
   bool has_last_ball_ = false;
   rclcpp::Time last_ball_change_;
-  uint32_t last_attacker_id_ = 999;
-  
+  uint32_t last_attacker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
   rclcpp::Time last_time_, last_role_change_time_;
+  oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
+  rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
   Vector2D last_ball_pos_;
   std::map<uint32_t, Vector2D> last_robot_pos_;
-
   rclcpp::Publisher<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_pub_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_sub_;
 };
 
+#ifndef ROLE_ASSIGNER_NODE_NO_MAIN
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
@@ -248,3 +347,4 @@ int main(int argc, char ** argv)
   rclcpp::shutdown();
   return 0;
 }
+#endif
