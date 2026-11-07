@@ -97,30 +97,6 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_strategy_node
     test/test_strategy_node.cpp
-    src/go_to_point_node.cpp
-    src/kick_ball_node.cpp
-    src/align_to_ball_node.cpp
-    src/update_ball_position_node.cpp
-    src/calculate_interception_node.cpp
-    src/is_ball_close_condition.cpp
-    src/goalkeeper_node.cpp
-    src/precision_kick_node.cpp
-    src/defender_nodes.cpp
-    src/goal_line_defend_node.cpp
-    src/is_ball_in_area_condition.cpp
-    src/is_ball_closest_condition.cpp
-    src/is_ball_in_our_half_condition.cpp
-    src/lateral_clear_node.cpp
-    src/position_bisector_node.cpp
-    src/smother_save_node.cpp
-    src/calculate_kickoff_pose.cpp
-    src/aim_at.cpp
-    src/has_line_of_sight.cpp
-    src/keep_distance.cpp
-    src/hold_position_node.cpp
-    src/avoid_placement_corridor_node.cpp
-    src/set_motion_limit_node.cpp
-    src/compute_legal_slot_node.cpp
     ${BT_LEAF_SOURCES}
   )
   ament_target_dependencies(test_strategy_node
@@ -175,33 +151,6 @@ endif()
 add_executable(
   strategy_node
   src/strategy_node.cpp
-  src/game_conditions.cpp
-  src/go_to_point_node.cpp
-  src/kick_ball_node.cpp
-  src/align_to_ball_node.cpp
-  src/update_ball_position_node.cpp
-  src/calculate_interception_node.cpp
-  src/is_ball_close_condition.cpp
-  src/goalkeeper_node.cpp
-  src/precision_kick_node.cpp
-  src/defender_nodes.cpp
-  src/goal_line_defend_node.cpp
-  src/is_ball_in_area_condition.cpp
-  src/is_ball_closest_condition.cpp
-  src/is_ball_in_our_half_condition.cpp
-  src/lateral_clear_node.cpp
-  src/position_bisector_node.cpp
-  src/smother_save_node.cpp
-  src/calculate_kickoff_pose.cpp
-  src/aim_at.cpp
-  src/has_line_of_sight.cpp
-  src/keep_distance.cpp
-  src/hold_position_node.cpp
-  src/avoid_placement_corridor_node.cpp
-  src/set_motion_limit_node.cpp
-  src/compute_legal_slot_node.cpp
-  src/kick_once_node.cpp
-  src/wait_ball_in_play_condition.cpp
   ${BT_LEAF_SOURCES}
 )
 

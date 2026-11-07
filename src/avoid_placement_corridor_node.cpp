@@ -104,7 +104,7 @@ BT::PortsList AvoidPlacementCorridorNode::providedPorts()
     BT::InputPort<double>(
       "designated_y", "{designated_y}", "Posição Y designada para a bola (mm)"),
     BT::InputPort<bool>(
-      "has_designated", false, "Indica se existe posição designada válida"),
+      "has_designated", "{has_designated}", "Indica se existe posição designada válida"),
     BT::InputPort<double>(
       "margin_mm", 550.0, "Margem do corredor proibido (mm); deve ser >= 500"),
     BT::InputPort<double>(

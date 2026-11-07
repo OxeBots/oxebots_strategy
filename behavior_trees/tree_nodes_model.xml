@@ -95,15 +95,15 @@
       <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô</input_port>
     </Action>
     <Action ID="AvoidPlacementCorridor">
-      <input_port name="robot_id" type="unsigned int">Id do robô</input_port>
-      <input_port name="robot_x" type="double">Posição X atual do robô (mm)</input_port>
-      <input_port name="robot_y" type="double">Posição Y atual do robô (mm)</input_port>
-      <input_port name="robot_yaw" type="double">Orientação atual do robô (rad)</input_port>
-      <input_port name="ball_x" type="double">Posição X da bola (mm)</input_port>
-      <input_port name="ball_y" type="double">Posição Y da bola (mm)</input_port>
-      <input_port name="designated_x" type="double">Posição X designada para a bola (mm)</input_port>
-      <input_port name="designated_y" type="double">Posição Y designada para a bola (mm)</input_port>
-      <input_port name="has_designated" default="false" type="bool">Indica se existe posição designada válida</input_port>
+      <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô</input_port>
+      <input_port name="robot_x" default="{robot_x}" type="double">Posição X atual do robô (mm)</input_port>
+      <input_port name="robot_y" default="{robot_y}" type="double">Posição Y atual do robô (mm)</input_port>
+      <input_port name="robot_yaw" default="{robot_yaw}" type="double">Orientação atual do robô (rad)</input_port>
+      <input_port name="ball_x" default="{ball_x}" type="double">Posição X da bola (mm)</input_port>
+      <input_port name="ball_y" default="{ball_y}" type="double">Posição Y da bola (mm)</input_port>
+      <input_port name="designated_x" default="{designated_x}" type="double">Posição X designada para a bola (mm)</input_port>
+      <input_port name="designated_y" default="{designated_y}" type="double">Posição Y designada para a bola (mm)</input_port>
+      <input_port name="has_designated" default="{has_designated}" type="bool">Indica se existe posição designada válida</input_port>
       <input_port name="margin_mm" default="550.000000" type="double">Margem do corredor proibido (mm); deve ser &gt;= 500</input_port>
       <input_port name="max_speed" default="0.750000" type="double">Teto de velocidade do deslocamento (m/s)</input_port>
     </Action>

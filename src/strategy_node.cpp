@@ -18,51 +18,7 @@
 #include "behaviortree_cpp/loggers/groot2_publisher.h"
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/defender_nodes.hpp"
-#include "oxebots_strategy/go_to_point_node.h"
-#include "oxebots_strategy/kick_ball_node.h"
-#include "oxebots_strategy/align_to_ball_node.h"
-#include "oxebots_strategy/update_ball_position_node.h"
-#include "oxebots_strategy/calculate_interception_node.h"
-#include "oxebots_strategy/is_ball_close_condition.h"
-#include "oxebots_strategy/goalkeeper_node.h"
-#include "oxebots_strategy/precision_kick_node.h"
-#include "oxebots_strategy/goal_line_defend_node.h"
-#include "oxebots_strategy/is_ball_in_area_condition.h"
-#include "oxebots_strategy/is_ball_closest_condition.h"
-#include "oxebots_strategy/is_ball_in_our_half_condition.h"
-#include "oxebots_strategy/lateral_clear_node.h"
-#include "oxebots_strategy/position_bisector_node.h"
-#include "oxebots_strategy/smother_save_node.h"
-#include "oxebots_strategy/calculate_kick_off_pose.hpp"
-#include "oxebots_strategy/keep_distance.hpp"
-#include "oxebots_strategy/aim_at.hpp"
-#include "oxebots_strategy/has_line_of_sight.hpp"
-#include "oxebots_strategy/game_conditions.hpp"
-#include "oxebots_strategy/hold_position_node.hpp"
-#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
-#include "oxebots_strategy/set_motion_limit_node.hpp"
-#include "oxebots_strategy/compute_legal_slot_node.hpp"
-#include "oxebots_strategy/kick_once_node.hpp"
-#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 #include "oxebots_strategy/node_registry.hpp"
-#include "oxebots_strategy/goal_line_defend_node.h"
-#include "oxebots_strategy/is_ball_in_area_condition.h"
-#include "oxebots_strategy/is_ball_closest_condition.h"
-#include "oxebots_strategy/is_ball_in_our_half_condition.h"
-#include "oxebots_strategy/lateral_clear_node.h"
-#include "oxebots_strategy/position_bisector_node.h"
-#include "oxebots_strategy/smother_save_node.h"
-#include "oxebots_strategy/calculate_kick_off_pose.hpp"
-#include "oxebots_strategy/keep_distance.hpp"
-#include "oxebots_strategy/aim_at.hpp"
-#include "oxebots_strategy/has_line_of_sight.hpp"
-#include "oxebots_strategy/game_conditions.hpp"
-#include "oxebots_strategy/hold_position_node.hpp"
-#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
-#include "oxebots_strategy/set_motion_limit_node.hpp"
-#include "oxebots_strategy/compute_legal_slot_node.hpp"
-#include "oxebots_strategy/kick_once_node.hpp"
-#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -180,113 +136,8 @@ public:
 
       RCLCPP_INFO(this->get_logger(), "Robô %d iniciando com árvore: %s", robot_id_, tree_path.c_str());
 
-      // Configura o contexto de controle utilizado pelos nós da defender_tree.
-      configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
-      factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::KickBallNode>("KickBall", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::AlignToBallNode>("AlignToBall", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::UpdateBallPositionNode>("UpdateBallPosition", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::CalculateInterceptionNode>("CalculateInterception", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallCloseCondition>("IsBallClose", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::GoalkeeperNode>("Goalkeeper", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::PrecisionKickNode>("PrecisionKick", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::GoalLineDefendNode>("GoalLineDefend", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallInAreaCondition>("IsBallInArea", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallClosestCondition>("IsBallClosest", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::IsBallInOurHalfCondition>("IsBallInOurHalf", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::LateralClearNode>("LateralClear", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::PositionBisectorNode>("PositionBisector", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::SmotherSaveNode>("SmotherSave", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::CalculateKickOffPose>("CalculateKickOffPose");
-      factory_.registerNodeType<oxebots_strategy::KeepDistance>("KeepDistance");
-      factory_.registerNodeType<oxebots_strategy::AimAt>("AimAt");
-      factory_.registerNodeType<oxebots_strategy::HasLineOfSight>("HasLineOfSight");
-      factory_.registerNodeType<oxebots_strategy::CheckGameStateCondition>("CheckGameState");
-      factory_.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
-      factory_.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
-      factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
-      factory_.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::AvoidPlacementCorridorNode>(
-        "AvoidPlacementCorridor", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", shared_from_this());
-      factory_.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
-
-      // Nós da estratégia defensiva (defender_tree.xml)
-      factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
-      factory_.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
-      factory_.registerNodeType<ShadowBall>("ShadowBall");
-      factory_.registerNodeType<MarkOpponent>("MarkOpponent");
-      factory_.registerNodeType<GoToClamped>("GoToClamped");
-      factory_.registerSimpleCondition("IsValueTrue", [&](BT::TreeNode& node) {
-          bool val;
-          if (node.getInput("value", val)) return val ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          return BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<bool>("value") });
-
-      factory_.registerSimpleCondition("IsThisNodeID", [&](BT::TreeNode& node) {
-          unsigned int target_id;
-          if (!node.getInput("id", target_id)) return BT::NodeStatus::FAILURE;
-          return (static_cast<unsigned int>(robot_id_) == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<unsigned int>("id") });
-
-      factory_.registerSimpleCondition("IsMyRole", [&](BT::TreeNode& node) {
-          std::string role;
-          uint32_t my_id, target_id;
-          if (!node.getInput("role", role)) return BT::NodeStatus::FAILURE;
-          if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
-          if (role == "attacker") {
-              if (blackboard_->get("attacker_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          } else if (role == "defender") {
-              if (blackboard_->get("defender_id", target_id)) return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-          }
-          return BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<std::string>("role") });
-
-      factory_.registerSimpleCondition("CheckGCCommand", [&](BT::TreeNode& node) {
-          int expected;
-          if (!node.getInput("expected", expected)) return BT::NodeStatus::FAILURE;
-          int current;
-          if (!blackboard_->get("gc_command", current)) return BT::NodeStatus::FAILURE;
-          return (current == expected) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<int>("expected") });
-
-      factory_.registerSimpleCondition("IsRobotId", [&](BT::TreeNode& node) {
-        uint32_t target_id, my_id;
-        if (!node.getInput("robot_id", target_id)) return BT::NodeStatus::FAILURE;
-        if (!blackboard_->get("robot_id", my_id)) return BT::NodeStatus::FAILURE;
-        return (my_id == target_id) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-      }, { BT::InputPort<uint32_t>("robot_id") });
-
-      factory_.registerSimpleAction("Halt", [&](BT::TreeNode& node) {
-          std::string reason = "pelo GC";
-          std::string input_reason;
-          if (node.getInput("reason", input_reason)) {
-              if (input_reason == "idle") {
-                  reason = "por estar ocioso (sem papel)";
-              } else if (input_reason == "gc_halt") {
-                  reason = "por HALT do arbitro";
-              } else if (input_reason == "timeout") {
-                  reason = "por TIMEOUT";
-              } else if (input_reason == "stale_data") {
-                  reason = "por dados desatualizados (stale/modo degradado)";
-              } else {
-                  reason = "motivo: " + input_reason;
-              }
-          }
-          RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Robô %d parado %s", robot_id_, reason.c_str());
-
-          // Pede ao controlador central de movimento (movement_calculation_node) para zerar os
-          // comandos deste robô, em vez de publicar direto em /robot_commands: esse tópico agora
-          // tem um único escritor por robô (o controlador), que arbitra entre path-follow,
-          // AlignToBall, KickBall e Halt via /robot_motion_override.
-          auto override_msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
-          override_msg->robot_id = robot_id_;
-          override_msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
-          override_pub_->publish(std::move(override_msg));
-          return BT::NodeStatus::SUCCESS;
-      }, { BT::InputPort<std::string>("reason") });
+      oxebots_strategy::registerStrategyNodes(
+        factory_, shared_from_this(), blackboard_, override_pub_, robot_id_);
 
       // Registrar todas as árvores no diretório para permitir subárvores
       std::string bt_dir = package_share_directory + "/behavior_trees";
