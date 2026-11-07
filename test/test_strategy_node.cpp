@@ -463,6 +463,21 @@ TEST_F(StrategyNodeBlackboardTest, FreeKickBranchTransitionsOurAndTheir)
     auto node = std::make_shared<StrategyNode>(opts);
     ASSERT_TRUE(node->init());
 
+    auto pub_node = std::make_shared<rclcpp::Node>("test_fk_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
+
     node->setLastGeometry(makeGeometry(4500.0, 3000.0));
 
     auto roles = std::make_shared<RoleAssignment>();
@@ -482,24 +497,38 @@ TEST_F(StrategyNodeBlackboardTest, FreeKickBranchTransitionsOurAndTheir)
     ally.orientation = 0.0f;
     gd->robots.allies.push_back(ally);
     node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
 
-    // 1) Free Kick Nosso (we_favored = true)
+    // 1) Free Kick Nosso (we_favored = true) -> Kicker executa RestartKickerTree (sem criar barreira)
+    node->getBlackboard()->unset("slot_x");
+    node->getBlackboard()->unset("slot_y");
     auto gs_our = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/true);
     gs_our->header.stamp = node->now();
     node->setLastGameState(gs_our);
     node->refresh();
     node->tickOnce();
+    spin_both();
 
     EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+    double dummy_x = 0.0;
+    // Kicker executa RestartKickerTree, não o slot de barreira (wall)
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", dummy_x));
 
-    // 2) Free Kick Deles (we_favored = false)
+    // 2) Free Kick Deles (we_favored = false) -> Linha forma WallRole a >= 500 mm da bola
     auto gs_their = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/false);
     gs_their->header.stamp = node->now();
     node->setLastGameState(gs_their);
     node->refresh();
     node->tickOnce();
+    spin_both();
 
     EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+    double wall_x = 0.0, wall_y = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", wall_x));
+    ASSERT_TRUE(node->getBlackboard()->get("slot_y", wall_y));
+    const double dist_wall_ball = std::hypot(wall_x - 200.0, wall_y - (-300.0));
+    EXPECT_GE(dist_wall_ball, 500.0 - 1.0);
 }
 
 // ============================================================================
@@ -515,6 +544,21 @@ TEST_F(StrategyNodeBlackboardTest, PrepareKickoffAndKickoffBranchesTransitionOur
 
     auto node = std::make_shared<StrategyNode>(opts);
     ASSERT_TRUE(node->init());
+
+    auto pub_node = std::make_shared<rclcpp::Node>("test_ko_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
 
     node->setLastGeometry(makeGeometry(4500.0, 3000.0));
 
@@ -535,37 +579,59 @@ TEST_F(StrategyNodeBlackboardTest, PrepareKickoffAndKickoffBranchesTransitionOur
     ally.orientation = 0.0f;
     gd->robots.allies.push_back(ally);
     node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
 
-    // 1) PREPARE_KICKOFF Nosso (we_favored = true)
+    // 1) PREPARE_KICKOFF Nosso (we_favored = true) -> Cobrador vai para o círculo central
     auto gs_prep_our = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/true);
     gs_prep_our->header.stamp = node->now();
     node->setLastGameState(gs_prep_our);
     node->refresh();
     node->tickOnce();
+    spin_both();
     EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+    double prep_our_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_our_x));
+    EXPECT_LT(prep_our_x, 0.0);
+    EXPECT_LE(std::abs(prep_our_x), 500.0); // No círculo central (SC-05)
 
-    // 2) PREPARE_KICKOFF Deles (we_favored = false)
+    // 2) PREPARE_KICKOFF Deles (we_favored = false) -> Defensor fica fora do círculo central
     auto gs_prep_their = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/false);
     gs_prep_their->header.stamp = node->now();
     node->setLastGameState(gs_prep_their);
     node->refresh();
     node->tickOnce();
+    spin_both();
     EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+    double prep_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_their_x));
+    EXPECT_LT(prep_their_x, 0.0);
+    EXPECT_GE(std::abs(prep_their_x), 500.0); // Fora do círculo central (SC-06)
 
-    // 3) KICKOFF Nosso (we_favored = true)
+    // 3) KICKOFF Nosso (we_favored = true) -> Cobrador executa RestartKickerTree (sem slot de espera)
+    node->getBlackboard()->unset("slot_x");
     auto gs_kick_our = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/true);
     gs_kick_our->header.stamp = node->now();
     node->setLastGameState(gs_kick_our);
     node->refresh();
     node->tickOnce();
+    spin_both();
     EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+    double kick_slot_x = 0.0;
+    // Cobrador executa RestartKickerTree, não o slot de espera defensiva
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", kick_slot_x));
 
-    // 4) KICKOFF Deles (we_favored = false)
+    // 4) KICKOFF Deles (we_favored = false) -> Permanece em espera legal fora do círculo (slot_x <= -500)
     auto gs_kick_their = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/false);
     gs_kick_their->header.stamp = node->now();
     node->setLastGameState(gs_kick_their);
     node->refresh();
     node->tickOnce();
+    spin_both();
     EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+    double kick_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", kick_their_x));
+    EXPECT_LT(kick_their_x, 0.0);
+    EXPECT_GE(std::abs(kick_their_x), 500.0);
 }
 
