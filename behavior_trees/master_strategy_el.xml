@@ -37,12 +37,24 @@
 
       <ReactiveSequence name="PrepareKickoffBranch">
         <CheckGameState phase="PREPARE_KICKOFF"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PrepareKickoffOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PrepareKickoffTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="KickoffBranch">
         <CheckGameState phase="KICKOFF"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="KickoffExecuteOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PrepareKickoffTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="PreparePenaltyBranch">

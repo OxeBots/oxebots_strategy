@@ -434,4 +434,110 @@ TEST_F(ComputeLegalSlotTest, FreeKickWallPlacesBetweenBallAndGoalAtLegalDistance
   EXPECT_GE(dist_ball, 500.0 - 1.0);
 }
 
+TEST_F(ComputeLegalSlotTest, KickoffKickerInsideCenterCircleInOurHalfBothSides)
+{
+  auto factory = makeFactory();
+  const std::string xml =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestKickoffKicker">
+           <ComputeLegalSlot slot="kickoff_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  // Lado 1: Defendemos x negativo (own_goal_x = -2250)
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb->set("ball_x", 0.0);
+    bb->set("ball_y", 0.0);
+
+    auto tree = factory.createTreeFromText(xml, bb);
+    EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    double sx = 0.0, sy = 0.0, sw = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", sx));
+    ASSERT_TRUE(bb->get("slot_y", sy));
+    ASSERT_TRUE(bb->get("slot_w", sw));
+
+    // SC-05 / R-11: Na nossa própria metade (x negativo) e dentro do círculo central (raio <= 500 mm)
+    EXPECT_LT(sx, 0.0);
+    const double dist = std::hypot(sx, sy);
+    EXPECT_LE(dist, 500.0);
+    // Olhando para o gol adversário (sentido +x, sw próximo de 0)
+    EXPECT_NEAR(sw, 0.0, 0.2);
+  }
+
+  // Lado 2: Defendemos x positivo (own_goal_x = +2250)
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/false);
+    bb->set("ball_x", 0.0);
+    bb->set("ball_y", 0.0);
+
+    auto tree = factory.createTreeFromText(xml, bb);
+    EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    double sx = 0.0, sy = 0.0, sw = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", sx));
+    ASSERT_TRUE(bb->get("slot_y", sy));
+    ASSERT_TRUE(bb->get("slot_w", sw));
+
+    // Na nossa própria metade (x positivo) e dentro do círculo central
+    EXPECT_GT(sx, 0.0);
+    const double dist = std::hypot(sx, sy);
+    EXPECT_LE(dist, 500.0);
+    // Olhando para o gol adversário (sentido -x, sw próximo de pi ou -pi)
+    EXPECT_NEAR(std::abs(sw), M_PI, 0.2);
+  }
+}
+
+TEST_F(ComputeLegalSlotTest, KickoffDefOutsideCenterCircleInOurHalfBothSides)
+{
+  auto factory = makeFactory();
+  const std::string xml0 =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestKickoffDef0">
+           <ComputeLegalSlot slot="kickoff_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+  const std::string xml1 =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestKickoffDef1">
+           <ComputeLegalSlot slot="kickoff_def" index="1" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  // Lado 1: Defendemos x negativo
+  {
+    auto bb0 = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb0->set("ball_x", 0.0);
+    bb0->set("ball_y", 0.0);
+    auto tree0 = factory.createTreeFromText(xml0, bb0);
+    EXPECT_EQ(tree0.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    double sx0 = 0.0, sy0 = 0.0;
+    ASSERT_TRUE(bb0->get("slot_x", sx0));
+    ASSERT_TRUE(bb0->get("slot_y", sy0));
+
+    // SC-05, SC-06 / R-11: Metade própria e fora do círculo central (raio >= 500 mm)
+    EXPECT_LT(sx0, 0.0);
+    EXPECT_GE(std::hypot(sx0, sy0), 500.0);
+
+    auto bb1 = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb1->set("ball_x", 0.0);
+    bb1->set("ball_y", 0.0);
+    auto tree1 = factory.createTreeFromText(xml1, bb1);
+    EXPECT_EQ(tree1.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+    double sx1 = 0.0, sy1 = 0.0;
+    ASSERT_TRUE(bb1->get("slot_x", sx1));
+    ASSERT_TRUE(bb1->get("slot_y", sy1));
+
+    EXPECT_LT(sx1, 0.0);
+    EXPECT_GE(std::hypot(sx1, sy1), 500.0);
+
+    // Índices 0 e 1 escalonados simetricamente em y
+    EXPECT_GT(sy0, 0.0);
+    EXPECT_LT(sy1, 0.0);
+  }
+}
+
 }  // namespace

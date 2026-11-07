@@ -26,6 +26,7 @@ PRODUCTION = [
     'restart_kicker.xml',
     'stop.xml',
     'free_kick.xml',
+    'kickoff.xml',
 ]
 
 MAX_KICK_SPEED = 3.0
@@ -126,4 +127,33 @@ def test_free_kick_trees_estrutura_e_papeis():
     # FreeKickTheirTree usa wall para formar barreira
     their_slots = [el.attrib.get('slot') for el in their_tree.iter('ComputeLegalSlot')]
     assert 'wall' in their_slots
+
+
+def test_kickoff_trees_estrutura_e_papeis():
+    root = load('kickoff.xml')
+    prep_our = root.find("./BehaviorTree[@ID='PrepareKickoffOurTree']")
+    prep_their = root.find("./BehaviorTree[@ID='PrepareKickoffTheirTree']")
+    exec_our = root.find("./BehaviorTree[@ID='KickoffExecuteOurTree']")
+
+    assert prep_our is not None, 'PrepareKickoffOurTree ausente em kickoff.xml'
+    assert prep_their is not None, 'PrepareKickoffTheirTree ausente em kickoff.xml'
+    assert exec_our is not None, 'KickoffExecuteOurTree ausente em kickoff.xml'
+
+    # PrepareKickoffOurTree tem cobrador com kickoff_kicker e defensores com kickoff_def
+    prep_our_slots = [el.attrib.get('slot') for el in prep_our.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' in prep_our_slots
+    assert 'kickoff_def' in prep_our_slots
+
+    # PrepareKickoffTheirTree só tem kickoff_def (ninguém no círculo central)
+    prep_their_slots = [el.attrib.get('slot') for el in prep_their.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' not in prep_their_slots
+    assert 'kickoff_def' in prep_their_slots
+
+    # KickoffExecuteOurTree tem cobrador com RestartKickerTree e outros em HoldPosition
+    exec_kicker = [el for el in exec_our.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(exec_kicker) == 1
+    assert exec_kicker[0].attrib['target_x'] == '{opp_goal_x}'
+    assert exec_kicker[0].attrib['target_y'] == '{opp_goal_y}'
+    assert list(exec_our.iter('HoldPosition')), 'HoldPosition ausente para demais robôs em KickoffExecuteOurTree'
+
 

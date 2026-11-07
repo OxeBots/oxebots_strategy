@@ -501,3 +501,71 @@ TEST_F(StrategyNodeBlackboardTest, FreeKickBranchTransitionsOurAndTheir)
 
     EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
 }
+
+// ============================================================================
+// 8. Kick-off Unificado (E05) — Transição de PrepareKickoffBranch e KickoffBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, PrepareKickoffAndKickoffBranchesTransitionOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 0.0f;
+    gd->ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -280.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+
+    // 1) PREPARE_KICKOFF Nosso (we_favored = true)
+    auto gs_prep_our = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/true);
+    gs_prep_our->header.stamp = node->now();
+    node->setLastGameState(gs_prep_our);
+    node->refresh();
+    node->tickOnce();
+    EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+
+    // 2) PREPARE_KICKOFF Deles (we_favored = false)
+    auto gs_prep_their = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/false);
+    gs_prep_their->header.stamp = node->now();
+    node->setLastGameState(gs_prep_their);
+    node->refresh();
+    node->tickOnce();
+    EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+
+    // 3) KICKOFF Nosso (we_favored = true)
+    auto gs_kick_our = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/true);
+    gs_kick_our->header.stamp = node->now();
+    node->setLastGameState(gs_kick_our);
+    node->refresh();
+    node->tickOnce();
+    EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+
+    // 4) KICKOFF Deles (we_favored = false)
+    auto gs_kick_their = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/false);
+    gs_kick_their->header.stamp = node->now();
+    node->setLastGameState(gs_kick_their);
+    node->refresh();
+    node->tickOnce();
+    EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+}
+

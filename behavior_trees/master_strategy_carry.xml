@@ -24,7 +24,7 @@
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
         </Fallback>
-        <SubTree ID="KickOffTree" _autoremap="true" />
+        <SubTree ID="PrepareKickoffOurTree" _autoremap="true" />
       </ReactiveSequence>
 
       <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
