@@ -373,4 +373,65 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
   EXPECT_TRUE(hold_called);
 }
 
+// ============================================================================
+// 7. Free Kick Unificado (E07) — Slots freekick_support (SC-07) e wall (SC-08)
+// ============================================================================
+
+TEST_F(ComputeLegalSlotTest, FreeKickSupportRespectsOpponentAreaDistance)
+{
+  auto factory = makeFactory();
+  const std::string xml =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestFKSup">
+           <ComputeLegalSlot slot="freekick_support" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  // Bola perto da área adversária (área adversária começa em x = 2250 - 500 = 1750, largura 1350)
+  bb->set("ball_x", 1600.0);
+  bb->set("ball_y", 200.0);
+
+  auto tree = factory.createTreeFromText(xml, bb);
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+  double sx = 0.0, sy = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", sx));
+  ASSERT_TRUE(bb->get("slot_y", sy));
+
+  // SC-07 / R-21: Deve ficar a >= 200 mm da área adversária e >= 500 mm da bola
+  const double opp_area_x_limit = 2250.0 - 500.0; // 1750 mm
+  EXPECT_LE(sx, opp_area_x_limit - 200.0 + 1.0);
+  const double dist_ball = std::hypot(sx - 1600.0, sy - 200.0);
+  EXPECT_GE(dist_ball, 500.0 - 1.0);
+}
+
+TEST_F(ComputeLegalSlotTest, FreeKickWallPlacesBetweenBallAndGoalAtLegalDistance)
+{
+  auto factory = makeFactory();
+  const std::string xml =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestWall">
+           <ComputeLegalSlot slot="wall" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  // Nosso gol em x = -2250, bola em (0, 0)
+  bb->set("ball_x", 0.0);
+  bb->set("ball_y", 0.0);
+
+  auto tree = factory.createTreeFromText(xml, bb);
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+  double sx = 0.0, sy = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", sx));
+  ASSERT_TRUE(bb->get("slot_y", sy));
+
+  // SC-08 / R-13: Barreira deve estar a >= 500 mm da bola em direção ao nosso gol (x negativo)
+  EXPECT_LT(sx, 0.0);
+  const double dist_ball = std::hypot(sx - 0.0, sy - 0.0);
+  EXPECT_GE(dist_ball, 500.0 - 1.0);
+}
+
 }  // namespace

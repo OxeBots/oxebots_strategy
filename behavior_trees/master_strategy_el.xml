@@ -55,9 +55,16 @@
         <Halt reason="not_implemented"/>
       </ReactiveSequence>
 
+      <!-- 9. FREE KICK (inclui falta, lateral, escanteio) -->
       <ReactiveSequence name="FreeKickBranch">
         <CheckGameState phase="FREE_KICK"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="FreeKickOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="FreeKickTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="RunBranch">

@@ -25,6 +25,7 @@ PRODUCTION = [
     'defender_tree.xml',
     'restart_kicker.xml',
     'stop.xml',
+    'free_kick.xml',
 ]
 
 MAX_KICK_SPEED = 3.0
@@ -104,3 +105,25 @@ def test_restart_kicker_expoe_as_portas_e_termina_em_kickonce():
     assert kick[0].attrib['target_x'] == '{target_x}' and kick[0].attrib['target_y'] == '{target_y}'
     # O IsBallClose antes do KickOnce garante o contato exigido pelo controlador.
     assert list(tree.iter('IsBallClose'))
+
+
+def test_free_kick_trees_estrutura_e_papeis():
+    root = load('free_kick.xml')
+    our_tree = root.find("./BehaviorTree[@ID='FreeKickOurTree']")
+    their_tree = root.find("./BehaviorTree[@ID='FreeKickTheirTree']")
+    assert our_tree is not None, 'FreeKickOurTree ausente em free_kick.xml'
+    assert their_tree is not None, 'FreeKickTheirTree ausente em free_kick.xml'
+
+    # FreeKickOurTree usa RestartKickerTree para o kicker e freekick_support para apoio
+    kicker_subtrees = [el for el in our_tree.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(kicker_subtrees) == 1
+    assert kicker_subtrees[0].attrib['target_x'] == '{opp_goal_x}'
+    assert kicker_subtrees[0].attrib['target_y'] == '{opp_goal_y}'
+
+    our_slots = [el.attrib.get('slot') for el in our_tree.iter('ComputeLegalSlot')]
+    assert 'freekick_support' in our_slots
+
+    # FreeKickTheirTree usa wall para formar barreira
+    their_slots = [el.attrib.get('slot') for el in their_tree.iter('ComputeLegalSlot')]
+    assert 'wall' in their_slots
+

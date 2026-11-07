@@ -448,3 +448,56 @@ TEST_F(StrategyNodeBlackboardTest, NodeRegistryAndTreeNodesModelForGroot2)
     }
     EXPECT_GE(custom_count, 32u);
 }
+
+// ============================================================================
+// 7. Free Kick Unificado (E07) — Transição e Roteamento de FreeKickBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, FreeKickBranchTransitionsOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 200.0f;
+    gd->ball.y = -300.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = 0.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+
+    // 1) Free Kick Nosso (we_favored = true)
+    auto gs_our = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/true);
+    gs_our->header.stamp = node->now();
+    node->setLastGameState(gs_our);
+    node->refresh();
+    node->tickOnce();
+
+    EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+
+    // 2) Free Kick Deles (we_favored = false)
+    auto gs_their = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/false);
+    gs_their->header.stamp = node->now();
+    node->setLastGameState(gs_their);
+    node->refresh();
+    node->tickOnce();
+
+    EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+}
