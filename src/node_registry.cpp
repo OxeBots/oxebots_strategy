@@ -5,6 +5,7 @@
 
 #include "behaviortree_cpp/xml_parsing.h"
 #include "oxebots_strategy/aim_at.hpp"
+#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
 #include "oxebots_strategy/align_to_ball_node.h"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/calculate_kick_off_pose.hpp"
@@ -88,6 +89,8 @@ void registerStrategyNodes(
   factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
   factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
   factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
+  factory.registerNodeType<oxebots_strategy::AvoidPlacementCorridorNode>(
+    "AvoidPlacementCorridor", node);
   factory.registerNodeType<oxebots_strategy::SetMotionLimitNode>("SetMotionLimit", node);
   factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
   factory.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", node);

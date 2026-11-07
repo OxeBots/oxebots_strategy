@@ -43,6 +43,7 @@ set(BT_LEAF_SOURCES
   src/has_line_of_sight.cpp
   src/keep_distance.cpp
   src/hold_position_node.cpp
+  src/avoid_placement_corridor_node.cpp
   src/set_motion_limit_node.cpp
   src/compute_legal_slot_node.cpp
   src/kick_once_node.cpp
@@ -317,46 +318,9 @@ install(
     DESTINATION share/${PROJECT_NAME}
 )
 
-<<<<<<< HEAD
-# --- Ferramentas e testes das Behavior Trees (backlog T01 e T02) ---------------------------------
-# dump_bt_model: despeja as portas de todas as folhas para o scripts/validate_bt.py. Compila as
-# mesmas folhas do strategy_node (sem o strategy_node.cpp), por isso a lista abaixo precisa
-# acompanhar a do strategy_node; o validador avisa (regra R8) se os registros divergirem.
-set(BT_LEAF_SOURCES
-  src/go_to_point_node.cpp
-  src/kick_ball_node.cpp
-  src/align_to_ball_node.cpp
-  src/update_ball_position_node.cpp
-  src/calculate_interception_node.cpp
-  src/is_ball_close_condition.cpp
-  src/goalkeeper_node.cpp
-  src/precision_kick_node.cpp
-  src/defender_nodes.cpp
-  src/goal_line_defend_node.cpp
-  src/is_ball_in_area_condition.cpp
-  src/is_ball_closest_condition.cpp
-  src/is_ball_in_our_half_condition.cpp
-  src/lateral_clear_node.cpp
-  src/position_bisector_node.cpp
-  src/smother_save_node.cpp
-  src/calculate_kickoff_pose.cpp
-  src/aim_at.cpp
-  src/has_line_of_sight.cpp
-  src/keep_distance.cpp
-  src/hold_position_node.cpp
-  src/avoid_placement_corridor_node.cpp
-  src/set_motion_limit_node.cpp
-  src/compute_legal_slot_node.cpp
-  src/game_conditions.cpp
-  src/kick_once_node.cpp
-  src/wait_ball_in_play_condition.cpp
-)
-
-=======
 # --- Ferramentas e testes das Behavior Trees (backlog T01, T02 e A05) ----------------------------
 # dump_bt_model: despeja as portas de todas as folhas (usando BT_LEAF_SOURCES + node_registry.cpp)
 # para o scripts/validate_bt.py e para o Groot2 (--groot).
->>>>>>> ffb1c15ed369bf5f8c4e0270072b9e4777833d97
 add_executable(dump_bt_model src/tools/dump_bt_model.cpp ${BT_LEAF_SOURCES})
 
 ament_target_dependencies(

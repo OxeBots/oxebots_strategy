@@ -11,7 +11,6 @@
 #include <string>
 
 #include "behaviortree_cpp/bt_factory.h"
-<<<<<<< HEAD
 #include "behaviortree_cpp/xml_parsing.h"
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/align_to_ball_node.h"
@@ -40,6 +39,7 @@
 #include "oxebots_strategy/smother_save_node.h"
 #include "oxebots_strategy/update_ball_position_node.h"
 #include "oxebots_strategy/wait_ball_in_play_condition.hpp"
+#include "oxebots_strategy/node_registry.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
@@ -102,11 +102,6 @@ void register_all(BT::BehaviorTreeFactory & factory, const rclcpp::Node::SharedP
 
 }  // namespace
 
-=======
-#include "oxebots_strategy/node_registry.hpp"
-#include "rclcpp/rclcpp.hpp"
-
->>>>>>> ffb1c15ed369bf5f8c4e0270072b9e4777833d97
 int main(int argc, char ** argv)
 {
 #ifdef SIGPIPE

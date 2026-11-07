@@ -18,7 +18,14 @@
 #include "behaviortree_cpp/loggers/groot2_publisher.h"
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/defender_nodes.hpp"
-<<<<<<< HEAD
+#include "oxebots_strategy/go_to_point_node.h"
+#include "oxebots_strategy/kick_ball_node.h"
+#include "oxebots_strategy/align_to_ball_node.h"
+#include "oxebots_strategy/update_ball_position_node.h"
+#include "oxebots_strategy/calculate_interception_node.h"
+#include "oxebots_strategy/is_ball_close_condition.h"
+#include "oxebots_strategy/goalkeeper_node.h"
+#include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/goal_line_defend_node.h"
 #include "oxebots_strategy/is_ball_in_area_condition.h"
 #include "oxebots_strategy/is_ball_closest_condition.h"
@@ -37,9 +44,25 @@
 #include "oxebots_strategy/compute_legal_slot_node.hpp"
 #include "oxebots_strategy/kick_once_node.hpp"
 #include "oxebots_strategy/wait_ball_in_play_condition.hpp"
-=======
 #include "oxebots_strategy/node_registry.hpp"
->>>>>>> ffb1c15ed369bf5f8c4e0270072b9e4777833d97
+#include "oxebots_strategy/goal_line_defend_node.h"
+#include "oxebots_strategy/is_ball_in_area_condition.h"
+#include "oxebots_strategy/is_ball_closest_condition.h"
+#include "oxebots_strategy/is_ball_in_our_half_condition.h"
+#include "oxebots_strategy/lateral_clear_node.h"
+#include "oxebots_strategy/position_bisector_node.h"
+#include "oxebots_strategy/smother_save_node.h"
+#include "oxebots_strategy/calculate_kick_off_pose.hpp"
+#include "oxebots_strategy/keep_distance.hpp"
+#include "oxebots_strategy/aim_at.hpp"
+#include "oxebots_strategy/has_line_of_sight.hpp"
+#include "oxebots_strategy/game_conditions.hpp"
+#include "oxebots_strategy/hold_position_node.hpp"
+#include "oxebots_strategy/avoid_placement_corridor_node.hpp"
+#include "oxebots_strategy/set_motion_limit_node.hpp"
+#include "oxebots_strategy/compute_legal_slot_node.hpp"
+#include "oxebots_strategy/kick_once_node.hpp"
+#include "oxebots_strategy/wait_ball_in_play_condition.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -156,7 +179,6 @@ public:
 
       RCLCPP_INFO(this->get_logger(), "Robô %d iniciando com árvore: %s", robot_id_, tree_path.c_str());
 
-<<<<<<< HEAD
       // Configura o contexto de controle utilizado pelos nós da defender_tree.
       configureDefenderController(shared_from_this(), static_cast<uint32_t>(robot_id_));
       factory_.registerNodeType<oxebots_strategy::GoToPointNode>("GoToPoint", shared_from_this());
@@ -264,10 +286,6 @@ public:
           override_pub_->publish(std::move(override_msg));
           return BT::NodeStatus::SUCCESS;
       }, { BT::InputPort<std::string>("reason") });
-=======
-      oxebots_strategy::registerStrategyNodes(
-        factory_, shared_from_this(), blackboard_, override_pub_, robot_id_);
->>>>>>> ffb1c15ed369bf5f8c4e0270072b9e4777833d97
 
       // Registrar todas as árvores no diretório para permitir subárvores
       std::string bt_dir = package_share_directory + "/behavior_trees";
