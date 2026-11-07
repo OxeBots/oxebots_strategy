@@ -1,237 +1,238 @@
 <root BTCPP_format="4">
-  <TreeNodesModel>
-    <Action ID="AimAt">
-      <input_port name="robot_id" type="unsigned int">ID do robô</input_port>
-      <input_port name="target_x" type="double">Ponto X para onde mirar</input_port>
-      <input_port name="target_y" type="double">Ponto Y para onde mirar</input_port>
-      <input_port name="robot_x" type="double">Posição X atual do robô</input_port>
-      <input_port name="robot_y" type="double">Posição Y atual do robô</input_port>
-      <output_port name="target_angle" type="double">Ângulo calculado em radianos</output_port>
-    </Action>
-    <Action ID="AlignToBall">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="angle_threshold_deg" default="10.000000" type="double">Desvio angular máximo para considerar alinhado</input_port>
-      <input_port name="max_angular_speed" default="3.000000" type="double">Velocidade angular máxima (rad/s)</input_port>
-      <input_port name="p_gain" default="4.000000" type="double">Ganho proporcional do controle de giro</input_port>
-    </Action>
-    <Condition ID="BallHeldTimer">
-      <input_port name="max_s" default="8.000000" type="double">Tempo máximo (s) que a bola pode ficar parada na área antes de falhar</input_port>
-      <input_port name="area" default="own_defense" type="std::string">Área monitorada: own_defense ou opp_defense</input_port>
-    </Condition>
-    <Action ID="CalculateInterception">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="goal_x" default="0.000000" type="double">X do gol alvo</input_port>
-      <input_port name="goal_y" default="0.000000" type="double">Y do gol alvo</input_port>
-      <input_port name="carry_distance_mm" default="95.000000" type="double">Distância (mm) do ponto de carga até a bola, do lado do gol. Ver kCarryDistanceMm.</input_port>
-      <input_port name="carry_face_lookahead_mm" default="400.000000" type="double">Distância (mm) do ponto de mira da carga até a bola, do lado do gol.</input_port>
-      <output_port name="intercept_x" type="double"/>
-      <output_port name="intercept_y" type="double"/>
-      <output_port name="intercept_pk_x" type="double"/>
-      <output_port name="intercept_pk_y" type="double"/>
-      <output_port name="intercept_pk_safe_x" type="double">Igual a intercept_pk_x, exceto quando o robô está do lado errado da bola agora — nesse caso, um waypoint de contorno lateral em vez do pré-chute direto.</output_port>
-      <output_port name="intercept_pk_safe_y" type="double"/>
-      <output_port name="intercept_capture_x" type="double"/>
-      <output_port name="intercept_capture_y" type="double"/>
-      <output_port name="intercept_carry_x" type="double"/>
-      <output_port name="intercept_carry_y" type="double"/>
-      <output_port name="intercept_carry_face_x" type="double"/>
-      <output_port name="intercept_carry_face_y" type="double"/>
-      <output_port name="is_ready_to_kick" type="bool"/>
-    </Action>
-    <Action ID="CalculateKickOffPose">
-      <input_port name="robot_id" type="unsigned int">ID do robô para calcular o espaçamento individual</input_port>
-      <output_port name="target_x" type="double">Coordenada X alvo no campo de defesa</output_port>
-      <output_port name="target_y" type="double">Coordenada Y alvo distribuída</output_port>
-    </Action>
-    <Condition ID="CheckGCCommand">
-      <input_port name="expected" type="int">Código inteiro do comando bruto do Game Controller</input_port>
-    </Condition>
-    <Condition ID="CheckGameState">
-      <input_port name="phase" type="std::string">Fase esperada: HALT, TIMEOUT, STOP, BALL_PLACEMENT, PREPARE_KICKOFF, KICKOFF, PREPARE_PENALTY, PENALTY, FREE_KICK ou RUN</input_port>
-    </Condition>
-    <Action ID="ComputeLegalSlot">
-      <input_port name="slot" type="std::string">Nome do slot tático (retreat, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, wall)</input_port>
-      <input_port name="index" default="0" type="unsigned int">Índice do robô no slot</input_port>
-      <output_port name="slot_x" type="double">Coordenada X calculada (mm)</output_port>
-      <output_port name="slot_y" type="double">Coordenada Y calculada (mm)</output_port>
-      <output_port name="slot_w" type="double">Orientação calculada (rad)</output_port>
-    </Action>
-    <Action ID="GoToClamped">
-      <input_port name="x" type="double">Coordenada X do alvo em mm (ex.: {ball_x})</input_port>
-      <input_port name="y" type="double">Coordenada Y do alvo em mm (ex.: {ball_y})</input_port>
-      <input_port name="my_goal_x" type="double">X do proprio gol (usado para calcular a borda da pequena area)</input_port>
-      <input_port name="penalty_area_depth" type="double">Profundidade da pequena area a partir da linha de fundo (mm)</input_port>
-    </Action>
-    <Action ID="GoToPoint">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robô (padrão {robot_id} da blackboard)</input_port>
-      <input_port name="x" type="double"/>
-      <input_port name="y" type="double"/>
-      <input_port name="face_x" type="double">Opcional: X do alvo de orientação (bola, companheiro, canto do gol...). Aceita literal ou remapeamento de blackboard, ex: "{ball_x}". Se omitido (junto com face_y), mantém o padrão de sempre olhar para o gol adversário.</input_port>
-      <input_port name="face_y" type="double">Opcional: Y do alvo de orientação. Ver face_x.</input_port>
-      <input_port name="tolerance" default="-1.000000" type="double">Tolerância para sucesso (se &lt;= 0, nunca retorna SUCCESS)</input_port>
-      <input_port name="max_speed" default="0.000000" type="double">Velocidade linear máxima opcional em m/s (&lt;= 0 usa o padrão do controlador)</input_port>
-      <input_port name="planner" default="dstar" type="std::string">Estratégia de planejamento: "dstar" (padrão, evita obstáculos), "straight_line" (linha reta, ignora a grade de obstáculos)</input_port>
-      <input_port name="ball_contact_threshold_mm" default="-1.000000" type="double">Se &gt; 0, o nó falha caso a bola AO VIVO chegue mais perto do robô do que esse valor antes de "chegar" ao alvo — força recalcular tudo do zero. Use só em GoToPoints longe da bola de propósito (ex: Fase 1); NÃO em GoToPoints que terminam perto dela de propósito (ex: Fase 2). Default -1.0 = desabilitado.</input_port>
-      <input_port name="ignore_area" default="false" type="bool">Se true, desativa restrições de área para este robô</input_port>
-      <input_port name="ball_side_check" default="false" type="bool">Se true, o nó falha caso o robô esteja do lado ERRADO da bola (mesmo lado que o gol adversário, "na frente" dela) — força recalcular tudo do zero. Só faz sentido em alvos com um lado correto bem definido (ex: ponto de pré-chute, atrás da bola). Default false = desabilitado.</input_port>
-    </Action>
-    <Action ID="GoalLineDefend">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-    </Action>
-    <Action ID="Goalkeeper">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robô goleiro</input_port>
-      <input_port name="kick_speed" default="3.000000" type="double">Velocidade do chute em m/s</input_port>
-      <input_port name="mode" default="normal" type="std::string">Modo de operação do goleiro: normal, penalty_def ou hold</input_port>
-      <input_port name="max_hold_s" default="8.000000" type="double">Tempo máximo (s) com a bola na área antes de forçar afastamento urgente (regra dos 10 s)</input_port>
-    </Action>
-    <Action ID="Halt">
-      <input_port name="reason" default="idle" type="std::string">Opcional: motivo da parada (gc_halt, timeout, stale_data, idle)</input_port>
-    </Action>
-    <Condition ID="HasLineOfSight">
-      <input_port name="robot_id" type="unsigned int">ID do robô</input_port>
-      <input_port name="target_x" type="double">Alvo X</input_port>
-      <input_port name="target_y" type="double">Alvo Y</input_port>
-    </Condition>
-    <Condition ID="HasRole">
-      <input_port name="role" type="std::string">Papel esperado: goalkeeper, attacker, defender ou kicker</input_port>
-    </Condition>
-    <Action ID="HoldPosition">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô</input_port>
-    </Action>
-    <Condition ID="IsBallClose">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="distance_threshold" default="180.000000" type="double">Distância para considerar 'perto'</input_port>
-      <input_port name="angle_threshold_deg" default="-1.000000" type="double">Desvio angular máximo (graus) entre a frente do robô e a bola, para o kicker realmente alcançar a bola. Se &lt;= 0, não checa ângulo (comportamento antigo).</input_port>
-    </Condition>
-    <Condition ID="IsBallClosest">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-      <input_port name="leash_fraction" default="0.650000" type="double">Fração da metade aliada (do gol ao meio-campo) até onde o goleiro busca a bola</input_port>
-    </Condition>
-    <Condition ID="IsBallInArea">
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-    </Condition>
-    <Condition ID="IsBallInOpponentField">
-      <input_port name="ball_x" type="double">X da bola (mm)</input_port>
-      <input_port name="my_goal_x" default="{my_goal_x}" type="double">X do proprio gol (mm), define o lado do campo. Padrao: {my_goal_x} da blackboard</input_port>
-      <input_port name="is_yellow" type="bool">Opcional (legado): so vale se my_goal_x nao estiver disponivel; assume que o amarelo ataca o x negativo, o que deixa de ser verdade na troca de lados</input_port>
-    </Condition>
-    <Condition ID="IsBallInOurHalf">
-      <input_port name="ball_x" type="double"/>
-    </Condition>
-    <Condition ID="IsDataFresh">
-      <input_port name="max_gc_ms" default="500.000000" type="double">Idade máxima do Game Controller em ms</input_port>
-      <input_port name="max_pose_ms" default="150.000000" type="double">Idade máxima da pose em ms</input_port>
-      <input_port name="max_ball_ms" default="300.000000" type="double">Idade máxima da bola em ms</input_port>
-      <input_port name="require_gc" type="bool">Opcional: se falso, ignora a verificação de idade do GC</input_port>
-    </Condition>
-    <Condition ID="IsMyRole">
-      <input_port name="role" type="std::string">Papel esperado (attacker | defender)</input_port>
-    </Condition>
-    <Condition ID="IsOpponentControllingBall">
-      <input_port name="opponent_controlling" type="bool"/>
-    </Condition>
-    <Condition ID="IsRobotId">
-      <input_port name="robot_id" type="unsigned int">ID esperado do robô</input_port>
-    </Condition>
-    <Condition ID="IsThisNodeID">
-      <input_port name="id" type="unsigned int">ID esperado do processo strategy_node</input_port>
-    </Condition>
-    <Condition ID="IsValueTrue">
-      <input_port name="value" type="bool">Valor booleano a avaliar</input_port>
-    </Condition>
-    <Action ID="KeepDistance">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robô</input_port>
-      <input_port name="distance" default="550.000000" type="double">Distância mínima a manter (ex: 500.0)</input_port>
-      <input_port name="ball_x" default="{ball_x}" type="double">Posição X da bola</input_port>
-      <input_port name="ball_y" default="{ball_y}" type="double">Posição Y da bola</input_port>
-      <input_port name="robot_x" default="{robot_x}" type="double">Posição X do robô</input_port>
-      <input_port name="robot_y" default="{robot_y}" type="double">Posição Y do robô</input_port>
-      <output_port name="target_x" type="double">Coordenada X para onde recuar</output_port>
-      <output_port name="target_y" type="double">Coordenada Y para onde recuar</output_port>
-    </Action>
-    <Action ID="KickBall">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="kick_speed" default="3.000000" type="double">Kick speed in m/s</input_port>
-    </Action>
-    <Action ID="KickOnce">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô que chuta</input_port>
-      <input_port name="target_x" type="double">Opcional: X do alvo do chute (mm); só para o log de alinhamento</input_port>
-      <input_port name="target_y" type="double">Opcional: Y do alvo do chute (mm); só para o log de alinhamento</input_port>
-      <input_port name="kick_speed" default="2.500000" type="double">Velocidade do chute (m/s); limitada a 3,0</input_port>
-      <input_port name="timeout_s" default="10.000000" type="double">Prazo (s) para a bola se mover; passado, FAILURE</input_port>
-      <input_port name="ball_moved_mm" default="50.000000" type="double">Deslocamento da bola (mm) que confirma o chute</input_port>
-    </Action>
-    <Action ID="LateralClear">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-      <input_port name="allow_leave_area" default="false" type="bool">Permite o alvo fora da grande área, até a coleira (bola fora da área e mais perto do goleiro)</input_port>
-      <output_port name="kick_speed" type="double">Velocidade do chute escolhida (m/s): passe ou afastar</output_port>
-    </Action>
-    <Action ID="MarkOpponent">
-      <input_port name="ball" type="Pose2D"/>
-      <input_port name="my_goal_x" type="double"/>
-      <input_port name="block_distance" default="400.000000" type="double">Distância mínima do oponente ao longo da linha bola→gol (mm)</input_port>
-      <input_port name="penalty_area_depth" type="double">Profundidade da pequena área a partir da linha de fundo (mm)</input_port>
-      <input_port name="penalty_area_width" type="double">Largura da pequena área (mm); sem a porta vale {penalty_area_width} da blackboard</input_port>
-      <input_port name="y_limit" default="1200.000000" type="double">Limite lateral do defensor em Y (mm)</input_port>
-    </Action>
-    <Action ID="PenaltyKeeperLine">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô goleiro (padrão {robot_id} da blackboard)</input_port>
-      <input_port name="side" default="defend" type="std::string">Lado de atuação no pênalti (defend)</input_port>
-      <input_port name="line_offset_mm" default="90.000000" type="double">Distância (mm) da linha de gol para dentro do campo (padrão 90 mm = 1 raio do robô)</input_port>
-    </Action>
-    <Action ID="PositionBisector">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-      <input_port name="goal_width" type="double"/>
-    </Action>
-    <Action ID="PrecisionKick">
-      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robo</input_port>
-      <input_port name="target_x" type="double">X do alvo</input_port>
-      <input_port name="target_y" type="double">Y do alvo</input_port>
-      <input_port name="kick_speed" default="3.000000" type="double">Velocidade do chute (m/s, limitada a &lt;= 3.0)</input_port>
-    </Action>
-    <Action ID="SetMotionLimit">
-      <input_port name="limit_mps" default="1.500000" type="double">Teto de velocidade linear (m/s) enviado ao SafetyGate (&lt;= 0.0 limpa o override)</input_port>
-    </Action>
-    <Action ID="ShadowBall">
-      <input_port name="ball" type="Pose2D"/>
-      <input_port name="ball_vel" type="Vector2D"/>
-      <input_port name="my_goal_x" type="double"/>
-      <input_port name="ratio" default="0.500000" type="double">Raio do defensor como fração da distância bola-gol (limitado por standoff/max_radius)</input_port>
-      <input_port name="standoff" default="300.000000" type="double">Folga mínima (mm) entre a borda da área (já com a margem do robô) e o defensor</input_port>
-      <input_port name="max_radius" default="2500.000000" type="double">Raio máximo (mm) do defensor a partir do centro do gol</input_port>
-      <input_port name="predict_time" default="0.300000" type="double">Horizonte de predição da trajetória da bola (s)</input_port>
-      <input_port name="penalty_area_depth" type="double">Profundidade da pequena área a partir da linha de fundo (mm)</input_port>
-      <input_port name="penalty_area_width" type="double">Largura da pequena área (mm); sem a porta vale {penalty_area_width} da blackboard</input_port>
-    </Action>
-    <Action ID="SmotherSave">
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="ball_x" type="double"/>
-      <input_port name="ball_y" type="double"/>
-    </Action>
-    <Action ID="UpdateBallPosition">
-      <output_port name="ball_x" type="double"/>
-      <output_port name="ball_y" type="double"/>
-      <output_port name="pre_kick_x" type="double"/>
-      <output_port name="pre_kick_y" type="double"/>
-      <output_port name="is_ready_to_kick" type="bool"/>
-      <output_port name="ball_in_enemy_half" type="bool"/>
-      <input_port name="robot_id" type="unsigned int"/>
-      <input_port name="goal_x" type="double"/>
-      <input_port name="goal_y" type="double"/>
-    </Action>
-    <Condition ID="WaitBallInPlay">
-      <input_port name="moved_mm" default="50.000000" type="double">Deslocamento da bola (mm) que a põe em jogo</input_port>
-      <input_port name="timeout_s" default="10.000000" type="double">Tempo (s) após o qual a bola é considerada em jogo</input_port>
-    </Condition>
-    <Condition ID="WeAreFavored"/>
-  </TreeNodesModel>
+    <TreeNodesModel>
+        <Action ID="AimAt">
+            <input_port name="robot_y" type="double">Posição Y atual do robô</input_port>
+            <output_port name="target_angle" type="double">Ângulo calculado em radianos</output_port>
+            <input_port name="robot_x" type="double">Posição X atual do robô</input_port>
+            <input_port name="target_y" type="double">Ponto Y para onde mirar</input_port>
+            <input_port name="target_x" type="double">Ponto X para onde mirar</input_port>
+            <input_port name="robot_id" type="unsigned int">ID do robô</input_port>
+        </Action>
+        <Action ID="AlignToBall">
+            <input_port name="p_gain" type="double" default="4.000000">Ganho proporcional do controle de giro</input_port>
+            <input_port name="max_angular_speed" type="double" default="3.000000">Velocidade angular máxima (rad/s)</input_port>
+            <input_port name="angle_threshold_deg" type="double" default="10.000000">Desvio angular máximo para considerar alinhado</input_port>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Condition ID="BallHeldTimer">
+            <input_port name="area" type="std::string" default="own_defense">Área monitorada: own_defense ou opp_defense</input_port>
+            <input_port name="max_s" type="double" default="8.000000">Tempo máximo (s) que a bola pode ficar parada na área antes de falhar</input_port>
+        </Condition>
+        <Action ID="CalculateInterception">
+            <output_port name="is_ready_to_kick" type="bool"/>
+            <output_port name="intercept_carry_face_y" type="double"/>
+            <output_port name="intercept_carry_face_x" type="double"/>
+            <output_port name="intercept_carry_y" type="double"/>
+            <output_port name="intercept_carry_x" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+            <input_port name="goal_x" type="double" default="0.000000">X do gol alvo</input_port>
+            <input_port name="goal_y" type="double" default="0.000000">Y do gol alvo</input_port>
+            <output_port name="intercept_pk_safe_x" type="double">Igual a intercept_pk_x, exceto quando o robô está do lado errado da bola agora — nesse caso, um waypoint de contorno lateral em vez do pré-chute direto.</output_port>
+            <output_port name="intercept_y" type="double"/>
+            <output_port name="intercept_x" type="double"/>
+            <output_port name="intercept_pk_safe_y" type="double"/>
+            <output_port name="intercept_pk_x" type="double"/>
+            <input_port name="carry_face_lookahead_mm" type="double" default="2500.000000">Distância (mm) do ponto de mira da carga até a bola, do lado do gol.</input_port>
+            <output_port name="intercept_pk_y" type="double"/>
+            <output_port name="intercept_capture_x" type="double"/>
+            <input_port name="carry_distance_mm" type="double" default="-120.000000">Distância (mm) do ponto de carga até a bola, do lado do gol. Ver kCarryDistanceMm.</input_port>
+            <output_port name="intercept_capture_y" type="double"/>
+        </Action>
+        <Action ID="CalculateKickOffPose">
+            <output_port name="target_y" type="double">Coordenada Y alvo distribuída</output_port>
+            <output_port name="target_x" type="double">Coordenada X alvo no campo de defesa</output_port>
+            <input_port name="robot_id" type="unsigned int">ID do robô para calcular o espaçamento individual</input_port>
+        </Action>
+        <Condition ID="CheckGCCommand">
+            <input_port name="expected" type="int">Código inteiro do comando bruto do Game Controller</input_port>
+        </Condition>
+        <Condition ID="CheckGameState">
+            <input_port name="phase" type="std::string">Fase esperada: HALT, TIMEOUT, STOP, BALL_PLACEMENT, PREPARE_KICKOFF, KICKOFF, PREPARE_PENALTY, PENALTY, FREE_KICK ou RUN</input_port>
+        </Condition>
+        <Action ID="ComputeLegalSlot">
+            <output_port name="slot_w" type="double">Orientação calculada (rad)</output_port>
+            <output_port name="slot_y" type="double">Coordenada Y calculada (mm)</output_port>
+            <output_port name="slot_x" type="double">Coordenada X calculada (mm)</output_port>
+            <input_port name="index" type="unsigned int" default="0">Índice do robô no slot</input_port>
+            <input_port name="slot" type="std::string">Nome do slot tático (retreat, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, wall)</input_port>
+        </Action>
+        <Action ID="GoToClamped">
+            <input_port name="penalty_area_depth" type="double">Profundidade da pequena area a partir da linha de fundo (mm)</input_port>
+            <input_port name="my_goal_x" type="double">X do proprio gol (usado para calcular a borda da pequena area)</input_port>
+            <input_port name="y" type="double">Coordenada Y do alvo em mm (ex.: {ball_y})</input_port>
+            <input_port name="x" type="double">Coordenada X do alvo em mm (ex.: {ball_x})</input_port>
+        </Action>
+        <Action ID="GoToPoint">
+            <input_port name="ball_side_check" type="bool" default="false">Se true, o nó falha caso o robô esteja do lado ERRADO da bola (mesmo lado que o gol adversário, "na frente" dela) — força recalcular tudo do zero. Só faz sentido em alvos com um lado correto bem definido (ex: ponto de pré-chute, atrás da bola). Default false = desabilitado.</input_port>
+            <input_port name="ignore_area" type="bool" default="false">Se true, desativa restrições de área para este robô</input_port>
+            <input_port name="ball_contact_threshold_mm" type="double" default="-1.000000">Se &gt; 0, o nó falha caso a bola AO VIVO chegue mais perto do robô do que esse valor antes de "chegar" ao alvo — força recalcular tudo do zero. Use só em GoToPoints longe da bola de propósito (ex: Fase 1); NÃO em GoToPoints que terminam perto dela de propósito (ex: Fase 2). Default -1.0 = desabilitado.</input_port>
+            <input_port name="max_speed" type="double" default="0.000000">Velocidade linear máxima opcional em m/s (&lt;= 0 usa o padrão do controlador)</input_port>
+            <input_port name="tolerance" type="double" default="-1.000000">Tolerância para sucesso (se &lt;= 0, nunca retorna SUCCESS)</input_port>
+            <input_port name="face_y" type="double">Opcional: Y do alvo de orientação. Ver face_x.</input_port>
+            <input_port name="face_x" type="double">Opcional: X do alvo de orientação (bola, companheiro, canto do gol...). Aceita literal ou remapeamento de blackboard, ex: "{ball_x}". Se omitido (junto com face_y), mantém o padrão de sempre olhar para o gol adversário.</input_port>
+            <input_port name="y" type="double"/>
+            <input_port name="x" type="double"/>
+            <input_port name="planner" type="std::string" default="dstar">Estratégia de planejamento: "dstar" (padrão, evita obstáculos), "straight_line" (linha reta, ignora a grade de obstáculos)</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">ID do robô (padrão {robot_id} da blackboard)</input_port>
+        </Action>
+        <Action ID="GoalLineDefend">
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Action ID="Goalkeeper">
+            <input_port name="max_hold_s" type="double" default="8.000000">Tempo máximo (s) com a bola na área antes de forçar afastamento urgente (regra dos 10 s)</input_port>
+            <input_port name="mode" type="std::string" default="normal">Modo de operação do goleiro: normal, penalty_def ou hold</input_port>
+            <input_port name="kick_speed" type="double" default="3.000000">Velocidade do chute em m/s</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">ID do robô goleiro</input_port>
+        </Action>
+        <Action ID="Halt">
+            <input_port name="reason" type="std::string" default="idle">Opcional: motivo da parada (gc_halt, timeout, stale_data, idle)</input_port>
+        </Action>
+        <Condition ID="HasLineOfSight">
+            <input_port name="target_y" type="double">Alvo Y</input_port>
+            <input_port name="target_x" type="double">Alvo X</input_port>
+            <input_port name="robot_id" type="unsigned int">ID do robô</input_port>
+        </Condition>
+        <Condition ID="HasRole">
+            <input_port name="role" type="std::string">Papel esperado: goalkeeper, attacker, defender ou kicker</input_port>
+        </Condition>
+        <Action ID="HoldPosition">
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">Id do robô</input_port>
+        </Action>
+        <Condition ID="IsBallClose">
+            <input_port name="angle_threshold_deg" type="double" default="-1.000000">Desvio angular máximo (graus) entre a frente do robô e a bola, para o kicker realmente alcançar a bola. Se &lt;= 0, não checa ângulo (comportamento antigo).</input_port>
+            <input_port name="distance_threshold" type="double" default="180.000000">Distância para considerar 'perto'</input_port>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Condition>
+        <Condition ID="IsBallClosest">
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+            <input_port name="leash_fraction" type="double" default="0.700000">Fração da metade aliada (do gol ao meio-campo) até onde o goleiro busca a bola</input_port>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Condition>
+        <Condition ID="IsBallInArea">
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+        </Condition>
+        <Condition ID="IsBallInOpponentField">
+            <input_port name="is_yellow" type="bool">Opcional (legado): so vale se my_goal_x nao estiver disponivel; assume que o amarelo ataca o x negativo, o que deixa de ser verdade na troca de lados</input_port>
+            <input_port name="my_goal_x" type="double" default="{my_goal_x}">X do proprio gol (mm), define o lado do campo. Padrao: {my_goal_x} da blackboard</input_port>
+            <input_port name="ball_x" type="double">X da bola (mm)</input_port>
+        </Condition>
+        <Condition ID="IsBallInOurHalf">
+            <input_port name="ball_x" type="double"/>
+        </Condition>
+        <Condition ID="IsDataFresh">
+            <input_port name="max_ball_ms" type="double" default="300.000000">Idade máxima da bola em ms</input_port>
+            <input_port name="max_pose_ms" type="double" default="150.000000">Idade máxima da pose em ms</input_port>
+            <input_port name="require_gc" type="bool">Opcional: se falso, ignora a verificação de idade do GC</input_port>
+            <input_port name="max_gc_ms" type="double" default="500.000000">Idade máxima do Game Controller em ms</input_port>
+        </Condition>
+        <Condition ID="IsMyRole">
+            <input_port name="role" type="std::string">Papel esperado (attacker | defender)</input_port>
+        </Condition>
+        <Condition ID="IsOpponentControllingBall">
+            <input_port name="opponent_controlling" type="bool"/>
+        </Condition>
+        <Condition ID="IsRobotId">
+            <input_port name="robot_id" type="unsigned int">ID esperado do robô</input_port>
+        </Condition>
+        <Condition ID="IsThisNodeID">
+            <input_port name="id" type="unsigned int">ID esperado do processo strategy_node</input_port>
+        </Condition>
+        <Condition ID="IsValueTrue">
+            <input_port name="value" type="bool">Valor booleano a avaliar</input_port>
+        </Condition>
+        <Action ID="KeepDistance">
+            <output_port name="target_x" type="double">Coordenada X para onde recuar</output_port>
+            <input_port name="robot_y" type="double" default="{robot_y}">Posição Y do robô</input_port>
+            <input_port name="robot_x" type="double" default="{robot_x}">Posição X do robô</input_port>
+            <input_port name="ball_y" type="double" default="{ball_y}">Posição Y da bola</input_port>
+            <input_port name="ball_x" type="double" default="{ball_x}">Posição X da bola</input_port>
+            <output_port name="target_y" type="double">Coordenada Y para onde recuar</output_port>
+            <input_port name="distance" type="double" default="550.000000">Distância mínima a manter (ex: 500.0)</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">ID do robô</input_port>
+        </Action>
+        <Action ID="KickBall">
+            <input_port name="kick_speed" type="double" default="3.000000">Kick speed in m/s</input_port>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Action ID="KickOnce">
+            <input_port name="timeout_s" type="double" default="10.000000">Prazo (s) para a bola se mover; passado, FAILURE</input_port>
+            <input_port name="kick_speed" type="double" default="2.500000">Velocidade do chute (m/s); limitada a 3,0</input_port>
+            <input_port name="ball_moved_mm" type="double" default="50.000000">Deslocamento da bola (mm) que confirma o chute</input_port>
+            <input_port name="target_y" type="double">Opcional: Y do alvo do chute (mm); só para o log de alinhamento</input_port>
+            <input_port name="target_x" type="double">Opcional: X do alvo do chute (mm); só para o log de alinhamento</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">Id do robô que chuta</input_port>
+        </Action>
+        <Action ID="LateralClear">
+            <output_port name="kick_speed" type="double">Velocidade do chute escolhida (m/s): passe ou afastar</output_port>
+            <input_port name="allow_leave_area" type="bool" default="false">Permite o alvo fora da grande área, até a coleira (bola fora da área e mais perto do goleiro)</input_port>
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Action ID="MarkOpponent">
+            <input_port name="y_limit" type="double" default="1200.000000">Limite lateral do defensor em Y (mm)</input_port>
+            <input_port name="penalty_area_depth" type="double">Profundidade da pequena área a partir da linha de fundo (mm)</input_port>
+            <input_port name="block_distance" type="double" default="400.000000">Distância mínima do oponente ao longo da linha bola→gol (mm)</input_port>
+            <input_port name="penalty_area_width" type="double">Largura da pequena área (mm); sem a porta vale {penalty_area_width} da blackboard</input_port>
+            <input_port name="my_goal_x" type="double"/>
+            <input_port name="ball" type="Pose2D"/>
+        </Action>
+        <Action ID="PenaltyKeeperLine">
+            <input_port name="line_offset_mm" type="double" default="90.000000">Distância (mm) da linha de gol para dentro do campo (padrão 90 mm = 1 raio do robô)</input_port>
+            <input_port name="side" type="std::string" default="defend">Lado de atuação no pênalti (defend)</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">Id do robô goleiro (padrão {robot_id} da blackboard)</input_port>
+        </Action>
+        <Action ID="PositionBisector">
+            <input_port name="goal_width" type="double"/>
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Action ID="PrecisionKick">
+            <input_port name="kick_speed" type="double" default="3.000000">Velocidade do chute (m/s, limitada a &lt;= 3.0)</input_port>
+            <input_port name="target_y" type="double">Y do alvo</input_port>
+            <input_port name="target_x" type="double">X do alvo</input_port>
+            <input_port name="robot_id" type="unsigned int" default="{robot_id}">ID do robo</input_port>
+        </Action>
+        <Action ID="SetMotionLimit">
+            <input_port name="limit_mps" type="double" default="1.500000">Teto de velocidade linear (m/s) enviado ao SafetyGate (&lt;= 0.0 limpa o override)</input_port>
+        </Action>
+        <Action ID="ShadowBall">
+            <input_port name="penalty_area_depth" type="double">Profundidade da pequena área a partir da linha de fundo (mm)</input_port>
+            <input_port name="standoff" type="double" default="300.000000">Folga mínima (mm) entre a borda da área (já com a margem do robô) e o defensor</input_port>
+            <input_port name="penalty_area_width" type="double">Largura da pequena área (mm); sem a porta vale {penalty_area_width} da blackboard</input_port>
+            <input_port name="predict_time" type="double" default="0.300000">Horizonte de predição da trajetória da bola (s)</input_port>
+            <input_port name="ratio" type="double" default="0.500000">Raio do defensor como fração da distância bola-gol (limitado por standoff/max_radius)</input_port>
+            <input_port name="my_goal_x" type="double"/>
+            <input_port name="max_radius" type="double" default="2500.000000">Raio máximo (mm) do defensor a partir do centro do gol</input_port>
+            <input_port name="ball_vel" type="Vector2D"/>
+            <input_port name="ball" type="Pose2D"/>
+        </Action>
+        <Action ID="SmotherSave">
+            <input_port name="ball_y" type="double"/>
+            <input_port name="ball_x" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+        </Action>
+        <Action ID="UpdateBallPosition">
+            <input_port name="goal_y" type="double"/>
+            <input_port name="goal_x" type="double"/>
+            <output_port name="ball_in_enemy_half" type="bool"/>
+            <output_port name="is_ready_to_kick" type="bool"/>
+            <output_port name="pre_kick_y" type="double"/>
+            <input_port name="robot_id" type="unsigned int"/>
+            <output_port name="pre_kick_x" type="double"/>
+            <output_port name="ball_y" type="double"/>
+            <output_port name="ball_x" type="double"/>
+        </Action>
+        <Condition ID="WaitBallInPlay">
+            <input_port name="timeout_s" type="double" default="10.000000">Tempo (s) após o qual a bola é considerada em jogo</input_port>
+            <input_port name="moved_mm" type="double" default="50.000000">Deslocamento da bola (mm) que a põe em jogo</input_port>
+        </Condition>
+        <Condition ID="WeAreFavored"/>
+    </TreeNodesModel>
 </root>
+

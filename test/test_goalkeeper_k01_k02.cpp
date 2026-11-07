@@ -190,9 +190,9 @@ TEST_F(GoalkeeperK01K02Test, K01_FailureWhenMissingGeometryOrDataOrStale)
 TEST_F(GoalkeeperK01K02Test, K01_HoldLimitForcesUrgentClearanceInArea)
 {
   populateStandardGeometry(-4500.0);
-  // Goleiro entre o gol (-4500) e a bola (-4000, 100), próximo da bola (150 mm),
-  // mas ainda não alinhado na direção lateral normal (onde sem urgência iria ao pré-chute com D*)
-  populatePoseAndBall(2u, -4150.0, 100.0, 0.0, -4000.0, 100.0);
+  // Goleiro entre o gol (-4500) e a bola (-4000, 100), próximo da bola (~215 mm),
+  // porém fora do cone de pré-chute lateral (dot < 0 -> sem urgência vai ao pré-chute com D*)
+  populatePoseAndBall(2u, -4100.0, 290.0, -1.08, -4000.0, 100.0);
 
   auto tree = factory_.createTreeFromText(
     R"(

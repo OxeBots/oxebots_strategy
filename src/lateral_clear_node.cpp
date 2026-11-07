@@ -104,7 +104,7 @@ BT::NodeStatus LateralClearNode::onStart()
     contact_since_valid_ = false;
     engage_start_ = node_->now();
 
-    return BT::NodeStatus::RUNNING;
+    return onRunning();
 }
 
 // Escolhe para onde chutar. Passe: o aliado à frente da bola com corredor livre de adversários (cápsula que

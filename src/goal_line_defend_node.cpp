@@ -117,7 +117,7 @@ BT::NodeStatus GoalLineDefendNode::onStart()
         last_ball_pred_.reset();
     }
     intercepting_ = false;
-    return BT::NodeStatus::RUNNING;
+    return onRunning();
 }
 
 BT::NodeStatus GoalLineDefendNode::onRunning()
