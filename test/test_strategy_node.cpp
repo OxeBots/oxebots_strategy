@@ -635,3 +635,59 @@ TEST_F(StrategyNodeBlackboardTest, PrepareKickoffAndKickoffBranchesTransitionOur
     EXPECT_GE(std::abs(kick_their_x), 500.0);
 }
 
+// ============================================================================
+// 9. Seleção Dinâmica de Canto do Gol (opp_goal_y / opponent_goal_y)
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, DynamicGoalTargetYSelectsOpenCornerAndRespectsHysteresis)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    auto geom = makeGeometry(4500.0, 3000.0);
+    geom->field.goal_width = 800;  // corner_y = 800/2 - 150 = 250 mm
+    node->setLastGeometry(geom);
+    node->setLastGameState(makeGameState(/*our_goal_positive_x=*/false));
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 1000.0f;
+    gd->ball.y = 0.0f;
+
+    // 1) Sem goleiro adversário -> mira no centro (0.0)
+    node->setLastGameData(gd);
+    node->refresh();
+    double opp_goal_y = 999.0;
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, 0.0);
+
+    // 2) Goleiro adversário fechando o canto superior (y = +120 mm) -> mira no canto inferior (-250 mm)
+    oxebots_interfaces::msg::RobotGameData enemy_gk;
+    enemy_gk.id = 0;
+    enemy_gk.x = 2150.0f;
+    enemy_gk.y = 120.0f;
+    gd->robots.enemies = {enemy_gk};
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, -250.0);
+
+    // 3) Histerese: goleiro vai quase pro centro (y = -5 mm), mas o canto inferior (-250) mantém-se escolhido
+    gd->robots.enemies[0].y = -5.0f;
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, -250.0);
+
+    // 4) Goleiro fecha claramente o canto inferior (y = -150 mm) -> vira para o canto superior (+250 mm)
+    gd->robots.enemies[0].y = -150.0f;
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, 250.0);
+}
+
+

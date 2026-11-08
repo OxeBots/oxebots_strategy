@@ -641,6 +641,20 @@ public:
       double ball_age_ms = (now_time - last_game_data_time_).nanoseconds() / 1e6;
       if (ball_age_ms < 0.0) ball_age_ms = 0.0;
       blackboard_->set("ball_age_ms", ball_age_ms);
+
+      // Seleção dinâmica do canto livre do gol adversário (opp_goal_y / opponent_goal_y)
+      double opp_goal_x = 0.0;
+      double goal_width = 800.0;
+      (void)blackboard_->get("opp_goal_x", opp_goal_x);
+      if (!blackboard_->get("goal_width", goal_width) || goal_width <= 1.0) {
+        goal_width = 800.0;
+      }
+      if (std::abs(opp_goal_x) > 1.0) {
+        const double best_goal_y = selectBestGoalTargetY(
+          ball_x, ball_y, opp_goal_x, goal_width, gd->robots.enemies);
+        blackboard_->set("opp_goal_y", best_goal_y);
+        blackboard_->set("opponent_goal_y", best_goal_y);
+      }
     }
   }
 
@@ -762,9 +776,83 @@ public:
     return "phase=" + phase_str;
   }
 
+  double selectBestGoalTargetY(
+    double ball_x,
+    double ball_y,
+    double opp_goal_x,
+    double goal_width,
+    const std::vector<oxebots_interfaces::msg::RobotGameData> & enemies)
+  {
+    const double corner_y = std::max(150.0, (goal_width / 2.0) - 150.0);
+    const double attack_sign = (opp_goal_x > 0.0) ? 1.0 : -1.0;
+
+    auto point_to_ray_dist = [](double px, double py,
+                                double ax, double ay,
+                                double bx, double by) -> double {
+      const double vx = bx - ax;
+      const double vy = by - ay;
+      const double len2 = vx * vx + vy * vy;
+      if (len2 < 1e-6) {
+        return std::hypot(px - ax, py - ay);
+      }
+      const double t = std::clamp(((px - ax) * vx + (py - ay) * vy) / len2, 0.0, 1.0);
+      const double proj_x = ax + t * vx;
+      const double proj_y = ay + t * vy;
+      return std::hypot(px - proj_x, py - proj_y);
+    };
+
+    auto eval_clearance = [&](double target_y, bool & has_blocker) -> double {
+      double min_clear = std::numeric_limits<double>::infinity();
+      for (const auto & e : enemies) {
+        const double ex = static_cast<double>(e.x);
+        const double ey = static_cast<double>(e.y);
+        // Considera apenas adversários entre a bola e a linha de fundo adversária
+        if ((ex - ball_x) * attack_sign < -50.0) {
+          continue;
+        }
+        if (std::abs(opp_goal_x - ex) <= 1200.0 && std::abs(ey) <= (goal_width / 2.0 + 350.0)) {
+          has_blocker = true;
+        }
+        const double d = point_to_ray_dist(ex, ey, ball_x, ball_y, opp_goal_x, target_y);
+        if (d < min_clear) {
+          min_clear = d;
+        }
+      }
+      return min_clear;
+    };
+
+    bool has_blocker = false;
+    const double clear_top = eval_clearance(corner_y, has_blocker);
+    const double clear_bot = eval_clearance(-corner_y, has_blocker);
+
+    // Sem goleiro/defensor adversário na frente do gol: mira no centro (maior margem contra as traves)
+    if (!has_blocker) {
+      last_selected_goal_y_ = 0.0;
+      return 0.0;
+    }
+
+    // Histerese anti-oscilação: mantém o canto já escolhido a menos que o outro tenha >= 40 mm a mais de folga
+    constexpr double kHysteresisMm = 40.0;
+    double score_top = clear_top;
+    double score_bot = clear_bot;
+    if (std::abs(last_selected_goal_y_ - corner_y) < 1.0) {
+      score_top += kHysteresisMm;
+    } else if (std::abs(last_selected_goal_y_ - (-corner_y)) < 1.0) {
+      score_bot += kHysteresisMm;
+    }
+
+    if (std::abs(score_top - score_bot) < 1e-3) {
+      last_selected_goal_y_ = (ball_y >= 0.0) ? -corner_y : corner_y;
+    } else {
+      last_selected_goal_y_ = (score_top > score_bot) ? corner_y : -corner_y;
+    }
+    return last_selected_goal_y_;
+  }
+
   bool is_yellow_;
   bool invert_sides_;
   int robot_id_;
+  double last_selected_goal_y_{0.0};
   uint32_t goalkeeper_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
   uint32_t attacker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
   uint32_t defender_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
