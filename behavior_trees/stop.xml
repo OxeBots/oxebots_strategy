@@ -2,17 +2,40 @@
 <root BTCPP_format="4">
   <BehaviorTree ID="StopSubTree">
     <ReactiveSequence name="StopLogic">
-      <!-- Regra §5.1.1: < 0,75 m/s (SafetyGate aplica o teto no controlador) -->
+      <!-- Regra §5.1.1: <= 0,75 m/s (SafetyGate aplica o teto no controlador) -->
       <SetMotionLimit limit_mps="0.75"/>
       <ReactiveFallback name="StopAction">
-        <!-- Perto da bola (< 0,5 m + margem): recua para ponto legal -->
+        <!-- 1. Emergência: perto da bola (< 0,5 m + margem) -> qualquer robô recua imediatamente -->
         <ReactiveSequence name="RetreatIfClose">
           <IsBallClose robot_id="{robot_id}" distance_threshold="650.0"/>
           <ComputeLegalSlot slot="retreat" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
           <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
                      face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
         </ReactiveSequence>
-        <!-- Caso contrário fica parado (publica goal na pose atual) -->
+
+        <!-- 2. Goleiro: acompanha a bola na bissetriz da meta (sem sair da área para chutar) -->
+        <ReactiveSequence name="StopGoalkeeperRole">
+          <HasRole role="goalkeeper"/>
+          <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+        </ReactiveSequence>
+
+        <!-- 3. Atacante: persegue/sombra a bola a distância segura (~700 mm) alinhado ao gol adversário -->
+        <ReactiveSequence name="StopAttackerShadow">
+          <HasRole role="attacker"/>
+          <ComputeLegalSlot slot="stop_shadow" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+          <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
+                     face_x="{opp_goal_x}" face_y="0.0" tolerance="80.0"/>
+        </ReactiveSequence>
+
+        <!-- 4. Defensor: acompanha a bola fechando a linha bola -> nosso gol (~800 mm) -->
+        <ReactiveSequence name="StopDefenderBarrier">
+          <HasRole role="defender"/>
+          <ComputeLegalSlot slot="stop_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+          <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
+                     face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+        </ReactiveSequence>
+
+        <!-- 5. Fallback seguro (ex: papel idle): mantém posição -->
         <HoldPosition robot_id="{robot_id}"/>
       </ReactiveFallback>
     </ReactiveSequence>

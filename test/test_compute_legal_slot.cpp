@@ -289,10 +289,71 @@ TEST_F(ComputeLegalSlotTest, KickoffSlotsOnOwnHalf)
 }
 
 // ============================================================================
-// 4. Teste Estrutural da Árvore de STOP (StopSubTree / stop.xml)
+// 4. Teste Estrutural e Tático da Árvore de STOP (StopSubTree / stop.xml)
 // ============================================================================
 
-TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
+TEST_F(ComputeLegalSlotTest, StopShadowPlacesBehindBallFacingOpponentGoal)
+{
+  auto factory = makeFactory();
+  const std::string xml =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestStopShadow">
+           <ComputeLegalSlot slot="stop_shadow" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  // Nosso gol em -2250, gol adversário em +2250, bola em (0, 0)
+  bb->set("ball_x", 0.0);
+  bb->set("ball_y", 0.0);
+
+  auto tree = factory.createTreeFromText(xml, bb);
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+  double sx = 0.0, sy = 0.0, sw = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", sx));
+  ASSERT_TRUE(bb->get("slot_y", sy));
+  ASSERT_TRUE(bb->get("slot_w", sw));
+
+  // Atrás da bola (x negativo) a ~700 mm (>= 500 mm da bola) e olhando para +X (gol adversário)
+  EXPECT_NEAR(sx, -700.0, 5.0);
+  EXPECT_NEAR(sy, 0.0, 5.0);
+  EXPECT_GE(std::hypot(sx, sy), 500.0);
+  EXPECT_NEAR(sw, 0.0, 0.05);
+}
+
+TEST_F(ComputeLegalSlotTest, StopDefPlacesBetweenBallAndOwnGoal)
+{
+  auto factory = makeFactory();
+  const std::string xml =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestStopDef">
+           <ComputeLegalSlot slot="stop_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  // Nosso gol em -2250, bola em (200, 0)
+  bb->set("ball_x", 200.0);
+  bb->set("ball_y", 0.0);
+
+  auto tree = factory.createTreeFromText(xml, bb);
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+
+  double sx = 0.0, sy = 0.0, sw = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", sx));
+  ASSERT_TRUE(bb->get("slot_y", sy));
+  ASSERT_TRUE(bb->get("slot_w", sw));
+
+  // Entre a bola (200) e o nosso gol (-2250), a ~800 mm da bola (sx ~ -600)
+  EXPECT_NEAR(sx, -600.0, 5.0);
+  EXPECT_NEAR(sy, 0.0, 5.0);
+  EXPECT_GE(std::hypot(sx - 200.0, sy), 500.0);
+  // Olhando para a bola (+X -> sw ~ 0)
+  EXPECT_NEAR(sw, 0.0, 0.05);
+}
+
+TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsCloseAndShadowsByRoleWhenSafe)
 {
   BT::BehaviorTreeFactory factory;
   factory.registerBuilder<oxebots_strategy::ComputeLegalSlotNode>(
@@ -312,9 +373,38 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
     return ball_is_close_flag ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
   }, {BT::InputPort<unsigned int>("robot_id"), BT::InputPort<double>("distance_threshold")});
 
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  bb->set("robot_x", 0.0);
+  bb->set("robot_y", 0.0);
+  bb->set("ball_x", 200.0);
+  bb->set("ball_y", 0.0);
+  bb->set("role", std::string("attacker"));
+
+  factory.registerSimpleCondition("HasRole", [&bb](BT::TreeNode& node) {
+    std::string expected_role;
+    node.getInput("role", expected_role);
+    std::string current_role;
+    if (bb && bb->get("role", current_role)) {
+      return (current_role == expected_role) ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+    }
+    return BT::NodeStatus::FAILURE;
+  }, {BT::InputPort<std::string>("role")});
+
+  bool gk_defend_called = false;
+  factory.registerSimpleAction("GoalLineDefend", [&gk_defend_called](BT::TreeNode&) {
+    gk_defend_called = true;
+    return BT::NodeStatus::SUCCESS;
+  }, {BT::InputPort<unsigned int>("robot_id"),
+      BT::InputPort<double>("ball_x"),
+      BT::InputPort<double>("ball_y")});
+
   bool goto_called = false;
-  factory.registerSimpleAction("GoToPoint", [&goto_called](BT::TreeNode&) {
+  double goto_x = 0.0, goto_y = 0.0, goto_face_x = 0.0;
+  factory.registerSimpleAction("GoToPoint", [&goto_called, &goto_x, &goto_y, &goto_face_x](BT::TreeNode& node) {
     goto_called = true;
+    node.getInput("x", goto_x);
+    node.getInput("y", goto_y);
+    node.getInput("face_x", goto_face_x);
     return BT::NodeStatus::SUCCESS;
   }, {BT::InputPort<unsigned int>("robot_id"),
       BT::InputPort<double>("x"),
@@ -342,34 +432,72 @@ TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsClose)
                  <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
                             face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
                </ReactiveSequence>
+               <ReactiveSequence name="StopGoalkeeperRole">
+                 <HasRole role="goalkeeper"/>
+                 <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+               </ReactiveSequence>
+               <ReactiveSequence name="StopAttackerShadow">
+                 <HasRole role="attacker"/>
+                 <ComputeLegalSlot slot="stop_shadow" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+                 <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
+                            face_x="{opp_goal_x}" face_y="0.0" tolerance="80.0"/>
+               </ReactiveSequence>
+               <ReactiveSequence name="StopDefenderBarrier">
+                 <HasRole role="defender"/>
+                 <ComputeLegalSlot slot="stop_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+                 <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
+                            face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+               </ReactiveSequence>
                <HoldPosition robot_id="{robot_id}"/>
              </ReactiveFallback>
            </ReactiveSequence>
          </BehaviorTree>
        </root>)";
 
-  auto bb = makeStandardBlackboard();
-  bb->set("robot_x", 0.0);
-  bb->set("robot_y", 0.0);
-  bb->set("ball_x", 200.0);
-  bb->set("ball_y", 0.0);
-
-  // Cenário 1: Bola perto (< 650 mm) -> Recua
+  // Cenário 1: Bola perto (< 650 mm) -> Emergência (recua mesmo sendo atacante)
   ball_is_close_flag = true;
   auto tree_close = factory.createTreeFromText(stop_xml, bb);
   EXPECT_EQ(tree_close.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
   EXPECT_DOUBLE_EQ(recorded_limit, 0.75);
   EXPECT_TRUE(goto_called);
+  EXPECT_NEAR(goto_x, -450.0, 5.0);  // 200 - 650 = -450
   EXPECT_FALSE(hold_called);
 
-  // Cenário 2: Bola longe (>= 650 mm) -> HoldPosition
+  // Cenário 2: Bola longe (>= 650 mm) e papel "attacker" -> stop_shadow (~700 mm atrás da bola, olhando opp_goal_x)
   ball_is_close_flag = false;
   goto_called = false;
   hold_called = false;
-  auto tree_far = factory.createTreeFromText(stop_xml, bb);
-  EXPECT_EQ(tree_far.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
-  EXPECT_DOUBLE_EQ(recorded_limit, 0.75);
+  auto tree_att = factory.createTreeFromText(stop_xml, bb);
+  EXPECT_EQ(tree_att.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_TRUE(goto_called);
+  EXPECT_NEAR(goto_x, -500.0, 5.0);  // 200 - 700 = -500
+  EXPECT_DOUBLE_EQ(goto_face_x, 2250.0);
+  EXPECT_FALSE(hold_called);
+
+  // Cenário 3: Bola longe e papel "defender" -> stop_def (~800 mm entre bola e nosso gol, olhando bola)
+  bb->set("role", std::string("defender"));
+  goto_called = false;
+  auto tree_def = factory.createTreeFromText(stop_xml, bb);
+  EXPECT_EQ(tree_def.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_TRUE(goto_called);
+  EXPECT_NEAR(goto_x, -600.0, 5.0);  // 200 - 800 = -600
+  EXPECT_DOUBLE_EQ(goto_face_x, 200.0);
+
+  // Cenário 4: Bola longe e papel "goalkeeper" -> GoalLineDefend
+  bb->set("role", std::string("goalkeeper"));
+  goto_called = false;
+  gk_defend_called = false;
+  auto tree_gk = factory.createTreeFromText(stop_xml, bb);
+  EXPECT_EQ(tree_gk.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+  EXPECT_TRUE(gk_defend_called);
   EXPECT_FALSE(goto_called);
+
+  // Cenário 5: Bola longe e papel "idle" -> HoldPosition
+  bb->set("role", std::string("idle"));
+  gk_defend_called = false;
+  hold_called = false;
+  auto tree_idle = factory.createTreeFromText(stop_xml, bb);
+  EXPECT_EQ(tree_idle.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
   EXPECT_TRUE(hold_called);
 }
 

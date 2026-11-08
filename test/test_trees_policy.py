@@ -157,3 +157,24 @@ def test_kickoff_trees_estrutura_e_papeis():
     assert list(exec_our.iter('HoldPosition')), 'HoldPosition ausente para demais robôs em KickoffExecuteOurTree'
 
 
+def test_stop_tree_estrutura_e_papeis():
+    root = load('stop.xml')
+    tree = root.find("./BehaviorTree[@ID='StopSubTree']")
+    assert tree is not None, 'StopSubTree ausente em stop.xml'
+
+    # Limite regulamentar de velocidade (<= 0,75 m/s)
+    limits = [numeric(el.attrib.get('limit_mps', '99')) for el in tree.iter('SetMotionLimit')]
+    assert limits and all(v is not None and v <= 0.75 for v in limits)
+
+    # Slots de emergência (retreat), sombra ofensiva (stop_shadow) e barreira defensiva (stop_def)
+    slots = [el.attrib.get('slot') for el in tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in slots
+    assert 'stop_shadow' in slots
+    assert 'stop_def' in slots
+
+    # Goleiro usa GoalLineDefend (sem sair para chutar) e fallback usa HoldPosition
+    assert list(tree.iter('GoalLineDefend'))
+    assert list(tree.iter('HoldPosition'))
+
+
+

@@ -46,7 +46,7 @@
       <input_port name="phase" type="std::string">Fase esperada: HALT, TIMEOUT, STOP, BALL_PLACEMENT, PREPARE_KICKOFF, KICKOFF, PREPARE_PENALTY, PENALTY, FREE_KICK ou RUN</input_port>
     </Condition>
     <Action ID="ComputeLegalSlot">
-      <input_port name="slot" type="std::string">Nome do slot tático (retreat, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, wall)</input_port>
+      <input_port name="slot" type="std::string">Nome do slot tático (retreat, stop_shadow, stop_def, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, wall)</input_port>
       <input_port name="index" default="0" type="unsigned int">Índice do robô no slot</input_port>
       <output_port name="slot_x" type="double">Coordenada X calculada (mm)</output_port>
       <output_port name="slot_y" type="double">Coordenada Y calculada (mm)</output_port>

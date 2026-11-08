@@ -114,7 +114,8 @@ ComputeLegalSlotNode::ComputeLegalSlotNode(const std::string& name,
 BT::PortsList ComputeLegalSlotNode::providedPorts()
 {
   return {
-    BT::InputPort<std::string>("slot", "Nome do slot tático (retreat, kickoff_kicker, kickoff_def, "
+    BT::InputPort<std::string>("slot", "Nome do slot tático (retreat, stop_shadow, stop_def, "
+                                       "kickoff_kicker, kickoff_def, "
                                        "penalty_kicker, penalty_behind, freekick_support, wall)"),
     BT::InputPort<unsigned int>("index", 0u, "Índice do robô no slot"),
     BT::OutputPort<double>("slot_x", "Coordenada X calculada (mm)"),
@@ -316,6 +317,38 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     slot_x = ball_x + min_stop_ball_dist * std::cos(dir_angle);
     slot_y = ball_y + min_stop_ball_dist * std::sin(dir_angle);
     enforce_ball_clearance = true;
+  } else if (slot == "stop_shadow") {
+    // Atacante no STOP: posiciona-se atrás da bola na linha bola -> gol adversário a >= 700 mm
+    const double gx = opp_goal_x - ball_x;
+    const double gy = 0.0 - ball_y;
+    const double g_norm = std::hypot(gx, gy);
+    const double ux = (g_norm > 1e-3) ? (gx / g_norm) : attack_sign;
+    const double uy = (g_norm > 1e-3) ? (gy / g_norm) : 0.0;
+    const double shadow_dist = std::max(700.0, min_stop_ball_dist + 50.0);
+
+    slot_x = ball_x - ux * shadow_dist;
+    slot_y = ball_y - uy * shadow_dist;
+    slot_w = std::atan2(0.0 - slot_y, opp_goal_x - slot_x);
+    enforce_ball_clearance = true;
+  } else if (slot == "stop_def") {
+    // Defensor no STOP: acompanha a bola fechando a linha bola -> nosso gol a >= 800 mm
+    const double dx = own_goal_x - ball_x;
+    const double dy = 0.0 - ball_y;
+    const double dist = std::hypot(dx, dy);
+    const double ux = (dist > 1e-3) ? (dx / dist) : our_half_sign;
+    const double uy = (dist > 1e-3) ? (dy / dist) : 0.0;
+    const double px = -uy;
+    const double py = ux;
+
+    const double def_dist = std::max(800.0, min_stop_ball_dist + 150.0);
+    const double lat = (index == 0u)
+                           ? 0.0
+                           : ((index % 2u == 1u) ? 220.0 : -220.0) *
+                                 static_cast<double>((index + 1u) / 2u);
+
+    slot_x = ball_x + ux * def_dist + px * lat;
+    slot_y = ball_y + uy * def_dist + py * lat;
+    enforce_ball_clearance = true;
   } else if (slot == "kickoff_kicker") {
     // Dentro do círculo central, atrás da bola (no nosso lado), voltado ao gol adversário
     const double kicker_dist = std::min(280.0, std::max(180.0, center_circle_radius - margin));
@@ -445,9 +478,11 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     slot_y = best_y;
   }
 
-  if (slot == "retreat" || slot == "wall" || slot == "freekick_support" ||
+  if (slot == "retreat" || slot == "stop_def" || slot == "wall" || slot == "freekick_support" ||
       slot == "kickoff_def" || slot == "penalty_behind") {
     slot_w = normalizeAngle(std::atan2(ball_y - slot_y, ball_x - slot_x));
+  } else if (slot == "stop_shadow") {
+    slot_w = normalizeAngle(std::atan2(0.0 - slot_y, opp_goal_x - slot_x));
   } else {
     slot_w = normalizeAngle(slot_w);
   }
