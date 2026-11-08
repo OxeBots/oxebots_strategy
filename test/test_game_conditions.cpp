@@ -13,6 +13,8 @@ BT::BehaviorTreeFactory makeFactory(std::string * last_halt_reason = nullptr)
   factory.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
   factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
   factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+  factory.registerNodeType<oxebots_strategy::IsCornerKickCondition>("IsCornerKick");
+  factory.registerNodeType<oxebots_strategy::IsThrowInCondition>("IsThrowIn");
 
   factory.registerSimpleAction("Halt", [last_halt_reason](BT::TreeNode & node) {
     std::string reason;
@@ -394,4 +396,88 @@ TEST(SafetyTreesTest, SC13_TimeoutTreeExecutesOnTimeoutPhase)
 
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
   EXPECT_EQ(last_reason, "timeout");
+}
+
+TEST(GameConditionsTest, IsCornerKickDetectsOffensiveCornersBothSides)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("field_length", 4500.0);
+  blackboard->set("field_width", 3000.0);
+  blackboard->set("own_goal_x", -2250.0);
+  blackboard->set("opp_goal_x", 2250.0);
+
+  auto tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsCornerKick/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  // 1) Escanteio ofensivo superior (+X, +Y) -> SUCCESS
+  blackboard->set("ball_x", 2050.0);
+  blackboard->set("ball_y", 1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // 2) Escanteio ofensivo inferior (+X, -Y) -> SUCCESS
+  blackboard->set("ball_x", 2050.0);
+  blackboard->set("ball_y", -1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // 3) Lateral no meio de campo (x = 200, y = 1400) -> FAILURE
+  blackboard->set("ball_x", 200.0);
+  blackboard->set("ball_y", 1400.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // 4) Falta frontal perto da área (x = 1400, y = 100) -> FAILURE
+  blackboard->set("ball_x", 1400.0);
+  blackboard->set("ball_y", 100.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // 5) Quina defensiva (-X, +Y) quando atacamos +X -> FAILURE
+  blackboard->set("ball_x", -2050.0);
+  blackboard->set("ball_y", 1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // 6) Troca de lados: atacando -X (opp_goal_x = -2250), quina (-2050, 1350) passa a ser escanteio ofensivo -> SUCCESS
+  blackboard->set("own_goal_x", 2250.0);
+  blackboard->set("opp_goal_x", -2250.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+}
+
+TEST(GameConditionsTest, IsThrowInDetectsSidelineOutsideCornersBothSides)
+{
+  auto factory = makeFactory();
+  auto blackboard = BT::Blackboard::create();
+  blackboard->set("field_length", 4500.0);
+  blackboard->set("field_width", 3000.0);
+
+  auto tree = factory.createTreeFromText(
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="Test">
+           <IsThrowIn/>
+         </BehaviorTree>
+       </root>)",
+    blackboard);
+
+  // 1) Lateral superior no meio de campo (x = 200, y = 1350) -> SUCCESS
+  blackboard->set("ball_x", 200.0);
+  blackboard->set("ball_y", 1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // 2) Lateral inferior no campo de defesa (x = -800, y = -1350) -> SUCCESS
+  blackboard->set("ball_x", -800.0);
+  blackboard->set("ball_y", -1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // 3) Quina de escanteio (+2050, +1350) -> FAILURE (é escanteio, não lateral)
+  blackboard->set("ball_x", 2050.0);
+  blackboard->set("ball_y", 1350.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
+  // 4) Centro do campo (x = 0, y = 200) -> FAILURE
+  blackboard->set("ball_x", 0.0);
+  blackboard->set("ball_y", 200.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
 }

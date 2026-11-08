@@ -115,18 +115,26 @@ def test_free_kick_trees_estrutura_e_papeis():
     assert our_tree is not None, 'FreeKickOurTree ausente em free_kick.xml'
     assert their_tree is not None, 'FreeKickTheirTree ausente em free_kick.xml'
 
-    # FreeKickOurTree usa RestartKickerTree para o kicker e freekick_support para apoio
+    # FreeKickOurTree usa RestartKickerTree (cruzamento no escanteio, passe no lateral e chute direto no gol)
     kicker_subtrees = [el for el in our_tree.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
-    assert len(kicker_subtrees) == 1
-    assert kicker_subtrees[0].attrib['target_x'] == '{opp_goal_x}'
-    assert kicker_subtrees[0].attrib['target_y'] == '{opp_goal_y}'
+    assert len(kicker_subtrees) >= 1
+    targets = [(el.attrib.get('target_x'), el.attrib.get('target_y')) for el in kicker_subtrees]
+    assert ('{opp_goal_x}', '{opp_goal_y}') in targets
+    assert ('{cross_x}', '{cross_y}') in targets
+    assert ('{pass_x}', '{pass_y}') in targets
 
     our_slots = [el.attrib.get('slot') for el in our_tree.iter('ComputeLegalSlot')]
     assert 'freekick_support' in our_slots
+    assert 'corner_target' in our_slots
+    assert 'corner_receiver' in our_slots
+    assert 'throwin_target' in our_slots
+    assert 'throwin_receiver' in our_slots
 
-    # FreeKickTheirTree usa wall para formar barreira
+    # FreeKickTheirTree usa retreat (emergência), wall (barreira) e def_box_guard (proteção da área/2º na barreira)
     their_slots = [el.attrib.get('slot') for el in their_tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in their_slots
     assert 'wall' in their_slots
+    assert 'def_box_guard' in their_slots
 
 
 def test_kickoff_trees_estrutura_e_papeis():

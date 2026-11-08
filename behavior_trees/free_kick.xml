@@ -7,7 +7,7 @@
 -->
 <root BTCPP_format="4">
 
-  <!-- Free kick nosso: cobrança e apoio legal (SC-07) -->
+  <!-- Free kick nosso: cobrança e apoio legal (SC-07) com jogadas ensaiadas de escanteio e lateral -->
   <BehaviorTree ID="FreeKickOurTree">
     <ReactiveFallback name="FreeKickOurRoles">
       <ReactiveSequence name="GoalkeeperRole">
@@ -17,24 +17,83 @@
 
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
-        <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+        <ReactiveFallback name="KickerSetPieceChoice">
+          <!-- 1. Escanteio ofensivo: cruza na entrada central da área adversária (Desafio 4) -->
+          <ReactiveSequence name="CornerKickCross">
+            <IsCornerKick/>
+            <ComputeLegalSlot slot="corner_target" index="0" slot_x="{cross_x}" slot_y="{cross_y}"/>
+            <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{cross_x}" target_y="{cross_y}" kick_speed="2.2"/>
+          </ReactiveSequence>
+
+          <!-- 2. Lateral: passe controlado para o pivô centralizado à frente da bola (throw_in.xml) -->
+          <ReactiveSequence name="ThrowInPass">
+            <IsThrowIn/>
+            <ComputeLegalSlot slot="throwin_target" index="0" slot_x="{pass_x}" slot_y="{pass_y}"/>
+            <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{pass_x}" target_y="{pass_y}" kick_speed="2.0"/>
+          </ReactiveSequence>
+
+          <!-- 3. Falta direta / tiro de meta: cobrança mirando no gol adversário -->
+          <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="SupportRole">
-        <ComputeLegalSlot slot="freekick_support" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
-        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+        <ReactiveFallback name="SupportSetPieceChoice">
+          <!-- 1. Escanteio ofensivo: recebedor infiltra na cabeça da área para finalizar de primeira -->
+          <ReactiveSequence name="CornerKickReceiver">
+            <IsCornerKick/>
+            <ComputeLegalSlot slot="corner_receiver" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+            <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+          </ReactiveSequence>
+
+          <!-- 2. Lateral: pivô centralizado no corredor central à frente da bola -->
+          <ReactiveSequence name="ThrowInReceiver">
+            <IsThrowIn/>
+            <ComputeLegalSlot slot="throwin_receiver" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+            <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+          </ReactiveSequence>
+
+          <!-- 3. Falta direta: apoio legal a >= 0,5 m da bola e >= 0,2 m da área adversária -->
+          <ReactiveSequence name="DefaultFreeKickSupport">
+            <ComputeLegalSlot slot="freekick_support" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+            <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+          </ReactiveSequence>
+        </ReactiveFallback>
       </ReactiveSequence>
     </ReactiveFallback>
   </BehaviorTree>
 
-  <!-- Free kick adversário: barreira legal a >= 0.5m da bola (SC-08) -->
+  <!-- Free kick adversário: barreira legal a >= 0.5m da bola e cobertura de área (SC-08, opp_set_piece.xml) -->
   <BehaviorTree ID="FreeKickTheirTree">
     <ReactiveFallback name="FreeKickTheirRoles">
+      <!-- 1. Emergência: se a bola estiver a < 650 mm, afasta imediatamente -->
+      <ReactiveSequence name="RetreatIfClose">
+        <IsBallClose robot_id="{robot_id}" distance_threshold="650.0"/>
+        <ComputeLegalSlot slot="retreat" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+      </ReactiveSequence>
+
+      <!-- 2. Goleiro defende a meta -->
       <ReactiveSequence name="GoalkeeperRole">
         <HasRole role="goalkeeper"/>
         <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
+      <!-- 3. Defensor forma a barreira principal na linha bola -> nosso gol -->
+      <ReactiveSequence name="DefenderWallRole">
+        <HasRole role="defender"/>
+        <ComputeLegalSlot slot="wall" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+      </ReactiveSequence>
+
+      <!-- 4. Atacante recuado protege a cabeça da nossa área em bolas abertas ou forma o 2º homem da barreira -->
+      <ReactiveSequence name="AttackerBoxGuardRole">
+        <HasRole role="attacker"/>
+        <ComputeLegalSlot slot="def_box_guard" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
+      </ReactiveSequence>
+
+      <!-- 5. Fallback seguro para barreira -->
       <ReactiveSequence name="WallRole">
         <ComputeLegalSlot slot="wall" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>

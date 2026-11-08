@@ -668,4 +668,135 @@ TEST_F(ComputeLegalSlotTest, KickoffDefOutsideCenterCircleInOurHalfBothSides)
   }
 }
 
+TEST_F(ComputeLegalSlotTest, CornerTargetAndReceiverInFrontOfOpponentAreaBothSides)
+{
+  auto factory = makeFactory();
+  const std::string xml_target =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestCornerTarget">
+           <ComputeLegalSlot slot="corner_target" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+  const std::string xml_receiver =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestCornerReceiver">
+           <ComputeLegalSlot slot="corner_receiver" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  // Lado 1: Defendemos x negativo (atacamos +2250, área adversária termina em +1750)
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb->set("ball_x", 2100.0);
+    bb->set("ball_y", 1350.0);
+
+    auto tree_t = factory.createTreeFromText(xml_target, bb);
+    EXPECT_EQ(tree_t.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double tx = 0.0, ty = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", tx));
+    ASSERT_TRUE(bb->get("slot_y", ty));
+    EXPECT_NEAR(tx, 1150.0, 10.0);
+    EXPECT_NEAR(ty, 0.0, 5.0);
+
+    auto tree_r = factory.createTreeFromText(xml_receiver, bb);
+    EXPECT_EQ(tree_r.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double rx = 0.0, ry = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", rx));
+    ASSERT_TRUE(bb->get("slot_y", ry));
+    EXPECT_NEAR(rx, 1100.0, 10.0);
+    EXPECT_NEAR(ry, 0.0, 5.0);
+    // Respeita >= 200 mm da área adversária (1750 - 200 = 1550) e >= 500 mm da bola
+    EXPECT_LE(rx, 1550.0);
+    EXPECT_GE(std::hypot(rx - 2100.0, ry - 1350.0), 500.0);
+  }
+
+  // Lado 2: Defendemos x positivo (atacamos -2250, área adversária termina em -1750)
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/false);
+    bb->set("ball_x", -2100.0);
+    bb->set("ball_y", 1350.0);
+
+    auto tree_r = factory.createTreeFromText(xml_receiver, bb);
+    EXPECT_EQ(tree_r.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double rx = 0.0, ry = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", rx));
+    ASSERT_TRUE(bb->get("slot_y", ry));
+    EXPECT_NEAR(rx, -1100.0, 10.0);
+    EXPECT_NEAR(ry, 0.0, 5.0);
+    EXPECT_GE(rx, -1550.0);
+    EXPECT_GE(std::hypot(rx - (-2100.0), ry - 1350.0), 500.0);
+  }
+}
+
+TEST_F(ComputeLegalSlotTest, ThrowInAndDefBoxGuardSlotsBothSides)
+{
+  auto factory = makeFactory();
+  const std::string xml_ti_rec =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestTIRec">
+           <ComputeLegalSlot slot="throwin_receiver" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+  const std::string xml_guard =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestDefGuard">
+           <ComputeLegalSlot slot="def_box_guard" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  // Lado 1: Defendemos -2250, atacamos +2250
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb->set("ball_x", 100.0);
+    bb->set("ball_y", 1350.0);
+
+    auto tree_ti = factory.createTreeFromText(xml_ti_rec, bb);
+    EXPECT_EQ(tree_ti.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double rx = 0.0, ry = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", rx));
+    ASSERT_TRUE(bb->get("slot_y", ry));
+    // Avança ~900 mm rumo ao ataque (+X -> ~1000 mm) no eixo central (y ~ 0)
+    EXPECT_NEAR(rx, 1000.0, 10.0);
+    EXPECT_NEAR(ry, 0.0, 5.0);
+    EXPECT_GE(std::hypot(rx - 100.0, ry - 1350.0), 500.0);
+
+    // Escanteio/lateral adversário na nossa defesa (-2000, -1350) -> def_box_guard protege a cabeça da nossa área (~-1150)
+    bb->set("ball_x", -2000.0);
+    bb->set("ball_y", -1350.0);
+    auto tree_g = factory.createTreeFromText(xml_guard, bb);
+    EXPECT_EQ(tree_g.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double gx = 0.0, gy = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", gx));
+    ASSERT_TRUE(bb->get("slot_y", gy));
+    EXPECT_NEAR(gx, -1150.0, 10.0);
+    EXPECT_NEAR(gy, -150.0, 10.0);
+    EXPECT_GE(std::hypot(gx - (-2000.0), gy - (-1350.0)), 500.0);
+  }
+
+  // Lado 2: Defendemos +2250, atacamos -2250
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/false);
+    bb->set("ball_x", -100.0);
+    bb->set("ball_y", -1350.0);
+
+    auto tree_ti = factory.createTreeFromText(xml_ti_rec, bb);
+    EXPECT_EQ(tree_ti.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double rx = 0.0, ry = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", rx));
+    ASSERT_TRUE(bb->get("slot_y", ry));
+    EXPECT_NEAR(rx, -1000.0, 10.0);
+    EXPECT_NEAR(ry, 0.0, 5.0);
+
+    bb->set("ball_x", 2000.0);
+    bb->set("ball_y", 1350.0);
+    auto tree_g = factory.createTreeFromText(xml_guard, bb);
+    EXPECT_EQ(tree_g.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double gx = 0.0, gy = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", gx));
+    ASSERT_TRUE(bb->get("slot_y", gy));
+    EXPECT_NEAR(gx, 1150.0, 10.0);
+    EXPECT_NEAR(gy, 150.0, 10.0);
+  }
+}
+
 }  // namespace

@@ -88,6 +88,8 @@ void registerStrategyNodes(
   factory.registerNodeType<oxebots_strategy::WeAreFavoredCondition>("WeAreFavored");
   factory.registerNodeType<oxebots_strategy::IsDataFreshCondition>("IsDataFresh");
   factory.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
+  factory.registerNodeType<oxebots_strategy::IsCornerKickCondition>("IsCornerKick");
+  factory.registerNodeType<oxebots_strategy::IsThrowInCondition>("IsThrowIn");
   factory.registerNodeType<oxebots_strategy::HoldPositionNode>("HoldPosition", node);
   factory.registerNodeType<oxebots_strategy::AvoidPlacementCorridorNode>(
     "AvoidPlacementCorridor", node);

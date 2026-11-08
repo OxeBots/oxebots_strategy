@@ -116,7 +116,9 @@ BT::PortsList ComputeLegalSlotNode::providedPorts()
   return {
     BT::InputPort<std::string>("slot", "Nome do slot tático (retreat, stop_shadow, stop_def, "
                                        "kickoff_kicker, kickoff_def, "
-                                       "penalty_kicker, penalty_behind, freekick_support, wall)"),
+                                       "penalty_kicker, penalty_behind, freekick_support, "
+                                       "corner_target, corner_receiver, "
+                                       "throwin_target, throwin_receiver, def_box_guard, wall)"),
     BT::InputPort<unsigned int>("index", 0u, "Índice do robô no slot"),
     BT::OutputPort<double>("slot_x", "Coordenada X calculada (mm)"),
     BT::OutputPort<double>("slot_y", "Coordenada Y calculada (mm)"),
@@ -413,6 +415,64 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     }
     slot_y = side_y;
     enforce_ball_clearance = true;
+  } else if (slot == "corner_target") {
+    // Alvo de cruzamento de escanteio na entrada central da área adversária (Desafio 4)
+    const double target_dist = std::max(penalty_depth + 600.0, 1100.0);
+    slot_x = opp_goal_x - attack_sign * target_dist;
+    slot_y = 0.0;
+    slot_w = std::atan2(0.0 - slot_y, opp_goal_x - slot_x);
+  } else if (slot == "corner_receiver") {
+    // Recebedor infiltrado na entrada central da área adversária (>= 200 mm da área e >= 500 mm da bola)
+    const double rec_dist = std::max(penalty_depth + 650.0, 1150.0);
+    slot_x = opp_goal_x - attack_sign * rec_dist;
+    if (index == 0u) {
+      slot_y = 0.0;
+    } else {
+      const double sign_y = (ball_y >= 0.0) ? -1.0 : 1.0;
+      slot_y = sign_y * (250.0 + static_cast<double>(index - 1u) * 300.0);
+    }
+    enforce_ball_clearance = true;
+  } else if (slot == "throwin_target") {
+    // Alvo de passe de lateral para o pivô no corredor central à frente da bola
+    const double max_off_x = std::max(400.0, std::abs(opp_goal_x) - penalty_depth - 600.0);
+    const double proj_x = std::clamp(attack_sign * ball_x + 950.0, -max_off_x, max_off_x);
+    slot_x = attack_sign * proj_x;
+    slot_y = 0.0;
+    slot_w = std::atan2(0.0 - slot_y, opp_goal_x - slot_x);
+  } else if (slot == "throwin_receiver") {
+    // Pivô centralizado à frente da bola para receber a cobrança de lateral (throw_in.xml)
+    const double max_off_x = std::max(400.0, std::abs(opp_goal_x) - penalty_depth - 650.0);
+    const double proj_x = std::clamp(attack_sign * ball_x + 900.0, -max_off_x, max_off_x);
+    slot_x = attack_sign * proj_x;
+    if (index == 0u) {
+      slot_y = 0.0;
+    } else {
+      const double sign_y = (ball_y >= 0.0) ? -1.0 : 1.0;
+      slot_y = sign_y * 300.0;
+    }
+    enforce_ball_clearance = true;
+  } else if (slot == "def_box_guard") {
+    // Proteção tática do 2º robô em bolas paradas adversárias (opp_set_piece.xml):
+    // - Se a bola adversária está aberta na lateral/escanteio (|ball_y| >= 700), fecha a cabeça da nossa área
+    // - Se é falta frontal (|ball_y| < 700), forma o 2º homem da barreira sem colidir com o defensor (wall index=0)
+    if (std::abs(ball_y) >= 700.0) {
+      const double guard_dist = std::max(penalty_depth + 550.0, 1100.0);
+      slot_x = own_goal_x - our_half_sign * guard_dist;
+      slot_y = (ball_y >= 0.0) ? 150.0 : -150.0;
+    } else {
+      const double dx = own_goal_x - ball_x;
+      const double dy = 0.0 - ball_y;
+      const double dist = std::hypot(dx, dy);
+      const double ux = (dist > 1e-3) ? (dx / dist) : our_half_sign;
+      const double uy = (dist > 1e-3) ? (dy / dist) : 0.0;
+      const double px = -uy;
+      const double py = ux;
+      const double wall_dist = std::max(min_stop_ball_dist, std::min(900.0, dist * 0.4));
+      const double lat_sign = (ball_y >= 0.0) ? -1.0 : 1.0;
+      slot_x = ball_x + ux * wall_dist + px * (lat_sign * 250.0);
+      slot_y = ball_y + uy * wall_dist + py * (lat_sign * 250.0);
+    }
+    enforce_ball_clearance = true;
   } else if (slot == "wall") {
     // Barreira entre a bola e o nosso gol (own_goal_x, 0), a >= 0,5 m + margem da bola
     const double dx = own_goal_x - ball_x;
@@ -478,10 +538,11 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     slot_y = best_y;
   }
 
-  if (slot == "retreat" || slot == "stop_def" || slot == "wall" || slot == "freekick_support" ||
+  if (slot == "retreat" || slot == "stop_def" || slot == "wall" || slot == "def_box_guard" ||
+      slot == "freekick_support" || slot == "corner_receiver" || slot == "throwin_receiver" ||
       slot == "kickoff_def" || slot == "penalty_behind") {
     slot_w = normalizeAngle(std::atan2(ball_y - slot_y, ball_x - slot_x));
-  } else if (slot == "stop_shadow") {
+  } else if (slot == "stop_shadow" || slot == "corner_target" || slot == "throwin_target") {
     slot_w = normalizeAngle(std::atan2(0.0 - slot_y, opp_goal_x - slot_x));
   } else {
     slot_w = normalizeAngle(slot_w);

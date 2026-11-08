@@ -46,7 +46,7 @@
       <input_port name="phase" type="std::string">Fase esperada: HALT, TIMEOUT, STOP, BALL_PLACEMENT, PREPARE_KICKOFF, KICKOFF, PREPARE_PENALTY, PENALTY, FREE_KICK ou RUN</input_port>
     </Condition>
     <Action ID="ComputeLegalSlot">
-      <input_port name="slot" type="std::string">Nome do slot tático (retreat, stop_shadow, stop_def, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, wall)</input_port>
+      <input_port name="slot" type="std::string">Nome do slot tático (retreat, stop_shadow, stop_def, kickoff_kicker, kickoff_def, penalty_kicker, penalty_behind, freekick_support, corner_target, corner_receiver, throwin_target, throwin_receiver, def_box_guard, wall)</input_port>
       <input_port name="index" default="0" type="unsigned int">Índice do robô no slot</input_port>
       <output_port name="slot_x" type="double">Coordenada X calculada (mm)</output_port>
       <output_port name="slot_y" type="double">Coordenada Y calculada (mm)</output_port>
@@ -90,6 +90,14 @@
     </Condition>
     <Condition ID="HasRole">
       <input_port name="role" type="std::string">Papel esperado: goalkeeper, attacker, defender ou kicker</input_port>
+    </Condition>
+    <Condition ID="IsCornerKick">
+      <input_port name="x_margin" default="750.000000" type="double">Margem máxima em X até a linha de fundo adversária (mm)</input_port>
+      <input_port name="y_margin" default="650.000000" type="double">Margem máxima em Y até a linha lateral (mm)</input_port>
+    </Condition>
+    <Condition ID="IsThrowIn">
+      <input_port name="y_margin" default="450.000000" type="double">Margem máxima em Y até a linha lateral (mm)</input_port>
+      <input_port name="corner_x_margin" default="750.000000" type="double">Margem em X das linhas de fundo para excluir escanteio/tiro de meta (mm)</input_port>
     </Condition>
     <Action ID="HoldPosition">
       <input_port name="robot_id" default="{robot_id}" type="unsigned int">Id do robô</input_port>
