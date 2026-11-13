@@ -43,4 +43,22 @@ public:
   BT::NodeStatus tick() override;
 };
 
+class IsCornerKickCondition : public BT::ConditionNode
+{
+public:
+  IsCornerKickCondition(const std::string & name, const BT::NodeConfig & config);
+
+  static BT::PortsList providedPorts();
+  BT::NodeStatus tick() override;
+};
+
+class IsThrowInCondition : public BT::ConditionNode
+{
+public:
+  IsThrowInCondition(const std::string & name, const BT::NodeConfig & config);
+
+  static BT::PortsList providedPorts();
+  BT::NodeStatus tick() override;
+};
+
 }  // namespace oxebots_strategy

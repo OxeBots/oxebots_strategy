@@ -26,6 +26,8 @@ PRODUCTION = [
     'goalkeeper_tree.xml',
     'restart_kicker.xml',
     'stop.xml',
+    'free_kick.xml',
+    'kickoff.xml',
 ]
 
 MAX_KICK_SPEED = 3.0
@@ -117,3 +119,83 @@ def test_restart_kicker_expoe_as_portas_e_termina_em_kickonce():
     assert kick[0].attrib['target_x'] == '{target_x}' and kick[0].attrib['target_y'] == '{target_y}'
     # O IsBallClose antes do KickOnce garante o contato exigido pelo controlador.
     assert list(tree.iter('IsBallClose'))
+
+
+def test_free_kick_trees_estrutura_e_papeis():
+    root = load('free_kick.xml')
+    our_tree = root.find("./BehaviorTree[@ID='FreeKickOurTree']")
+    their_tree = root.find("./BehaviorTree[@ID='FreeKickTheirTree']")
+    assert our_tree is not None, 'FreeKickOurTree ausente em free_kick.xml'
+    assert their_tree is not None, 'FreeKickTheirTree ausente em free_kick.xml'
+
+    # FreeKickOurTree usa RestartKickerTree (cruzamento no escanteio, passe no lateral e chute direto no gol)
+    kicker_subtrees = [el for el in our_tree.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(kicker_subtrees) >= 1
+    targets = [(el.attrib.get('target_x'), el.attrib.get('target_y')) for el in kicker_subtrees]
+    assert ('{opp_goal_x}', '{opp_goal_y}') in targets
+    assert ('{cross_x}', '{cross_y}') in targets
+    assert ('{pass_x}', '{pass_y}') in targets
+
+    our_slots = [el.attrib.get('slot') for el in our_tree.iter('ComputeLegalSlot')]
+    assert 'freekick_support' in our_slots
+    assert 'corner_target' in our_slots
+    assert 'corner_receiver' in our_slots
+    assert 'throwin_target' in our_slots
+    assert 'throwin_receiver' in our_slots
+
+    # FreeKickTheirTree usa retreat (emergência), wall (barreira) e def_box_guard (proteção da área/2º na barreira)
+    their_slots = [el.attrib.get('slot') for el in their_tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in their_slots
+    assert 'wall' in their_slots
+    assert 'def_box_guard' in their_slots
+
+
+def test_kickoff_trees_estrutura_e_papeis():
+    root = load('kickoff.xml')
+    prep_our = root.find("./BehaviorTree[@ID='PrepareKickoffOurTree']")
+    prep_their = root.find("./BehaviorTree[@ID='PrepareKickoffTheirTree']")
+    exec_our = root.find("./BehaviorTree[@ID='KickoffExecuteOurTree']")
+
+    assert prep_our is not None, 'PrepareKickoffOurTree ausente em kickoff.xml'
+    assert prep_their is not None, 'PrepareKickoffTheirTree ausente em kickoff.xml'
+    assert exec_our is not None, 'KickoffExecuteOurTree ausente em kickoff.xml'
+
+    # PrepareKickoffOurTree tem cobrador com kickoff_kicker e defensores com kickoff_def
+    prep_our_slots = [el.attrib.get('slot') for el in prep_our.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' in prep_our_slots
+    assert 'kickoff_def' in prep_our_slots
+
+    # PrepareKickoffTheirTree só tem kickoff_def (ninguém no círculo central)
+    prep_their_slots = [el.attrib.get('slot') for el in prep_their.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' not in prep_their_slots
+    assert 'kickoff_def' in prep_their_slots
+
+    # KickoffExecuteOurTree tem cobrador com RestartKickerTree e outros em HoldPosition
+    exec_kicker = [el for el in exec_our.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(exec_kicker) == 1
+    assert exec_kicker[0].attrib['target_x'] == '{opp_goal_x}'
+    assert exec_kicker[0].attrib['target_y'] == '{opp_goal_y}'
+    assert list(exec_our.iter('HoldPosition')), 'HoldPosition ausente para demais robôs em KickoffExecuteOurTree'
+
+
+def test_stop_tree_estrutura_e_papeis():
+    root = load('stop.xml')
+    tree = root.find("./BehaviorTree[@ID='StopSubTree']")
+    assert tree is not None, 'StopSubTree ausente em stop.xml'
+
+    # Limite regulamentar de velocidade (<= 0,75 m/s)
+    limits = [numeric(el.attrib.get('limit_mps', '99')) for el in tree.iter('SetMotionLimit')]
+    assert limits and all(v is not None and v <= 0.75 for v in limits)
+
+    # Slots de emergência (retreat), sombra ofensiva (stop_shadow) e barreira defensiva (stop_def)
+    slots = [el.attrib.get('slot') for el in tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in slots
+    assert 'stop_shadow' in slots
+    assert 'stop_def' in slots
+
+    # Goleiro usa GoalLineDefend (sem sair para chutar) e fallback usa HoldPosition
+    assert list(tree.iter('GoalLineDefend'))
+    assert list(tree.iter('HoldPosition'))
+
+
+

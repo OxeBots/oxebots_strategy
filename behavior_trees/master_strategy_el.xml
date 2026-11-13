@@ -29,20 +29,40 @@
         <SubTree ID="StopSubTree" _autoremap="true"/>
       </ReactiveSequence>
 
-      <!-- Fases ainda não implementadas: parada segura -->
+      <!-- BALL_PLACEMENT: só o time favorecido pode posicionar; E04 ainda não existe. -->
       <ReactiveSequence name="BallPlacementBranch">
         <CheckGameState phase="BALL_PLACEMENT"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback name="BallPlacementAction">
+          <ReactiveSequence name="BallPlacementTheirBranch">
+            <Inverter>
+              <WeAreFavored/>
+            </Inverter>
+            <SubTree ID="BallPlacementTheirTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <Halt reason="ball_placement_our_not_implemented"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="PrepareKickoffBranch">
         <CheckGameState phase="PREPARE_KICKOFF"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PrepareKickoffOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PrepareKickoffTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="KickoffBranch">
         <CheckGameState phase="KICKOFF"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="KickoffExecuteOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PrepareKickoffTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="PreparePenaltyBranch">
@@ -55,9 +75,16 @@
         <Halt reason="not_implemented"/>
       </ReactiveSequence>
 
+      <!-- 9. FREE KICK (inclui falta, lateral, escanteio) -->
       <ReactiveSequence name="FreeKickBranch">
         <CheckGameState phase="FREE_KICK"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="FreeKickOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="FreeKickTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="RunBranch">

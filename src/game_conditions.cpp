@@ -315,4 +315,117 @@ BT::NodeStatus HasRoleCondition::tick()
   return BT::NodeStatus::FAILURE;
 }
 
+IsCornerKickCondition::IsCornerKickCondition(
+  const std::string & name, const BT::NodeConfig & config)
+: BT::ConditionNode(name, config)
+{
+}
+
+BT::PortsList IsCornerKickCondition::providedPorts()
+{
+  return {
+    BT::InputPort<double>("x_margin", 750.0, "Margem máxima em X até a linha de fundo adversária (mm)"),
+    BT::InputPort<double>("y_margin", 650.0, "Margem máxima em Y até a linha lateral (mm)")
+  };
+}
+
+BT::NodeStatus IsCornerKickCondition::tick()
+{
+  auto * bb = rootBB(config());
+  if (!bb) {
+    return BT::NodeStatus::FAILURE;
+  }
+
+  double x_margin = 750.0;
+  double y_margin = 650.0;
+  getInput("x_margin", x_margin);
+  getInput("y_margin", y_margin);
+
+  double ball_x = 0.0;
+  double ball_y = 0.0;
+  if (!bb->get("ball_x", ball_x) || !bb->get("ball_y", ball_y)) {
+    return BT::NodeStatus::FAILURE;
+  }
+
+  double field_length = 4500.0;
+  if (!bb->get("field_length", field_length) || field_length <= 1.0) {
+    field_length = 4500.0;
+  }
+  double field_width = 3000.0;
+  if (!bb->get("field_width", field_width) || field_width <= 1.0) {
+    field_width = 3000.0;
+  }
+
+  double opp_goal_x = 0.0;
+  if (!bb->get("opp_goal_x", opp_goal_x) || std::abs(opp_goal_x) < 1.0) {
+    double own_goal_x = 0.0;
+    if (bb->get("own_goal_x", own_goal_x) && std::abs(own_goal_x) > 1.0) {
+      opp_goal_x = -own_goal_x;
+    } else if (bb->get("my_goal_x", own_goal_x) && std::abs(own_goal_x) > 1.0) {
+      opp_goal_x = -own_goal_x;
+    } else {
+      int side_sign = 0;
+      if (bb->get("side_sign", side_sign) && side_sign != 0) {
+        opp_goal_x = (side_sign > 0) ? (field_length / 2.0) : -(field_length / 2.0);
+      } else {
+        return BT::NodeStatus::FAILURE;
+      }
+    }
+  }
+
+  const double attack_sign = (opp_goal_x > 0.0) ? 1.0 : -1.0;
+  const bool in_offensive_half = (ball_x * attack_sign) > 0.0;
+  const bool near_goal_line = std::abs(opp_goal_x - ball_x) <= x_margin;
+  const bool near_sideline = std::abs(ball_y) >= (field_width / 2.0 - y_margin);
+
+  return boolStatus(in_offensive_half && near_goal_line && near_sideline);
+}
+
+IsThrowInCondition::IsThrowInCondition(
+  const std::string & name, const BT::NodeConfig & config)
+: BT::ConditionNode(name, config)
+{
+}
+
+BT::PortsList IsThrowInCondition::providedPorts()
+{
+  return {
+    BT::InputPort<double>("y_margin", 450.0, "Margem máxima em Y até a linha lateral (mm)"),
+    BT::InputPort<double>("corner_x_margin", 750.0, "Margem em X das linhas de fundo para excluir escanteio/tiro de meta (mm)")
+  };
+}
+
+BT::NodeStatus IsThrowInCondition::tick()
+{
+  auto * bb = rootBB(config());
+  if (!bb) {
+    return BT::NodeStatus::FAILURE;
+  }
+
+  double y_margin = 450.0;
+  double corner_x_margin = 750.0;
+  getInput("y_margin", y_margin);
+  getInput("corner_x_margin", corner_x_margin);
+
+  double ball_x = 0.0;
+  double ball_y = 0.0;
+  if (!bb->get("ball_x", ball_x) || !bb->get("ball_y", ball_y)) {
+    return BT::NodeStatus::FAILURE;
+  }
+
+  double field_length = 4500.0;
+  if (!bb->get("field_length", field_length) || field_length <= 1.0) {
+    field_length = 4500.0;
+  }
+  double field_width = 3000.0;
+  if (!bb->get("field_width", field_width) || field_width <= 1.0) {
+    field_width = 3000.0;
+  }
+
+  const bool near_sideline = std::abs(ball_y) >= (field_width / 2.0 - y_margin);
+  const bool outside_corners = std::abs(ball_x) < (field_length / 2.0 - corner_x_margin);
+
+  return boolStatus(near_sideline && outside_corners);
+}
+
 }  // namespace oxebots_strategy
