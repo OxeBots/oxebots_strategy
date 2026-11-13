@@ -109,20 +109,20 @@ BT::NodeStatus PenaltyKeeperLineNode::step()
     }
   }
 
-  // Se a blackboard já atribuiu papéis, garante que este robô é de fato o goleiro (SC-17)
-  bool is_gk = true;
-  uint32_t gk_id = robot_id_;
-  if (bb->get("is_goalkeeper", is_gk)) {
-    if (!is_gk && (!bb->get("goalkeeper_id", gk_id) || gk_id != robot_id_)) {
-      RCLCPP_WARN_THROTTLE(
-        node_->get_logger(), *node_->get_clock(), 2000,
-        "PenaltyKeeperLine: robô %u não possui o papel de goleiro", robot_id_);
-      return BT::NodeStatus::FAILURE;
-    }
-  } else if (bb->get("goalkeeper_id", gk_id) && gk_id != robot_id_) {
+  // Se a blackboard já atribuiu papéis, garante consistência de que este robô é o goleiro (SC-17)
+  bool is_gk = false;
+  const bool has_is_gk = bb->get("is_goalkeeper", is_gk);
+  uint32_t gk_id = 999u;
+  const bool has_gk_id = bb->get("goalkeeper_id", gk_id);
+
+  const bool invalid_by_flag = has_is_gk && !is_gk;
+  const bool invalid_by_id = has_gk_id && (gk_id != robot_id_);
+
+  if (invalid_by_flag || invalid_by_id) {
     RCLCPP_WARN_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 2000,
-      "PenaltyKeeperLine: robô %u diferente de goalkeeper_id=%u", robot_id_, gk_id);
+      "PenaltyKeeperLine: robô %u não possui papel de goleiro consistente (is_gk=%d, gk_id=%u, SC-17)",
+      robot_id_, static_cast<int>(is_gk), gk_id);
     return BT::NodeStatus::FAILURE;
   }
 

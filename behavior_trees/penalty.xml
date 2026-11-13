@@ -50,7 +50,7 @@
             <!-- ========================================== -->
             <ReactiveSequence name="GoalkeeperPenalty">
                 <HasRole role="goalkeeper"/>
-                <Goalkeeper robot_id="{robot_id}" mode="penalty_def"/>
+                <PenaltyKeeperLine line_offset_mm="90.0" robot_id="{robot_id}" side="defend"/>
             </ReactiveSequence>
 
             <!-- ========================================== -->

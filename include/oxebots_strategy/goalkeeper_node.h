@@ -6,7 +6,6 @@
 #include <string>
 
 #include "behaviortree_cpp/behavior_tree.h"
-#include "oxebots_interfaces/msg/ball_position.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
@@ -60,11 +59,6 @@ private:
   double penalty_area_width_{0.0};
   double goal_width_{0.0};
   double field_width_{0.0};
-
-  oxebots_interfaces::msg::BallPosition last_ball_pos_;
-  oxebots_interfaces::msg::RobotGameData current_robot_data_;
-  bool ball_pos_updated_{false};
-  bool robot_data_updated_{false};
 
   double last_target_x_{-99999.0};
   double last_target_y_{-99999.0};

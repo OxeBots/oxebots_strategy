@@ -122,6 +122,11 @@ TEST_F(GoalkeeperK01K02Test, K01_DynamicGoalkeeperIdAndRoleEnforcement)
   EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, -4380.0, 1.0);
   EXPECT_NEAR(last_goal_->pose.pose.position.y * 1000.0, 200.0, 1.0);
 
+  // Se a Blackboard estiver inconsistente (is_goalkeeper=true, mas goalkeeper_id != robot_id) -> FAILURE
+  bb_->set("is_goalkeeper", true);
+  bb_->set("goalkeeper_id", 5u);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
+
   // Se o robô perde o papel de goleiro (ex.: GC trocou goleiro para 5 ou goleiro ausente = 999)
   bb_->set("is_goalkeeper", false);
   bb_->set("goalkeeper_id", 999u);
@@ -227,6 +232,20 @@ TEST_F(GoalkeeperK01K02Test, K01_HoldLimitForcesUrgentClearanceInArea)
     last_override_->mode,
     oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK);
   EXPECT_NEAR(last_override_->kick_speed, 2.8, 1e-3);
+
+  // Edge case (Item 7): se o goleiro estiver adiantado (na frente da bola, rx = -3900 > ball_x = -4000),
+  // mesmo em urgent_clear ele deve contornar para trás da bola com D* e NÃO avançar de costas
+  last_goal_.reset();
+  last_override_.reset();
+  bb_->set("robot_x", -3900.0);
+  bb_->set("robot_y", 100.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_EQ(
+    last_goal_->planner_type,
+    oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR);
+  EXPECT_LT(last_goal_->pose.pose.position.x * 1000.0, -4000.0);
 }
 
 // K01 / SC-25: Condição BallHeldTimer falha após max_s com a bola parada na área própria
@@ -260,6 +279,10 @@ TEST_F(GoalkeeperK01K02Test, K01_BallHeldTimerConditionDetectsStagnantBallInArea
   // Se a bola se move significativamente (>= 80 mm) dentro da área, o timer reinicia -> SUCCESS
   bb_->set("ball_x", -3850.0);
   EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::SUCCESS);
+
+  // Se a visão congelar (ball_age_ms > 500 ms), retorna FAILURE imediatamente
+  bb_->set("ball_age_ms", 600.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::FAILURE);
 }
 
 // K02 / SC-10: PenaltyKeeperLine mantém o goleiro cravado a 90 mm da linha de gol mesmo com bola na área

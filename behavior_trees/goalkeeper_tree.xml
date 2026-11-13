@@ -14,18 +14,21 @@
                    <HasRole role="goalkeeper" />
                    <ReactiveFallback name="ReactiveGoalkeeper">
 
-                       <!-- 1. Bola dentro da área (ou retida > 8s na área própria, SC-25): buscar a bola e chutar -->
+                       <!-- 1. Bola dentro da área (até 8s na área própria, SC-25): buscar a bola e chutar -->
                        <ReactiveSequence name="State3_BallInArea">
-                           <Fallback name="InAreaOrHeldTimeout">
-                               <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}" />
-                               <Inverter>
-                                   <BallHeldTimer max_s="8.0" area="own_defense" />
-                               </Inverter>
-                           </Fallback>
+                           <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+                           <!-- Garante que a bola não está retida há mais de 8s; se estourar, falha para o ramo de emergência -->
+                           <BallHeldTimer area="own_defense" max_s="8.0"/>
                            <Sequence name="ApproachAndKick">
-                               <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" allow_leave_area="true" kick_speed="{gk_kick_speed}" />
-                               <KickBall robot_id="{robot_id}" kick_speed="{gk_kick_speed}" />
+                               <LateralClear allow_leave_area="true" ball_x="{ball_x}" ball_y="{ball_y}" kick_speed="{gk_kick_speed}" robot_id="{robot_id}"/>
+                               <KickBall kick_speed="{gk_kick_speed}" robot_id="{robot_id}"/>
                            </Sequence>
+                       </ReactiveSequence>
+
+                       <!-- 1b. Emergência (> 8s retida na área própria, SC-25): afastamento urgente imediato -->
+                       <ReactiveSequence name="State3_EmergencyClear">
+                           <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+                           <Goalkeeper robot_id="{robot_id}" mode="normal" max_hold_s="0.01" kick_speed="3.0"/>
                        </ReactiveSequence>
 
                        <!-- 2. Bola fora da área, mais perto do goleiro que de qualquer outro robô: sair, buscar e chutar -->

@@ -27,9 +27,7 @@ GoalkeeperNode::GoalkeeperNode(
   const std::string & name, const BT::NodeConfig & config,
   rclcpp::Node::SharedPtr node_ptr)
 : BT::StatefulActionNode(name, config),
-  node_(node_ptr),
-  ball_pos_updated_(false),
-  robot_data_updated_(false)
+  node_(node_ptr)
 {
   if (!getInput<uint32_t>("robot_id", robot_id_)) {
     robot_id_ = 0;
@@ -85,16 +83,6 @@ void GoalkeeperNode::game_data_callback(
   std::lock_guard<std::mutex> lock(data_mutex_);
   last_game_data_ = msg;
   last_game_data_stamp_ = node_->now();
-  last_ball_pos_ = msg->ball;
-  ball_pos_updated_ = true;
-
-  for (const auto & ally : msg->robots.allies) {
-    if (ally.id == robot_id_) {
-      current_robot_data_ = ally;
-      robot_data_updated_ = true;
-      break;
-    }
-  }
 }
 
 void GoalkeeperNode::clampInsidePenaltyArea(double & tx, double & ty, double margin_mm)
@@ -171,7 +159,7 @@ void GoalkeeperNode::sendKickOverride(double kick_speed)
   auto msg = std::make_unique<oxebots_interfaces::msg::RobotMotionOverride>();
   msg->robot_id = robot_id_;
   msg->mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK;
-  msg->kick_speed = std::min(kick_speed, 3.0);
+  msg->kick_speed = std::clamp(kick_speed, 0.0, 3.0);
   override_pub_->publish(std::move(msg));
   kick_override_active_ = true;
 }
@@ -222,22 +210,21 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     }
   }
 
-  // Se a blackboard tem atribuição de papel para o goleiro, valida que este robô é o goleiro
-  bool is_gk = true;
-  uint32_t gk_id = robot_id_;
-  if (blackboard->get("is_goalkeeper", is_gk)) {
-    if (!is_gk && (!blackboard->get("goalkeeper_id", gk_id) || gk_id != robot_id_)) {
-      releaseKickOverride();
-      RCLCPP_WARN_THROTTLE(
-        node_->get_logger(), *node_->get_clock(), 2000,
-        "GoalkeeperNode: robô %u não tem papel de goleiro (SC-17)", robot_id_);
-      return BT::NodeStatus::FAILURE;
-    }
-  } else if (blackboard->get("goalkeeper_id", gk_id) && gk_id != robot_id_) {
+  // Se a blackboard tem atribuição de papel para o goleiro, valida consistência (SC-17)
+  bool is_gk = false;
+  const bool has_is_gk = blackboard->get("is_goalkeeper", is_gk);
+  uint32_t gk_id = 999u;
+  const bool has_gk_id = blackboard->get("goalkeeper_id", gk_id);
+
+  const bool invalid_by_flag = has_is_gk && !is_gk;
+  const bool invalid_by_id = has_gk_id && (gk_id != robot_id_);
+
+  if (invalid_by_flag || invalid_by_id) {
     releaseKickOverride();
     RCLCPP_WARN_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 2000,
-      "GoalkeeperNode: robô %u diferente de goalkeeper_id=%u (SC-17)", robot_id_, gk_id);
+      "GoalkeeperNode: robô %u não tem papel de goleiro consistente (is_gk=%d, gk_id=%u, SC-17)",
+      robot_id_, static_cast<int>(is_gk), gk_id);
     return BT::NodeStatus::FAILURE;
   }
 
@@ -417,7 +404,9 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     // No modo urgente (bola retida >= max_hold_s_), se o goleiro está entre o gol e a bola,
     // avança direto na direção robô->bola para limpar imediatamente antes dos 10 s regulamentares
     const double forward_sign = (my_goal_x_ < 0.0) ? 1.0 : -1.0;
-    if (urgent_clear && dist_to_ball > 1.0 && forward_sign * dx > 0.0) {
+    const bool behind_ball_for_urgent =
+      urgent_clear && (dist_to_ball > 1.0) && (forward_sign * dx > 0.0);
+    if (behind_ball_for_urgent) {
       clear_angle = std::atan2(dy, dx);
       ux = std::cos(clear_angle);
       uy = std::sin(clear_angle);
@@ -426,8 +415,8 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     double dot = (dx * ux + dy * uy);
     double angle_err = normalizeAngle(clear_angle - ryaw);
 
-    if (urgent_clear || (dot > 0.0 && dist_to_ball < 250.0)) {
-      // Já posicionado atrás da bola (ou em limpeza urgente): avança em linha reta para contato
+    if (behind_ball_for_urgent || (dot > 0.0 && dist_to_ball < 250.0)) {
+      // Já posicionado atrás da bola (ou em limpeza urgente atrás da bola): avança em linha reta para contato
       double target_x = ball_x + ux * 60.0;
       double target_y = ball_y + uy * 60.0;
       clampInsidePenaltyArea(target_x, target_y, kGkMarginMm);
@@ -450,10 +439,15 @@ BT::NodeStatus GoalkeeperNode::onRunning()
         releaseKickOverride();
       }
     } else {
-      // Robô ainda longe ou fora da linha do chute: navegar até o ponto de pré-chute atrás da bola
+      // Robô ainda longe ou à frente da bola (inclusive em urgent_clear quando adiantado):
+      // navega até o ponto de pré-chute atrás da bola contornando-a antes de avançar em linha reta
       releaseKickOverride();
       double target_x = ball_x - ux * 200.0;
       double target_y = ball_y - uy * 200.0;
+      if (dot <= 0.0 && std::abs(-dx * uy + dy * ux) < 150.0) {
+        const double detour_side = (ry >= ball_y) ? 1.0 : -1.0;
+        target_y = ball_y + detour_side * 180.0;
+      }
       clampInsidePenaltyArea(target_x, target_y, kGkMarginMm);
 
       publishGoal(

@@ -93,6 +93,14 @@ BT::NodeStatus BallHeldTimerCondition::tick()
     return BT::NodeStatus::FAILURE;
   }
 
+  double ball_age_ms = 0.0;
+  if (bb->get("ball_age_ms", ball_age_ms) && ball_age_ms > 500.0) {
+    tracking_ = false;
+    RCLCPP_WARN_THROTTLE(
+      kLogger, clock, 2000, "BallHeldTimer: ball_age_ms=%.1f > 500ms -> FAILURE", ball_age_ms);
+    return BT::NodeStatus::FAILURE;
+  }
+
   const double target_goal_x = (area == "own_defense") ? my_goal_x : -my_goal_x;
   if (!isInsidePenaltyArea(ball_x, ball_y, target_goal_x, area_depth, area_width)) {
     tracking_ = false;
