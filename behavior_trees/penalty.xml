@@ -1,65 +1,123 @@
+<?xml version="1.0"?>
+<!--
+  E06 — Pênalti legal unificado (SC-09, SC-10, R-15).
+  - PreparePenaltyOurTree: goleiro na meta; cobrador (kicker) no slot penalty_kicker
+    (atrás da bola sem tocá-la, olhando para o gol adversário); demais robôs no slot
+    penalty_behind (>= 1 m atrás da bola).
+  - PreparePenaltyTheirTree: goleiro defensor na linha de gol (PenaltyKeeperLine);
+    demais robôs no slot penalty_behind (>= 1 m atrás da bola).
+  - PenaltyExecuteOurTree: cobrador executa RestartKickerTree apontando para o gol adversário;
+    demais robôs seguram posição (HoldPosition).
+  - PenaltyDefendTheirTree: goleiro mantém a linha de gol (PenaltyKeeperLine) até a bola entrar em jogo
+    (WaitBallInPlay >= 50 mm ou 10 s), depois assume defesa normal (GoalkeeperTree); demais robôs seguram posição.
+-->
 <root BTCPP_format="4">
-    <BehaviorTree ID="PenaltyTree">
-        <!-- O Fallback garante que o robô execute apenas o bloco correspondente ao seu papel -->
-        <Fallback name="PenaltyRoles">
-            
-            <!-- ========================================== -->
-            <!-- 1. ATACANTE (O Cobrador do Pênalti)        -->
-            <!-- ========================================== -->
-            <Sequence name="AttackerPenalty">
-                <IsMyRole role="attacker"/>
-                <ReactiveFallback name="AttackerPenaltyLogic">
-                    
-                    <!-- AÇÃO B: O juiz apitou NORMAL_START (2). Vai pra bola e chuta! -->
-                    <Sequence name="ExecutePenalty">
-                        <CheckGCCommand expected="2"/>
-                        <UpdateBallPosition robot_id="{robot_id}" 
-                                            ball_x="{ball_x}" ball_y="{ball_y}" 
-                                            pre_kick_x="{pkx}" pre_kick_y="{pky}" 
-                                            is_ready_to_kick="{is_ready}" 
-                                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
-                        
-                        <Parallel name="ChaseAndKick" success_count="1" failure_count="1">
-                            <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}" tolerance="30.0"/>
-                            <Sequence>
-                                <RetryUntilSuccessful num_attempts="-1">
-                                    <IsBallClose robot_id="{robot_id}" distance_threshold="150.0"/>
-                                </RetryUntilSuccessful>
-                                <!-- Velocidade máxima do pênalti pode chegar até 8.0 m/s dependendo das regras locais -->
-                                <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
-                            </Sequence>
-                        </Parallel>
-                    </Sequence>
-                    
-                    <!-- AÇÃO A: O juiz está em PREPARE_PENALTY (6 ou 7). Apenas se posiciona. -->
-                    <Sequence name="PreparePenalty">
-                        <UpdateBallPosition robot_id="{robot_id}" 
-                                            ball_x="{ball_x}" ball_y="{ball_y}" 
-                                            pre_kick_x="{pkx}" pre_kick_y="{pky}" 
-                                            is_ready_to_kick="{is_ready}" 
-                                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"/>
-                        
-                        <!-- Vai para a posição de pré-chute (pkx, pky) calculada pelo seu nó e aguarda -->
-                        <GoToPoint robot_id="{robot_id}" x="{pkx}" y="{pky}" tolerance="20.0"/>
-                    </Sequence>
-                </ReactiveFallback>
-            </Sequence>
 
-            <!-- ========================================== -->
-            <!-- 2. GOLEIRO (Fica na nossa meta)            -->
-            <!-- ========================================== -->
-            <ReactiveSequence name="GoalkeeperPenalty">
-                <HasRole role="goalkeeper"/>
-                <PenaltyKeeperLine line_offset_mm="90.0" robot_id="{robot_id}" side="defend"/>
-            </ReactiveSequence>
+  <!-- 1. Preparação para o nosso pênalti (SC-09, R-15) -->
+  <BehaviorTree ID="PreparePenaltyOurTree">
+    <ReactiveFallback name="PreparePenaltyOurRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
 
-            <!-- ========================================== -->
-            <!-- 3. OUTROS ROBÔS (Zagueiros / Reservas)     -->
-            <!-- ========================================== -->
-            <Sequence name="OthersPenalty">
-                <Halt reason="wait_penalty"/>
-            </Sequence>
+      <ReactiveSequence name="KickerRole">
+        <HasRole role="kicker"/>
+        <ComputeLegalSlot slot="penalty_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{opp_goal_x}" face_y="{opp_goal_y}" tolerance="50.0"/>
+      </ReactiveSequence>
 
-        </Fallback>
-    </BehaviorTree>
+      <ReactiveSequence name="AttackerBehindRole">
+        <HasRole role="attacker"/>
+        <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="DefenderBehindRole">
+        <HasRole role="defender"/>
+        <ComputeLegalSlot slot="penalty_behind" index="1" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="LineDefendersBehindFallback">
+        <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 2. Preparação para o pênalti adversário (SC-10, R-15) -->
+  <BehaviorTree ID="PreparePenaltyTheirTree">
+    <ReactiveFallback name="PreparePenaltyTheirRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <PenaltyKeeperLine line_offset_mm="90.0" robot_id="{robot_id}" side="defend"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="AttackerBehindRole">
+        <HasRole role="attacker"/>
+        <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="DefenderBehindRole">
+        <HasRole role="defender"/>
+        <ComputeLegalSlot slot="penalty_behind" index="1" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="LineDefendersBehindFallback">
+        <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 3. Execução do nosso pênalti após NORMAL_START (SC-09, R-15) -->
+  <BehaviorTree ID="PenaltyExecuteOurTree">
+    <ReactiveFallback name="PenaltyExecuteOurRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="KickerRole">
+        <HasRole role="kicker"/>
+        <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="HoldOtherRobotsRole">
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 4. Defesa do pênalti adversário após NORMAL_START (SC-10, R-15) -->
+  <BehaviorTree ID="PenaltyDefendTheirTree">
+    <ReactiveFallback name="PenaltyDefendTheirRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <!-- Linha de gol até a bola entrar em jogo; depois volta ao goleiro normal -->
+        <ReactiveFallback name="KeeperLineUntilPlay">
+          <ReactiveSequence name="StayOnLineBeforePlay">
+            <Inverter>
+              <WaitBallInPlay moved_mm="50.0" timeout_s="10.0"/>
+            </Inverter>
+            <PenaltyKeeperLine line_offset_mm="90.0" robot_id="{robot_id}" side="defend"/>
+          </ReactiveSequence>
+          <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+        </ReactiveFallback>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="HoldOtherRobotsRole">
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 5. Alias de compatibilidade legada -->
+  <BehaviorTree ID="PenaltyTree">
+    <SubTree ID="PreparePenaltyOurTree" _autoremap="true"/>
+  </BehaviorTree>
+
 </root>

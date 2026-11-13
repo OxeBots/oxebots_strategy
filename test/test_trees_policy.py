@@ -28,6 +28,7 @@ PRODUCTION = [
     'stop.xml',
     'free_kick.xml',
     'kickoff.xml',
+    'penalty.xml',
 ]
 
 MAX_KICK_SPEED = 3.0
@@ -196,6 +197,45 @@ def test_stop_tree_estrutura_e_papeis():
     # Goleiro usa GoalLineDefend (sem sair para chutar) e fallback usa HoldPosition
     assert list(tree.iter('GoalLineDefend'))
     assert list(tree.iter('HoldPosition'))
+
+
+def test_penalty_trees_estrutura_e_papeis():
+    root = load('penalty.xml')
+    prep_our = root.find("./BehaviorTree[@ID='PreparePenaltyOurTree']")
+    prep_their = root.find("./BehaviorTree[@ID='PreparePenaltyTheirTree']")
+    exec_our = root.find("./BehaviorTree[@ID='PenaltyExecuteOurTree']")
+    def_their = root.find("./BehaviorTree[@ID='PenaltyDefendTheirTree']")
+
+    assert prep_our is not None, 'PreparePenaltyOurTree ausente em penalty.xml'
+    assert prep_their is not None, 'PreparePenaltyTheirTree ausente em penalty.xml'
+    assert exec_our is not None, 'PenaltyExecuteOurTree ausente em penalty.xml'
+    assert def_their is not None, 'PenaltyDefendTheirTree ausente em penalty.xml'
+
+    # PreparePenaltyOurTree: cobrador com penalty_kicker e defensores/atacantes com penalty_behind
+    prep_our_slots = [el.attrib.get('slot') for el in prep_our.iter('ComputeLegalSlot')]
+    assert 'penalty_kicker' in prep_our_slots
+    assert 'penalty_behind' in prep_our_slots
+    assert any(el.attrib.get('ID') == 'GoalkeeperTree' for el in prep_our.iter('SubTree'))
+
+    # PreparePenaltyTheirTree: goleiro na linha com PenaltyKeeperLine, robôs atrás com penalty_behind
+    prep_their_slots = [el.attrib.get('slot') for el in prep_their.iter('ComputeLegalSlot')]
+    assert 'penalty_behind' in prep_their_slots
+    assert 'penalty_kicker' not in prep_their_slots
+    assert list(prep_their.iter('PenaltyKeeperLine'))
+
+    # PenaltyExecuteOurTree: cobrador com RestartKickerTree e demais em HoldPosition
+    exec_kicker = [el for el in exec_our.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(exec_kicker) == 1
+    assert exec_kicker[0].attrib['target_x'] == '{opp_goal_x}'
+    assert exec_kicker[0].attrib['target_y'] == '{opp_goal_y}'
+    assert list(exec_our.iter('HoldPosition'))
+
+    # PenaltyDefendTheirTree: goleiro com WaitBallInPlay + PenaltyKeeperLine e GoalkeeperTree, demais em HoldPosition
+    assert list(def_their.iter('WaitBallInPlay'))
+    assert list(def_their.iter('PenaltyKeeperLine'))
+    assert any(el.attrib.get('ID') == 'GoalkeeperTree' for el in def_their.iter('SubTree'))
+    assert list(def_their.iter('HoldPosition'))
+
 
 
 

@@ -690,4 +690,117 @@ TEST_F(StrategyNodeBlackboardTest, DynamicGoalTargetYSelectsOpenCornerAndRespect
     EXPECT_DOUBLE_EQ(opp_goal_y, 250.0);
 }
 
+// ============================================================================
+// 10. Pênalti Unificado (E06) — Transição de PreparePenaltyBranch e PenaltyBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, PreparePenaltyAndPenaltyBranchesTransitionOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    auto pub_node = std::make_shared<rclcpp::Node>("test_pen_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 1000.0f; // Marca do pênalti no ataque
+    gd->ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = 600.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    // 1) PREPARE_PENALTY Nosso (we_favored = true) -> Cobrador (kicker) se posiciona atrás da bola no slot penalty_kicker
+    auto gs_prep_our = makeGameState(false, GameState::PHASE_PREPARE_PENALTY, /*we_favored=*/true);
+    gs_prep_our->header.stamp = node->now();
+    node->setLastGameState(gs_prep_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PreparePenaltyBranch");
+    double prep_our_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_our_x));
+    // Fica atrás da bola (ball_x = 1000, opp_goal_x = 2250 -> slot_x < 1000)
+    EXPECT_LT(prep_our_x, 1000.0);
+    EXPECT_GE(prep_our_x, 600.0);
+
+    // 2) PREPARE_PENALTY Deles (we_favored = false) -> Robô de linha fica >= 1 m atrás da bola (slot penalty_behind)
+    gd->ball.x = -1000.0f; // Marca de pênalti na nossa defesa (defendemos my_goal_x = -2250)
+    gd->ball.y = 0.0f;
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    auto gs_prep_their = makeGameState(false, GameState::PHASE_PREPARE_PENALTY, /*we_favored=*/false);
+    gs_prep_their->header.stamp = node->now();
+    node->setLastGameState(gs_prep_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PreparePenaltyBranch");
+    double prep_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_their_x));
+    // penalty_behind: >= 1 m atrás da bola na direção oposta ao ataque adversário (+X)
+    EXPECT_GT(prep_their_x, -1000.0);
+    EXPECT_GE(prep_their_x - (-1000.0), 1000.0 - 1.0); // SC-10: >= 1 m atrás da bola
+
+    // 3) PENALTY Nosso (we_favored = true) -> Cobrador executa RestartKickerTree
+    gd->ball.x = 1000.0f;
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    node->getBlackboard()->unset("slot_x");
+    auto gs_pen_our = makeGameState(false, GameState::PHASE_PENALTY, /*we_favored=*/true);
+    gs_pen_our->header.stamp = node->now();
+    node->setLastGameState(gs_pen_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PenaltyBranch");
+    double kick_slot_x = 0.0;
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", kick_slot_x));
+
+    // 4) PENALTY Deles (we_favored = false) -> Robô de linha (robot_id=1) segura posição (HoldPosition)
+    auto gs_pen_their = makeGameState(false, GameState::PHASE_PENALTY, /*we_favored=*/false);
+    gs_pen_their->header.stamp = node->now();
+    node->setLastGameState(gs_pen_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PenaltyBranch");
+}
+
+
 

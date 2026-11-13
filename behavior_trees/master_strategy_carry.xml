@@ -33,7 +33,7 @@
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
         </Fallback>
-        <SubTree ID="PenaltyTree" _autoremap="true" />
+        <SubTree ID="PreparePenaltyOurTree" _autoremap="true" />
       </ReactiveSequence>
 
       <!-- NOSSAS FALTAS / LATERAIS / ESCANTEIOS (unificadas E07) -->

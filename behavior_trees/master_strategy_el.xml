@@ -67,12 +67,24 @@
 
       <ReactiveSequence name="PreparePenaltyBranch">
         <CheckGameState phase="PREPARE_PENALTY"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PreparePenaltyOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PreparePenaltyTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <ReactiveSequence name="PenaltyBranch">
         <CheckGameState phase="PENALTY"/>
-        <Halt reason="not_implemented"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PenaltyExecuteOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PenaltyDefendTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <!-- 9. FREE KICK (inclui falta, lateral, escanteio) -->

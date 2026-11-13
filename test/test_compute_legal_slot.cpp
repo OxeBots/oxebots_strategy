@@ -799,4 +799,97 @@ TEST_F(ComputeLegalSlotTest, ThrowInAndDefBoxGuardSlotsBothSides)
   }
 }
 
+// ============================================================================
+// 10. Pênalti Legal (E06) — Slots penalty_kicker e penalty_behind
+// ============================================================================
+
+TEST_F(ComputeLegalSlotTest, PenaltySlotsKickerAndBehind)
+{
+  auto factory = makeFactory();
+
+  const std::string xml_kicker =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestPenaltyKicker">
+           <ComputeLegalSlot slot="penalty_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  const std::string xml_behind_0 =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestPenaltyBehind0">
+           <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  const std::string xml_behind_1 =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestPenaltyBehind1">
+           <ComputeLegalSlot slot="penalty_behind" index="1" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  // Lado 1: Defendemos -2250, atacamos +2250. Pênalti nosso na marca +1200.
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+    bb->set("ball_x", 1200.0);
+    bb->set("ball_y", 0.0);
+
+    // penalty_kicker: atrás da bola na reta bola -> gol (+2250, 0), slot_x < 1200, slot_w ~ 0
+    auto tree_pk = factory.createTreeFromText(xml_kicker, bb);
+    EXPECT_EQ(tree_pk.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double pk_x = 0.0, pk_y = 0.0, pk_w = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", pk_x));
+    ASSERT_TRUE(bb->get("slot_y", pk_y));
+    ASSERT_TRUE(bb->get("slot_w", pk_w));
+    EXPECT_LT(pk_x, 1200.0);
+    EXPECT_NEAR(pk_x, 1200.0 - 300.0, 50.0);
+    EXPECT_NEAR(pk_y, 0.0, 1.0);
+    EXPECT_NEAR(pk_w, 0.0, 0.05);
+
+    // penalty_behind index=0: >= 1 m atrás da bola (slot_x <= 1200 - 1000 = 200 mm), y = +500
+    auto tree_pb0 = factory.createTreeFromText(xml_behind_0, bb);
+    EXPECT_EQ(tree_pb0.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double pb0_x = 0.0, pb0_y = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", pb0_x));
+    ASSERT_TRUE(bb->get("slot_y", pb0_y));
+    EXPECT_LE(pb0_x, 200.0 + 1e-3);
+    EXPECT_NEAR(pb0_y, 500.0, 1.0);
+
+    // penalty_behind index=1: y = -500
+    auto tree_pb1 = factory.createTreeFromText(xml_behind_1, bb);
+    EXPECT_EQ(tree_pb1.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double pb1_x = 0.0, pb1_y = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", pb1_x));
+    ASSERT_TRUE(bb->get("slot_y", pb1_y));
+    EXPECT_LE(pb1_x, 200.0 + 1e-3);
+    EXPECT_NEAR(pb1_y, -500.0, 1.0);
+  }
+
+  // Lado 2: Defendemos +2250, atacamos -2250. Pênalti nosso na marca -1200.
+  {
+    auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/false);
+    bb->set("ball_x", -1200.0);
+    bb->set("ball_y", 0.0);
+
+    auto tree_pk = factory.createTreeFromText(xml_kicker, bb);
+    EXPECT_EQ(tree_pk.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double pk_x = 0.0, pk_y = 0.0, pk_w = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", pk_x));
+    ASSERT_TRUE(bb->get("slot_y", pk_y));
+    ASSERT_TRUE(bb->get("slot_w", pk_w));
+    EXPECT_GT(pk_x, -1200.0);
+    EXPECT_NEAR(pk_x, -1200.0 + 300.0, 50.0);
+    EXPECT_NEAR(pk_y, 0.0, 1.0);
+    EXPECT_NEAR(std::abs(pk_w), M_PI, 0.05);
+
+    auto tree_pb0 = factory.createTreeFromText(xml_behind_0, bb);
+    EXPECT_EQ(tree_pb0.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double pb0_x = 0.0, pb0_y = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", pb0_x));
+    ASSERT_TRUE(bb->get("slot_y", pb0_y));
+    EXPECT_GE(pb0_x, -200.0 - 1e-3);
+    EXPECT_NEAR(pb0_y, 500.0, 1.0);
+  }
+}
+
 }  // namespace
