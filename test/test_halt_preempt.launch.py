@@ -16,8 +16,8 @@ Dois robôs, dois caminhos de segurança, no mesmo launch:
 Ajustes (variáveis de ambiente, para mudar sem editar o arquivo):
   OXEBOTS_HALT_BUDGET_MS   limite de parada em ms (padrão 300; o regulamento dá 2 s)
   OXEBOTS_HALT_REPETITIONS ciclos RUN -> HALT por robô (padrão 10)
-  OXEBOTS_HALT_ATTEMPTS    tentativas por ciclo inconclusivo (padrão 3, veja _cycle)
-  OXEBOTS_TEST_DOMAIN_ID   ROS_DOMAIN_ID do teste (padrão 100 + PID % 100, isolado do grSim e das
+  OXEBOTS_HALT_ATTEMPTS    tentativas por ciclo inconclusivo (padrão 5, veja _cycle)
+  OXEBOTS_TEST_DOMAIN_ID   ROS_DOMAIN_ID do teste (padrão 50 + PID % 50, isolado do grSim e das
                            partidas simuladas nos domínios 0 e 1)
 
 Nada é medido sobre o robô físico: o robô simulado fica parado em /game_data, e é o controlador que
@@ -33,7 +33,7 @@ import unittest
 
 # O domínio precisa estar definido ANTES de qualquer nó: os processos lançados herdam o ambiente.
 os.environ['ROS_DOMAIN_ID'] = os.environ.get(
-    'OXEBOTS_TEST_DOMAIN_ID', str(100 + os.getpid() % 100))
+    'OXEBOTS_TEST_DOMAIN_ID', str(50 + os.getpid() % 50))
 os.environ.setdefault('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
 
 from ament_index_python.packages import get_package_share_directory  # noqa: E402
@@ -46,8 +46,7 @@ from nav_msgs.msg import Path  # noqa: E402
 from oxebots_interfaces.msg import (  # noqa: E402
     GameData, RobotCmd, RobotGameData, RobotGoal, RobotMotionOverride, SSLGeometryData)
 import rclpy  # noqa: E402
-from rclpy.callback_groups import ReentrantCallbackGroup  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
+from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.qos import (  # noqa: E402
     DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data)
@@ -59,7 +58,7 @@ from std_msgs.msg import String  # noqa: E402
 # ----------------------------------------------------------------------------------------------
 HALT_BUDGET_MS = float(os.environ.get('OXEBOTS_HALT_BUDGET_MS', '300'))
 REPETITIONS = int(os.environ.get('OXEBOTS_HALT_REPETITIONS', '10'))
-ATTEMPTS = int(os.environ.get('OXEBOTS_HALT_ATTEMPTS', '3'))
+ATTEMPTS = int(os.environ.get('OXEBOTS_HALT_ATTEMPTS', '5'))
 
 ROBOT_GATE = 0   # só controlador + SafetyGate
 ROBOT_TREE = 1   # strategy_node + controlador + SafetyGate
@@ -73,6 +72,7 @@ MIN_ZERO_SAMPLES = 20         # e ter amostras zero suficientes (o controlador p
 # controlador mudo, ou o próprio processo do teste parado por falta de CPU) torna a medida
 # inconclusiva: o ciclo é repetido em vez de reprovar ou aprovar às cegas.
 MAX_SAMPLE_GAP_S = 0.15
+PAUSE_AFTER_STALL_S = 1.0     # espera antes de repetir um ciclo em que o próprio teste travou
 
 # Robôs parados na visão, longe da bola (não dispara a repulsão de contato) e fora das áreas.
 ROBOT_POSE_M = {ROBOT_GATE: (-1.0, 0.5), ROBOT_TREE: (-1.0, -0.5)}
@@ -130,7 +130,6 @@ class World(Node):
 
     def __init__(self):
         super().__init__('halt_preempt_world')
-        group = ReentrantCallbackGroup()
         latched = QoSProfile(
             history=HistoryPolicy.KEEP_LAST, depth=1,
             reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -144,6 +143,7 @@ class World(Node):
         self.samples = {ROBOT_GATE: [], ROBOT_TREE: []}
         self.branches = []     # (t, texto de /strategy/active_branch)
         self.overrides = []    # (t, robot_id, mode)
+        self.timer_ticks = []  # instantes do timer de 60 Hz: mostram se o processo do teste travou
 
         self._game_data_pub = self.create_publisher(GameData, '/game_data', 10)
         self._referee_pub = self.create_publisher(
@@ -154,19 +154,16 @@ class World(Node):
             rid: self.create_publisher(Path, f'/robot_{rid}/path', 10) for rid in ROBOT_POSE_M}
 
         self.create_subscription(
-            RobotCmd, '/robot_commands', self._on_command, qos_profile_sensor_data,
-            callback_group=group)
+            RobotCmd, '/robot_commands', self._on_command, qos_profile_sensor_data)
         self.create_subscription(
-            String, '/strategy/active_branch', self._on_branch, latched_log,
-            callback_group=group)
+            String, '/strategy/active_branch', self._on_branch, latched_log)
         self.create_subscription(
-            RobotMotionOverride, '/robot_motion_override', self._on_override, 50,
-            callback_group=group)
+            RobotMotionOverride, '/robot_motion_override', self._on_override, 50)
 
-        self.create_timer(1.0 / 60.0, self._publish_game_data, callback_group=group)
-        self.create_timer(0.1, self._publish_referee, callback_group=group)
-        self.create_timer(0.1, self._publish_gate_goal, callback_group=group)
-        self.create_timer(0.05, self._publish_paths, callback_group=group)
+        self.create_timer(1.0 / 60.0, self._publish_game_data)
+        self.create_timer(0.1, self._publish_referee)
+        self.create_timer(0.1, self._publish_gate_goal)
+        self.create_timer(0.05, self._publish_paths)
 
         self._geometry_pub.publish(self._geometry())
 
@@ -183,6 +180,10 @@ class World(Node):
         return msg
 
     def _publish_game_data(self):
+        with self._lock:
+            self.timer_ticks.append(time.monotonic())
+            if len(self.timer_ticks) > 20000:
+                del self.timer_ticks[:10000]
         now = self.get_clock().now().to_msg()
         msg = GameData()
         msg.header.stamp = now
@@ -290,6 +291,16 @@ class World(Node):
         with self._lock:
             return [text for t, text in self.branches if t >= t0]
 
+    def timer_gap(self, t_start, t_end):
+        """Maior intervalo sem disparo do timer de 60 Hz em [t_start, t_end].
+
+        Se o processo do teste travou (disco ou CPU ocupados), o timer também parou: o buraco nas
+        amostras é do ambiente. Se o timer andou e as amostras não, o controlador é que ficou mudo.
+        """
+        with self._lock:
+            ticks = [x for x in self.timer_ticks if t_start <= x <= t_end]
+        return largest_gap_of_times([t_start] + ticks + [t_end])
+
     def overrides_since(self, robot_id, t0):
         with self._lock:
             return [mode for t, rid, mode in self.overrides if t >= t0 and rid == robot_id]
@@ -321,10 +332,13 @@ def stop_analysis(samples, t0):
     return tail[0].t - t0, len(tail), duration
 
 
+def largest_gap_of_times(times):
+    return max(later - earlier for earlier, later in zip(times, times[1:]))
+
+
 def largest_gap(samples, t_start, t_end):
     """Maior intervalo sem amostra em [t_start, t_end] (inclui as pontas)."""
-    times = [t_start] + [s.t for s in samples] + [t_end]
-    return max(later - earlier for earlier, later in zip(times, times[1:]))
+    return largest_gap_of_times([t_start] + [s.t for s in samples] + [t_end])
 
 
 def percentile(values, fraction):
@@ -339,7 +353,11 @@ class TestHaltPreempt(unittest.TestCase):
         rclpy.init()
         cls.world = World()
         cls.inconclusive_cycles = 0
-        cls.executor = MultiThreadedExecutor(num_threads=4)
+        # SingleThreadedExecutor DE PROPÓSITO: com o MultiThreadedExecutor do rclpy (Python) a
+        # carga deste teste (~250 callbacks/s: timers mais /robot_commands dos dois controladores a
+        # 50 Hz cada) satura o laço do executor e os timers pausam por até 2,7 s. Medido: 126 de
+        # 720 ticks em 12 s, contra 720 de 720 com uma thread.
+        cls.executor = SingleThreadedExecutor()
         cls.executor.add_node(cls.world)
         cls.spin_thread = threading.Thread(target=cls.executor.spin, daemon=True)
         cls.spin_thread.start()
@@ -355,13 +373,15 @@ class TestHaltPreempt(unittest.TestCase):
     def _cycle(self, robot_id):
         """RUN com o robô a ~1 m/s -> HALT. Devolve (latência_s, t0).
 
-        Se as amostras do ciclo tiverem um buraco maior que MAX_SAMPLE_GAP_S, a medida é
-        inconclusiva (máquina ocupada travou o processo do teste, ou o controlador ficou mudo) e o
-        ciclo é repetido, no máximo ATTEMPTS vezes. Um controlador mudo de verdade repete o buraco
-        em todas as tentativas e reprova; uma pausa isolada do teste não.
+        Se as amostras do ciclo tiverem um buraco maior que MAX_SAMPLE_GAP_S, há dois casos:
+          * o timer do próprio teste também parou: o processo do teste travou (disco ou CPU
+            ocupados). A medida é inconclusiva e o ciclo é repetido, no máximo ATTEMPTS vezes;
+          * o timer andou e o controlador não publicou: o controlador ficou mudo depois do HALT.
+            É defeito do produto e reprova na hora, sem repetir.
         """
         world = self.world
         gap = 0.0
+        world_gap = 0.0
         for attempt in range(1, ATTEMPTS + 1):
             world.send_command(Referee.COMMAND_FORCE_START)
             self.assertTrue(
@@ -377,16 +397,24 @@ class TestHaltPreempt(unittest.TestCase):
             gap = largest_gap(samples, t0, t_end)
             if gap <= MAX_SAMPLE_GAP_S:
                 break
+            world_gap = world.timer_gap(t0, t_end)
+            if world_gap <= MAX_SAMPLE_GAP_S:
+                self.fail(
+                    f'robô {robot_id}: o controlador ficou {gap * 1000:.0f} ms sem publicar em '
+                    '/robot_commands depois do HALT, e o processo do teste não travou '
+                    f'(maior pausa do timer: {world_gap * 1000:.0f} ms)')
             self.inconclusive_cycles += 1
             print(
-                f'[HALT-LATENCY] robô {robot_id}: ciclo inconclusivo (buraco de '
-                f'{gap * 1000:.0f} ms nas amostras, limite {MAX_SAMPLE_GAP_S * 1000:.0f} ms), '
+                f'[HALT-LATENCY] robô {robot_id}: ciclo inconclusivo, o processo do teste travou '
+                f'(pausa de {world_gap * 1000:.0f} ms; limite {MAX_SAMPLE_GAP_S * 1000:.0f} ms), '
                 f'tentativa {attempt}/{ATTEMPTS}', flush=True)
+            time.sleep(PAUSE_AFTER_STALL_S)
         else:
             self.fail(
-                f'robô {robot_id}: buraco de {gap * 1000:.0f} ms nas amostras em {ATTEMPTS} '
-                'tentativas seguidas: o controlador ficou mudo depois do HALT ou a máquina está '
-                'sobrecarregada demais para medir')
+                f'robô {robot_id}: o processo do teste travou (pausas de até '
+                f'{world_gap * 1000:.0f} ms) em {ATTEMPTS} tentativas seguidas. A máquina está '
+                'ocupada demais para medir; veja /proc/pressure/io e /proc/pressure/cpu e rode de '
+                'novo com ela parada')
 
         latency, zeros, _ = stop_analysis(samples, t0)
         self.assertIsNotNone(

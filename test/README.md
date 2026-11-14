@@ -520,15 +520,29 @@ colcon test --packages-select oxebots_strategy --ctest-args -R test_halt_preempt
 |---|---|---|
 | `OXEBOTS_HALT_BUDGET_MS` | 300 | limite de parada em ms (o regulamento dá 2 s) |
 | `OXEBOTS_HALT_REPETITIONS` | 10 | ciclos RUN → HALT por robô |
-| `OXEBOTS_HALT_ATTEMPTS` | 3 | tentativas por ciclo inconclusivo (veja abaixo) |
-| `OXEBOTS_TEST_DOMAIN_ID` | 100 + PID % 100 | `ROS_DOMAIN_ID` do teste (isola do grSim e das partidas nos domínios 0 e 1) |
+| `OXEBOTS_HALT_ATTEMPTS` | 5 | tentativas por ciclo inconclusivo (veja abaixo) |
+| `OXEBOTS_TEST_DOMAIN_ID` | 50 + PID % 50 | `ROS_DOMAIN_ID` do teste (isola do grSim e das partidas nos domínios 0 e 1) |
 
 A saída traz uma linha `[HALT-LATENCY] ...` com mediana, p95 e máximo por caminho. O teste roda
-**sozinho** no `ctest` (`RUN_SERIAL`): com os linters e outros testes do pacote competindo por CPU, o
-processo Python do teste chegava a parar por mais de 150 ms e a medida ficava inválida. Mesmo assim,
-um ciclo com buraco de mais de 150 ms nas amostras é tratado como **inconclusivo** e repetido (até
-`OXEBOTS_HALT_ATTEMPTS` vezes, e a saída avisa). Um controlador que ficasse mudo depois do HALT repetiria
-o buraco em todas as tentativas e reprovaria. Se o teste falhar
+**sozinho** no `ctest` (`RUN_SERIAL`), porque ele mede tempo e não pode competir por CPU com outros
+testes.
+
+O processo do teste usa um `SingleThreadedExecutor` **de propósito**. Com o `MultiThreadedExecutor`
+do rclpy (escrito em Python) a carga do teste, de cerca de 250 callbacks por segundo (os timers mais
+`/robot_commands` dos dois controladores a 50 Hz cada), satura o laço do executor: os timers pausavam
+por até 2,7 s e o teste media o próprio travamento. Medido em 12 s: 126 de 720 ticks com várias
+threads, contra 720 de 720 com uma. Não volte para o executor de várias threads.
+
+Se, depois do HALT, as amostras de `/robot_commands` têm um buraco de mais de 150 ms, o teste olha o
+timer de 60 Hz do próprio processo de teste:
+- o timer **também parou**: o processo do teste travou (CPU ocupada, por exemplo). O ciclo é
+  inconclusivo e repetido, com 1 s de pausa, até `OXEBOTS_HALT_ATTEMPTS` vezes (a saída avisa). Se
+  todas as tentativas travarem, o teste reprova dizendo que a máquina está ocupada demais (veja
+  `/proc/pressure/io` e `/proc/pressure/cpu`); rode de novo com ela parada;
+- o timer **andou** e o controlador não publicou: o controlador ficou mudo depois do HALT. É defeito
+  do produto e reprova na hora, sem repetir.
+
+Se o teste falhar
 por "o robô não chegou a 0,9 m/s", ele não mediu nada: veja os logs dos nós antes de mexer no limite.
 O `strategy_node` tenta abrir o Groot2 na porta 1667 + id; se estiver ocupada (partida rodando), só
 avisa. Ao trocar o `RunBranch` provisório (A06), o robô 1 pode passar a usar a `master_strategy_el.xml`
