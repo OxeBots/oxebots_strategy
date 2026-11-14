@@ -12,6 +12,7 @@
 
 #define STRATEGY_NODE_NO_MAIN
 #include "../src/strategy_node.cpp"
+#include "master_tree_scenario.hpp"
 
 using GameState = oxebots_interfaces::msg::GameState;
 using GameData = oxebots_interfaces::msg::GameData;
@@ -690,4 +691,67 @@ TEST_F(StrategyNodeBlackboardTest, DynamicGoalTargetYSelectsOpenCornerAndRespect
     EXPECT_DOUBLE_EQ(opp_goal_y, 250.0);
 }
 
+// ============================================================================
+// 10. Contrato do mock da Master Tree (T05)
+// ============================================================================
 
+// test_master_tree.cpp monta a blackboard com master_tree_test::Scenario. Este teste prova que o
+// refresh() real escreve as MESMAS chaves, com os MESMOS tipos, e com o papel/cobrador no formato que
+// o Scenario assume. Se o refresh() mudar um nome ou tipo, o mock da Master Tree deixa de ser fiel e
+// este teste falha, em vez de os testes da árvore passarem contra uma blackboard que não existe.
+TEST_F(StrategyNodeBlackboardTest, MasterTreeScenarioMatchesRefreshKeysAndTypes)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto gs = makeGameState(false, GameState::PHASE_STOP, /*we_favored=*/true);
+    gs->header.stamp = node->now();
+    node->setLastGameState(gs);
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    roles->epoch = 1;
+    roles->active_ids = {0, 1, 2};
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 100.0f;
+    gd->ball.y = -50.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -800.0f;
+    ally.y = 200.0f;
+    ally.orientation = 0.3f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+
+    node->refresh();
+
+    for (const auto & [key, type] : master_tree_test::expectedKeyTypes()) {
+        const BT::TypeInfo * info = bb->entryInfo(key);
+        ASSERT_NE(info, nullptr) << "o refresh() não escreve a chave do Scenario: " << key;
+        EXPECT_EQ(info->type(), type)
+            << "tipo diferente para a chave " << key << " (refresh: " << info->type().name()
+            << ", Scenario: " << type.name() << ")";
+    }
+
+    // O refresh() nunca grava role="kicker": o cobrador é atacante/defensor com is_kicker ligado.
+    std::string role;
+    bool is_kicker = false;
+    int phase = -1;
+    ASSERT_TRUE(bb->get("role", role));
+    ASSERT_TRUE(bb->get("is_kicker", is_kicker));
+    ASSERT_TRUE(bb->get("phase", phase));
+    EXPECT_EQ(role, "attacker");
+    EXPECT_TRUE(is_kicker);
+    EXPECT_EQ(phase, static_cast<int>(GameState::PHASE_STOP));
+}

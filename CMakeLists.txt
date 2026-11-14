@@ -115,6 +115,31 @@ if(BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
 
+  # T05: Master Tree (MainTreeEL) REAL com folhas falsas e blackboard mock (sem ROS ativo). Os XML são
+  # lidos direto de behavior_trees/ do código-fonte (MASTER_TREES_DIR), sem depender do install.
+  ament_add_gtest(test_master_tree
+    test/test_master_tree.cpp
+    ${BT_LEAF_SOURCES}
+  )
+  ament_target_dependencies(test_master_tree
+    rclcpp
+    oxebots_interfaces
+    ssl_league_msgs
+    behaviortree_cpp
+    ament_index_cpp
+    geometry_msgs
+    nav_msgs
+    std_msgs
+    visualization_msgs
+  )
+  target_include_directories(test_master_tree PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+  target_compile_definitions(test_master_tree PRIVATE
+    MASTER_TREES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/behavior_trees"
+  )
+
   ament_add_gtest(test_game_conditions
     test/test_game_conditions.cpp
     src/game_conditions.cpp
@@ -376,6 +401,18 @@ if(BUILD_TESTING)
   # E09/E10: política estática das árvores de produção (sem PrecisionKick, chute <= 3 m/s, guardas
   # reativas, papel por HasRole). Só Python, sem compilar nada.
   ament_add_pytest_test(test_trees_policy test/test_trees_policy.py TIMEOUT 60)
+
+  # T06: launch_testing com processos reais (referee_state_node, movement_calculation_node e
+  # strategy_node). Mede o HALT em /robot_commands com o robô a ~1 m/s (SC-02, limite 300 ms; mude por
+  # OXEBOTS_HALT_BUDGET_MS). O ROS_DOMAIN_ID é definido dentro do próprio arquivo (isolado do grSim).
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_halt_preempt.launch.py
+    TARGET test_halt_preempt
+    TIMEOUT 240
+  )
+  # Mede tempo em processos reais: roda sozinho no ctest (sem os linters e os outros testes do
+  # pacote competindo por CPU, o que travava o processo Python do teste e inflava a medida).
+  set_tests_properties(test_halt_preempt PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 ament_package()

@@ -186,3 +186,21 @@ def test_stop_tree_estrutura_e_papeis():
 
 
 
+
+
+def canonical(el):
+    """Forma comparável de um nó: tag, atributos e filhos (comentários e espaços não contam)."""
+    return (el.tag, tuple(sorted(el.attrib.items())), tuple(canonical(child) for child in el))
+
+
+def test_arvore_de_teste_do_halt_copia_safetyguard_e_haltbranch_da_mestre():
+    # T06: o launch test mede o HALT com test_halt_preempt.xml. Se o SafetyGuard ou o HaltBranch da
+    # MainTreeEL mudarem e a árvore de teste não, o teste mediria uma árvore que não é a do jogo.
+    master = load('master_strategy_el.xml')
+    test_tree = load('test_halt_preempt.xml')
+    for name in ('SafetyGuard', 'HaltBranch'):
+        in_master = next(el for el in master.iter() if el.attrib.get('name') == name)
+        in_test = next(el for el in test_tree.iter() if el.attrib.get('name') == name)
+        assert canonical(in_master) == canonical(in_test), (
+            f'"{name}" de test_halt_preempt.xml diverge de master_strategy_el.xml; '
+            'atualize a árvore de teste do T06.')

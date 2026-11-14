@@ -10,8 +10,12 @@ realmente envia. São três ferramentas independentes:
 | **Harness de semântica** (`test_bt_semantics`) | T01 | "A BT.CPP **instalada** faz o que o manual diz que ela faz?" | `test/test_bt_semantics.cpp` |
 | **Validador estático** (`validate_bt.py` + `dump_bt_model`) | T02 | "Os XMLs de `behavior_trees/` estão **consistentes** com as folhas registradas?" | `scripts/validate_bt.py`, `src/tools/dump_bt_model.cpp` |
 | **Análise do Game Controller** (`analisar_gc_bag.py`) | T03 | "Que `command` o árbitro publica durante o jogo corrido?" (hipótese H-01) | `scripts/analisar_gc_bag.py` |
+| **Master Tree com folhas falsas** (`test_master_tree`) | T05 | "Qual ramo da `MainTreeEL` decide em cada fase, o que roda nele e a preempção por `halt` funciona?" | `test/test_master_tree.cpp`, `test/master_tree_harness.hpp` |
+| **HALT em processos reais** (`test_halt_preempt`) | T06 | "O HALT zera `/robot_commands` em até 300 ms com o robô a 1 m/s?" | `test/test_halt_preempt.launch.py` |
 
-Nenhuma das duas inicia ROS, publica tópicos ou mexe em robô. Rodam em segundos.
+O harness, o validador e a análise do GC não iniciam ROS, não publicam tópicos e não mexem em robô;
+rodam em segundos. O `test_master_tree` carrega só a BT.CPP e as folhas falsas (sem nó ROS ativo). O
+`test_halt_preempt` é o único que **sobe processos ROS 2** (veja a seção 4).
 
 > Quando rodar: o harness, ao atualizar a BT.CPP, o ROS ou o ambiente de desenvolvimento, e antes de apostar numa
 > semântica nova (uma guarda, um `Retry`, um `Parallel`). O validador, **antes de todo PR que mexa
@@ -466,6 +470,72 @@ o caminho anotado no manual.
 
 ---
 
+## 4. Master Tree com folhas falsas (T05) e HALT em processos reais (T06)
+
+### `test_master_tree` (T05)
+Carrega a `MainTreeEL` (`behavior_trees/master_strategy_el.xml`) **real**, com todas as subárvores do
+diretório (como o `strategy_node` faz), mas com folhas falsas e a blackboard montada pelo teste
+(`master_tree_scenario.hpp`). Ficam reais só as condições que leem a blackboard (`CheckGameState`,
+`WeAreFavored`, `IsDataFresh`, `HasRole`, `IsCornerKick`, `IsThrowIn`). Cada folha falsa copia o
+manifesto da real (portas e tipo), então o XML é validado contra as portas reais e uma folha nova
+entra sozinha. Os XML são lidos de `behavior_trees/` do **código-fonte**, não do `install`.
+
+```bash
+./build/oxebots_strategy/test_master_tree
+```
+
+```bash
+./build/oxebots_strategy/test_master_tree --gtest_filter='MasterTreeHaltPreemptionTest*'
+```
+
+Como escrever um caso: ajuste `h->scenario` (fase, `we_favored`, papel, idades, cor, lado, bola),
+chame `h->tick()` e consulte `h->branch()` (ramo da raiz), `h->ran("GoToPoint")`,
+`h->rawPort("ComputeLegalSlot", "slot")` e `h->stats("GoToPoint").halts`. `h->setStatus(id, status)`
+muda o que uma folha falsa devolve (por padrão, as ações do robô ficam em RUNNING e as condições de
+bola em FAILURE).
+
+- O `Scenario` precisa continuar igual ao que o `refresh()` do `strategy_node` escreve. O teste
+  `StrategyNodeBlackboardTest.MasterTreeScenarioMatchesRefreshKeysAndTypes` (em `test_strategy_node`)
+  falha se um nome ou tipo mudar.
+- O `refresh()` **nunca** grava `role="kicker"`: o cobrador é atacante/defensor com `is_kicker` ligado.
+- O observador de ramo do harness repete o `attachBranchObserver()` do `strategy_node.cpp`. Se aquele
+  critério mudar, mude o harness também.
+- `PreparePenalty`, `Penalty`, `RunBranch` e o ball placement nosso ainda são `Halt` provisório e
+  estão **fixados** como tal. Quando E06, A06 e E04 trocarem o XML, o teste falha de propósito: troque-o
+  pelo teste do comportamento real (SC-09, SC-10, SC-12, SC-15/16/17 em RUN).
+
+### `test_halt_preempt` (T06)
+`launch_testing` com `referee_state_node`, `movement_calculation_node` (robôs 0 e 1) e `strategy_node`
+(robô 1, árvore `behavior_trees/test_halt_preempt.xml`). O próprio teste faz o árbitro (`Referee`),
+a visão (`/game_data`, `/field_geometry`) e o planejador (`/robot_N/path`), deixa o robô a ~1 m/s,
+publica `HALT` e mede o tempo até `/robot_commands` ficar zero **e continuar zero**. O robô 0 não tem
+árvore (só o SafetyGate) e recebe `RobotGoal` durante o HALT; o robô 1 tem a cadeia completa e o teste
+confere `/strategy/active_branch` e o `MODE_HALT`. Depois confere que o FORCE_START libera os dois.
+
+```bash
+colcon test --packages-select oxebots_strategy --ctest-args -R test_halt_preempt --event-handlers console_direct+
+```
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `OXEBOTS_HALT_BUDGET_MS` | 300 | limite de parada em ms (o regulamento dá 2 s) |
+| `OXEBOTS_HALT_REPETITIONS` | 10 | ciclos RUN → HALT por robô |
+| `OXEBOTS_HALT_ATTEMPTS` | 3 | tentativas por ciclo inconclusivo (veja abaixo) |
+| `OXEBOTS_TEST_DOMAIN_ID` | 100 + PID % 100 | `ROS_DOMAIN_ID` do teste (isola do grSim e das partidas nos domínios 0 e 1) |
+
+A saída traz uma linha `[HALT-LATENCY] ...` com mediana, p95 e máximo por caminho. O teste roda
+**sozinho** no `ctest` (`RUN_SERIAL`): com os linters e outros testes do pacote competindo por CPU, o
+processo Python do teste chegava a parar por mais de 150 ms e a medida ficava inválida. Mesmo assim,
+um ciclo com buraco de mais de 150 ms nas amostras é tratado como **inconclusivo** e repetido (até
+`OXEBOTS_HALT_ATTEMPTS` vezes, e a saída avisa). Um controlador que ficasse mudo depois do HALT repetiria
+o buraco em todas as tentativas e reprovaria. Se o teste falhar
+por "o robô não chegou a 0,9 m/s", ele não mediu nada: veja os logs dos nós antes de mexer no limite.
+O `strategy_node` tenta abrir o Groot2 na porta 1667 + id; se estiver ocupada (partida rodando), só
+avisa. Ao trocar o `RunBranch` provisório (A06), o robô 1 pode passar a usar a `master_strategy_el.xml`
+e a árvore de teste sai.
+
+---
+
 ## Arquivos gerados e versionamento
 - Os resultados dos testes (XML do gtest, logs do CTest) são escritos em `build/` e `log/`, que já
   estão no `.gitignore` do workspace e do pacote. Nada precisa ser acrescentado.
@@ -478,8 +548,8 @@ o caminho anotado no manual.
 
 ## Limitações atuais
 - O validador **não executa** as árvores: não prova que um ramo é alcançado, só que o XML está
-  consistente. Os testes de comportamento (Master Tree com blackboard mock, cenários SC-xx) são as
-  tarefas T04 a T06.
+  consistente. Os testes de comportamento são o `test_master_tree` (T05, árvore com folhas falsas), o
+  `test_halt_preempt` (T06, processos reais) e os testes de folhas (T04).
 - Não verifica **tipos** das chaves da blackboard entre produtor e consumidor.
 - R6/R7 são heurísticos (ver acima).
 - O harness usa folhas falsas: valida a **biblioteca**, não as folhas reais do projeto (T04).
