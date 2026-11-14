@@ -48,6 +48,8 @@ set(BT_LEAF_SOURCES
   src/compute_legal_slot_node.cpp
   src/kick_once_node.cpp
   src/wait_ball_in_play_condition.cpp
+  src/ball_held_timer_condition.cpp
+  src/penalty_keeper_line_node.cpp
 )
 
 if(BUILD_TESTING)
@@ -398,7 +400,21 @@ if(BUILD_TESTING)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
 
-  # E09/E10: política estática das árvores de produção (sem PrecisionKick, chute <= 3 m/s, guardas
+  # K01/K02: Goleiro (identidade dinâmica via HasRole, FAILURE sem dados, limite de posse 10 s, PenaltyKeeperLine e modos penalty_def/hold).
+  ament_add_gtest(test_goalkeeper_k01_k02
+    test/test_goalkeeper_k01_k02.cpp
+    src/goalkeeper_node.cpp
+    src/penalty_keeper_line_node.cpp
+    src/ball_held_timer_condition.cpp
+    src/goal_line_defend_node.cpp
+    src/lateral_clear_node.cpp
+  )
+  ament_target_dependencies(test_goalkeeper_k01_k02 rclcpp behaviortree_cpp oxebots_interfaces)
+  target_include_directories(test_goalkeeper_k01_k02 PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
+  # E09/E10/K01: política estática das árvores de produção (sem PrecisionKick, chute <= 3 m/s, guardas
   # reativas, papel por HasRole). Só Python, sem compilar nada.
   ament_add_pytest_test(test_trees_policy test/test_trees_policy.py TIMEOUT 60)
 

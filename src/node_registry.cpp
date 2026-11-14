@@ -7,6 +7,7 @@
 #include "oxebots_strategy/aim_at.hpp"
 #include "oxebots_strategy/avoid_placement_corridor_node.hpp"
 #include "oxebots_strategy/align_to_ball_node.h"
+#include "oxebots_strategy/ball_held_timer_condition.hpp"
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/calculate_kick_off_pose.hpp"
 #include "oxebots_strategy/compute_legal_slot_node.hpp"
@@ -25,6 +26,7 @@
 #include "oxebots_strategy/kick_ball_node.h"
 #include "oxebots_strategy/kick_once_node.hpp"
 #include "oxebots_strategy/lateral_clear_node.h"
+#include "oxebots_strategy/penalty_keeper_line_node.hpp"
 #include "oxebots_strategy/position_bisector_node.h"
 #include "oxebots_strategy/precision_kick_node.h"
 #include "oxebots_strategy/set_motion_limit_node.hpp"
@@ -97,6 +99,8 @@ void registerStrategyNodes(
   factory.registerNodeType<oxebots_strategy::ComputeLegalSlotNode>("ComputeLegalSlot", node);
   factory.registerNodeType<oxebots_strategy::KickOnceNode>("KickOnce", node);
   factory.registerNodeType<oxebots_strategy::WaitBallInPlayCondition>("WaitBallInPlay");
+  factory.registerNodeType<oxebots_strategy::BallHeldTimerCondition>("BallHeldTimer");
+  factory.registerNodeType<oxebots_strategy::PenaltyKeeperLineNode>("PenaltyKeeperLine", node);
 
   // Nós da estratégia defensiva (defender_tree.xml)
   factory.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");

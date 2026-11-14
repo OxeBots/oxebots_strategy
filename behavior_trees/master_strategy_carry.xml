@@ -33,7 +33,28 @@
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
         </Fallback>
-        <SubTree ID="PenaltyTree" _autoremap="true" />
+        <SubTree ID="PreparePenaltyOurTree" _autoremap="true" />
+      </ReactiveSequence>
+
+      <!-- BOLA PARADA DO ADVERSÁRIO: PÊNALTI DELES (Amarelo 7, Azul 6) -->
+      <ReactiveSequence name="TheirPenaltyBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
+        </Fallback>
+        <SubTree ID="PreparePenaltyTheirTree" _autoremap="true" />
+      </ReactiveSequence>
+
+      <!-- EXECUÇÃO DO PÊNALTI APÓS NORMAL_START (fase PENALTY) -->
+      <ReactiveSequence name="PenaltyExecuteBranch">
+        <CheckGameState phase="PENALTY"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PenaltyExecuteOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PenaltyDefendTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <!-- NOSSAS FALTAS / LATERAIS / ESCANTEIOS (unificadas E07) -->
@@ -53,9 +74,6 @@
           <!-- Kick-Off deles -->
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
-          <!-- Pênalti deles -->
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
           <!-- Falta deles (Direta Amarelo 8, Direta Azul 9) -->
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="9"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="8"/></Sequence>
@@ -68,7 +86,7 @@
 
       <!-- JOGO ROLANDO -->
       <ReactiveSequence name="GoalkeeperRole">
-        <IsRobotId robot_id="0" />
+        <HasRole role="goalkeeper" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 
