@@ -6,13 +6,13 @@
 // (halt das folhas interrompidas) e a independência de cor e de lado.
 //
 // Cenários do Cap. 23 cobertos aqui, no nível da árvore: SC-01, SC-02, SC-03 (ramo e limite
-// pedido), SC-04, SC-05, SC-06, SC-07, SC-08, SC-09, SC-10, SC-11, SC-13, SC-14, SC-16 e SC-17.
-// A velocidade medida em /robot_commands (SC-02/03) é do T06 e do T08.
+// pedido), SC-04, SC-05, SC-06, SC-07, SC-08, SC-09, SC-10, SC-11, SC-13, SC-14, SC-15, SC-16,
+// SC-17, SC-23, SC-24 e SC-25. A velocidade medida em /robot_commands (SC-02/03) é do T06 e do T08.
 //
-// Ramos ainda provisórios (Halt "not_implemented"): RunBranch e o ball placement nosso. Os testes os
-// FIXAM como "para com segurança": quando A06 ou E04 trocarem o XML, eles falham de propósito e devem
-// ser substituídos pelo teste do comportamento real (SC-15/16/17 em RUN, SC-12). O pênalti (E06) já
-// é real e tem os testes de SC-09 e SC-10 abaixo.
+// Ramo ainda provisório (Halt "ball_placement_our_not_implemented"): o ball placement nosso (E04).
+// O teste o FIXA como "para com segurança": quando o E04 trocar o XML, ele falha de propósito e
+// deve ser substituído pelo teste do comportamento real (SC-12). O pênalti (E06) e o jogo corrido
+// (A06, NormalPlayTree em RunBranch) já são reais e têm seus testes abaixo.
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -317,7 +317,9 @@ INSTANTIATE_TEST_SUITE_P(
     Origin{"PreparePenaltyOursKicker", kPreparePenalty, true, "kicker"},
     Origin{"PreparePenaltyTheirsGoalkeeper", kPreparePenalty, false, "goalkeeper"},
     Origin{"PenaltyOursKicker", kPenalty, true, "kicker"},
-    Origin{"PenaltyTheirsOther", kPenalty, false, "defender"}),
+    Origin{"PenaltyTheirsOther", kPenalty, false, "defender"},
+    Origin{"RunAttacker", kRun, false, "attacker"},
+    Origin{"RunGoalkeeper", kRun, false, "goalkeeper"}),
   [](const ::testing::TestParamInfo<Origin> & info) {return std::string(info.param.name);});
 
 // ============================================================================
@@ -383,7 +385,8 @@ TEST_F(MasterTreeTest, StopHaltsTheOldGoalInsteadOfLettingItPersist)
 
 TEST_F(MasterTreeTest, StopThenForceStartResumesTheRolesAfterStop)
 {
-  // SC-04: STOP -> FORCE_START (fase RUN). O ramo de STOP é interrompido no mesmo tick.
+  // SC-04: STOP -> FORCE_START (fase RUN). O ramo de STOP é interrompido no mesmo tick e cada
+  // papel retoma sua subárvore em NormalPlayTree.
   goTo(kStop, false, "idle");
   ASSERT_EQ(tickBranch(), "StopBranch");
   ASSERT_TRUE(h->ran("HoldPosition"));
@@ -392,6 +395,21 @@ TEST_F(MasterTreeTest, StopThenForceStartResumesTheRolesAfterStop)
   EXPECT_EQ(tickBranch(), kRunBranch);
   EXPECT_EQ(h->stats("HoldPosition").halts, 1);
   EXPECT_FALSE(h->ran("HoldPosition"));
+  EXPECT_TRUE(h->ran("Halt:idle"));
+
+  goTo(kRun, false, "attacker");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("UpdateBallPosition"));
+  EXPECT_TRUE(h->ran("CalculateInterception"));
+  EXPECT_TRUE(h->ran("GoToPoint"));
+
+  goTo(kRun, false, "defender");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("ShadowBall"));
+
+  goTo(kRun, false, "goalkeeper");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("GoalLineDefend"));
 }
 
 // ============================================================================
@@ -556,6 +574,10 @@ TEST_F(MasterTreeTest, KickoffAndFreeKickTreesDoNotDependOnColorOrSide)
     {"penalty_exec_our_kicker", kPenalty, true, "kicker"},
     {"penalty_exec_their_goalkeeper", kPenalty, false, "goalkeeper"},
     {"penalty_exec_their_other", kPenalty, false, "defender"},
+    {"run_goalkeeper", kRun, false, "goalkeeper"},
+    {"run_attacker", kRun, false, "attacker"},
+    {"run_defender", kRun, false, "defender"},
+    {"run_idle", kRun, false, "idle"},
   };
 
   std::map<std::string, std::string> baseline;
@@ -697,7 +719,7 @@ TEST_F(MasterTreeTest, WithoutGoalkeeperRoleNobodyRunsTheGoalkeeperLogic)
   } phases[] = {
     {kStop, false}, {kPrepareKickoff, true}, {kPrepareKickoff, false}, {kKickoff, true},
     {kKickoff, false}, {kFreeKick, true}, {kFreeKick, false}, {kPreparePenalty, true},
-    {kPreparePenalty, false}, {kPenalty, true}, {kPenalty, false}};
+    {kPreparePenalty, false}, {kPenalty, true}, {kPenalty, false}, {kRun, false}, {kRun, true}};
   for (const auto & p : phases) {
     for (const char * role : {"attacker", "defender", "idle"}) {
       reset();
@@ -804,20 +826,118 @@ TEST_F(MasterTreeTest, PenaltyTheirsOtherRobotsHoldPositionAndNeverKick)
 }
 
 // ============================================================================
-// Ramo provisório: fixado como "para com segurança" até o A06
+// Ramo 10: jogo corrido — NormalPlayTree em RunBranch (A06: SC-15, SC-16, SC-23, SC-24, SC-25)
 // ============================================================================
 
-TEST_F(MasterTreeTest, RunBranchIsStillAnExplicitSafeHalt)
+TEST_F(MasterTreeTest, RunBranchDispatchesGoalkeeperAttackerDefenderAndIdle)
 {
-  // Substituir ao implementar o A06 (NormalPlayTree: SC-15/16/17 em RUN).
+  // Goleiro: defesa de linha por padrão; na área faz LateralClear e, se passar de 8s (SC-25),
+  // aciona o afastamento de emergência (Goalkeeper com max_hold_s="0.01").
+  goTo(kRun, false, "goalkeeper");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("UpdateBallPosition"));
+  EXPECT_TRUE(h->ran("GoalLineDefend"));
+  EXPECT_FALSE(h->ran("Halt"));
+
+  h->setStatus("IsBallInArea", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), kRunBranch);
+  EXPECT_TRUE(h->ran("LateralClear"));
+  EXPECT_EQ(h->stats("GoalLineDefend").halts, 1);
+
+  h->setStatus("BallHeldTimer", NodeStatus::FAILURE);  // > 8s na área própria (SC-25)
+  h->tick();
+  EXPECT_EQ(h->branch(), kRunBranch);
+  EXPECT_TRUE(h->ran("Goalkeeper"));
+  EXPECT_EQ(h->rawPort("Goalkeeper", "max_hold_s"), "0.01");
+  EXPECT_EQ(h->rawPort("Goalkeeper", "kick_speed"), "3.0");
+  EXPECT_EQ(h->stats("LateralClear").halts, 1);
+
+  // Atacante: persegue o ponto seguro de interceptação e, quando alcança a bola no campo
+  // adversário, chuta com KickBall limitado a 3.0 m/s (SC-24).
+  reset();
+  goTo(kRun, false, "attacker");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("UpdateBallPosition"));
+  EXPECT_TRUE(h->ran("CalculateInterception"));
+  EXPECT_TRUE(h->ran("GoToPoint"));
+  EXPECT_EQ(h->rawPort("GoToPoint", "x"), "{int_pk_safe_x}");
+
+  h->setStatus("GoToPoint", NodeStatus::SUCCESS);
+  h->setStatus("IsBallClose", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), kRunBranch);
+  EXPECT_TRUE(h->ran("KickBall"));
+  EXPECT_EQ(h->rawPort("KickBall", "kick_speed"), "3.0");
+
+  // Defensor: cobre o gol com ShadowBall (ou marca o oponente com posse).
+  reset();
+  goTo(kRun, false, "defender");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("ShadowBall"));
+  EXPECT_EQ(h->rawPort("ShadowBall", "ratio"), "0.35");
+
+  h->setStatus("IsOpponentControllingBall", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), kRunBranch);
+  EXPECT_TRUE(h->ran("MarkOpponent"));
+  EXPECT_FALSE(h->ran("ShadowBall"));
+
+  // Sem papel (idle ou retirado por cartão amarelo): fica em Halt(reason="idle").
+  reset();
   for (const bool favored : {true, false}) {
-    reset();
-    goTo(kRun, favored, "kicker");
-    h->tick();
-    EXPECT_EQ(h->branch(), kRunBranch) << "favored " << favored;
-    EXPECT_TRUE(h->ran("Halt:not_implemented")) << "favored " << favored;
+    goTo(kRun, favored, "idle");
+    EXPECT_EQ(tickBranch(), kRunBranch) << "favored " << favored;
+    EXPECT_TRUE(h->ran("Halt:idle")) << "favored " << favored;
     EXPECT_TRUE(h->runningLeaves().empty()) << "favored " << favored;
   }
+}
+
+TEST_F(MasterTreeTest, RunBranchRoleSwitchHaltsTheOldRoleInTheSameTick)
+{
+  // SC-15 / SC-16 em RUN: trocar o papel na blackboard interrompe a subárvore anterior no tick.
+  goTo(kRun, false, "attacker");
+  ASSERT_EQ(tickBranch(), kRunBranch);
+  ASSERT_TRUE(h->ran("GoToPoint"));
+  ASSERT_EQ(h->stats("GoToPoint").starts, 1);
+  ASSERT_EQ(h->stats("GoToPoint").halts, 0);
+
+  useRole("defender");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_EQ(h->stats("GoToPoint").halts, 1);
+  EXPECT_FALSE(h->ran("GoToPoint"));
+  EXPECT_TRUE(h->ran("ShadowBall"));
+
+  useRole("attacker");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_EQ(h->stats("GoToPoint").starts, 2);
+  EXPECT_TRUE(h->ran("GoToPoint"));
+
+  useRole("idle");
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_EQ(h->stats("GoToPoint").halts, 2);
+  EXPECT_FALSE(h->ran("GoToPoint"));
+  EXPECT_TRUE(h->ran("Halt:idle"));
+  EXPECT_TRUE(h->runningLeaves().empty());
+}
+
+TEST_F(MasterTreeTest, RunBranchLoneAttackerCoversGoalInOurHalfAndAttacksInTheirs)
+{
+  // SC-23 (P03) integrado na MainTreeEL em fase RUN: sem defensor e com bola no nosso campo,
+  // o atacante cobre o gol; quando a bola vai para o campo adversário, retoma o ataque.
+  goTo(kRun, false, "attacker");
+  s().has_defender = false;
+  h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("ShadowBall"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
+
+  h->setStatus("IsBallInOurHalf", NodeStatus::FAILURE);
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_FALSE(h->ran("ShadowBall"));
+  EXPECT_TRUE(h->ran("UpdateBallPosition"));
+  EXPECT_TRUE(h->ran("CalculateInterception"));
+  EXPECT_TRUE(h->ran("GoToPoint"));
 }
 
 // ============================================================================
@@ -830,11 +950,13 @@ TEST_F(MasterTreeTest, BranchGuardIsReevaluatedEveryTick)
   goTo(kKickoff, true, "kicker");
   ASSERT_EQ(tickBranch(), "KickoffBranch");
   ASSERT_TRUE(h->ran("GoToPoint"));
+  ASSERT_EQ(h->rawPort("GoToPoint", "x"), "{pkx}");
 
   s().phase = kRun;
   EXPECT_EQ(tickBranch(), kRunBranch);
-  EXPECT_FALSE(h->ran("GoToPoint"));  // nem um tick a mais do kick-off
-  EXPECT_EQ(h->stats("GoToPoint").halts, 1);
+  EXPECT_EQ(h->stats("GoToPoint").halts, 1);   // o GoToPoint do kick-off recebeu halt no mesmo tick
+  EXPECT_EQ(h->stats("GoToPoint").starts, 2);  // e o NormalPlayTree iniciou o GoToPoint do atacante
+  EXPECT_EQ(h->rawPort("GoToPoint", "x"), "{int_pk_safe_x}");
 }
 
 TEST_F(MasterTreeTest, SteadyStateDoesNotRestartTheLeaf)

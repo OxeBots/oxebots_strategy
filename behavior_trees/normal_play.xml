@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!--
+  S16 — NormalPlayTree (Capítulos 16 e 19, tarefa A06).
+  Despacha o comportamento de jogo corrido (fase RUN) por papel exclusivo (HasRole):
+    - goalkeeper -> GoalkeeperTree (K01)
+    - attacker   -> AttackerTree (E09 + cobertura de gol sozinho do P03)
+    - defender   -> DefenderTree (E10)
+    - sem papel (idle / robô retirado) -> Halt reason="idle"
+-->
+<root BTCPP_format="4">
+  <BehaviorTree ID="NormalPlayTree">
+    <ReactiveFallback name="Roles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
+      <ReactiveSequence name="AttackerRole">
+        <HasRole role="attacker"/>
+        <SubTree ID="AttackerTree" _autoremap="true"/>
+      </ReactiveSequence>
+      <ReactiveSequence name="DefenderRole">
+        <HasRole role="defender"/>
+        <SubTree ID="DefenderTree" _autoremap="true"/>
+      </ReactiveSequence>
+      <Halt reason="idle"/>
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

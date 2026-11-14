@@ -99,9 +99,10 @@
         </ReactiveFallback>
       </ReactiveSequence>
 
+      <!-- 10. JOGO CORRIDO (FORCE_START / Run) -->
       <ReactiveSequence name="RunBranch">
         <CheckGameState phase="RUN"/>
-        <Halt reason="not_implemented"/>
+        <SubTree ID="NormalPlayTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <!-- Estado desconhecido: seguro por padrão -->

@@ -21,6 +21,7 @@ TREES = Path(__file__).resolve().parent.parent / 'behavior_trees'
 PRODUCTION = [
     'master_strategy_carry.xml',
     'master_strategy_el.xml',
+    'normal_play.xml',
     'attacker_tree.xml',
     'defender_tree.xml',
     'goalkeeper_tree.xml',
@@ -64,14 +65,15 @@ def test_chutes_nao_passam_de_tres_metros_por_segundo(name):
                     f'{name}: <{tag}> kick_speed={value} acima de {MAX_KICK_SPEED} m/s (R-25).')
 
 
-def test_guardas_de_ramo_do_mestre_sao_reativas():
-    root = load('master_strategy_carry.xml')
+@pytest.mark.parametrize('master_name', ['master_strategy_carry.xml', 'master_strategy_el.xml'])
+def test_guardas_de_ramo_do_mestre_sao_reativas(master_name):
+    root = load(master_name)
     branches = [el for el in root.iter() if el.attrib.get('name', '').endswith('Branch')]
-    assert branches, 'nenhum ramo "*Branch" encontrado no mestre; o teste ficou desatualizado'
+    assert branches, f'nenhum ramo "*Branch" encontrado em {master_name}'
     for el in branches:
         assert el.tag == 'ReactiveSequence', (
-            f'ramo "{el.attrib["name"]}" é <{el.tag}>; guardas de ramo devem ser ReactiveSequence '
-            '(uma Sequence comum não reavalia a guarda com o filho em RUNNING).')
+            f'{master_name}: ramo "{el.attrib["name"]}" é <{el.tag}>; guardas de ramo devem ser '
+            'ReactiveSequence (uma Sequence comum não reavalia a guarda com o filho em RUNNING).')
 
 
 def test_atacante_no_mestre_usa_hasrole_e_a_subarvore():
@@ -237,8 +239,35 @@ def test_penalty_trees_estrutura_e_papeis():
     assert list(def_their.iter('HoldPosition'))
 
 
+def test_normal_play_tree_estrutura_e_ligacao_no_mestre_el():
+    # A06: RunBranch da MainTreeEL chama NormalPlayTree, que despacha por papel com HasRole.
+    normal = load('normal_play.xml').find("./BehaviorTree[@ID='NormalPlayTree']")
+    assert normal is not None, 'NormalPlayTree ausente em normal_play.xml'
 
+    expected_roles = [
+        ('GoalkeeperRole', 'goalkeeper', 'GoalkeeperTree'),
+        ('AttackerRole', 'attacker', 'AttackerTree'),
+        ('DefenderRole', 'defender', 'DefenderTree'),
+    ]
+    for branch_name, role_name, subtree_id in expected_roles:
+        role_branch = next(
+            (el for el in normal.iter('ReactiveSequence') if el.attrib.get('name') == branch_name),
+            None)
+        assert role_branch is not None, f'ramo {branch_name} ausente em NormalPlayTree'
+        children = list(role_branch)
+        assert children[0].tag == 'HasRole' and children[0].attrib.get('role') == role_name
+        assert children[1].tag == 'SubTree' and children[1].attrib.get('ID') == subtree_id
+        assert children[1].attrib.get('_autoremap') == 'true'
 
+    halts = list(normal.iter('Halt'))
+    assert len(halts) == 1 and halts[0].attrib.get('reason') == 'idle'
+
+    master = load('master_strategy_el.xml')
+    run_branch = next(
+        el for el in master.iter('ReactiveSequence') if el.attrib.get('name') == 'RunBranch')
+    run_subtrees = [el.attrib.get('ID') for el in run_branch.iter('SubTree')]
+    assert run_subtrees == ['NormalPlayTree']
+    assert not list(run_branch.iter('Halt')), 'RunBranch não deve mais ter Halt provisório'
 
 
 def canonical(el):
