@@ -500,9 +500,9 @@ bola em FAILURE).
 - O `refresh()` **nunca** grava `role="kicker"`: o cobrador é atacante/defensor com `is_kicker` ligado.
 - O observador de ramo do harness repete o `attachBranchObserver()` do `strategy_node.cpp`. Se aquele
   critério mudar, mude o harness também.
-- `PreparePenalty`, `Penalty`, `RunBranch` e o ball placement nosso ainda são `Halt` provisório e
-  estão **fixados** como tal. Quando E06, A06 e E04 trocarem o XML, o teste falha de propósito: troque-o
-  pelo teste do comportamento real (SC-09, SC-10, SC-12, SC-15/16/17 em RUN).
+- O `RunBranch` e o ball placement nosso ainda são `Halt` provisório e estão **fixados** como tal.
+  Quando A06 e E04 trocarem o XML, o teste falha de propósito: troque-o pelo teste do comportamento
+  real (SC-12, SC-15/16/17 em RUN). O pênalti (E06) já é real e tem testes de SC-09 e SC-10.
 
 ### `test_halt_preempt` (T06)
 `launch_testing` com `referee_state_node`, `movement_calculation_node` (robôs 0 e 1) e `strategy_node`

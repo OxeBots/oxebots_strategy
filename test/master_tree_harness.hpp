@@ -60,7 +60,7 @@ inline const std::set<std::string> & runningLeafIds()
   static const std::set<std::string> ids{
     "GoToPoint", "HoldPosition", "Goalkeeper", "KickOnce", "KickBall", "AlignToBall",
     "GoalLineDefend", "LateralClear", "PositionBisector", "SmotherSave", "GoToClamped",
-    "PrecisionKick"};
+    "PrecisionKick", "PenaltyKeeperLine"};
   return ids;
 }
 
@@ -68,7 +68,9 @@ inline BT::NodeStatus defaultStatus(const std::string & id)
 {
   static const std::set<std::string> failing{
     "IsBallClose", "IsBallInArea", "IsBallClosest", "IsBallInOurHalf", "IsBallInOpponentField",
-    "IsOpponentControllingBall"};
+    "IsOpponentControllingBall",
+    // A bola ainda não entrou em jogo (não se moveu 50 mm nem passaram 10 s).
+    "WaitBallInPlay"};
   if (runningLeafIds().count(id) > 0) {
     return BT::NodeStatus::RUNNING;
   }
