@@ -257,3 +257,19 @@ def test_arvore_de_teste_do_halt_copia_safetyguard_e_haltbranch_da_mestre():
         assert canonical(in_master) == canonical(in_test), (
             f'"{name}" de test_halt_preempt.xml diverge de master_strategy_el.xml; '
             'atualize a árvore de teste do T06.')
+
+
+def test_falta_do_adversario_na_carry_decide_pela_fase_e_nao_pelo_comando():
+    # O GC mantém o comando DIRECT_FREE_* depois que a bola entra em jogo (H-01). Se este ramo
+    # voltar a checar o comando bruto (8/9), o time que sofreu a falta fica preso na barreira, e o
+    # goleiro recuando da bola, até o próximo STOP.
+    root = load('master_strategy_carry.xml')
+    branch = next(el for el in root.iter('ReactiveSequence')
+                  if el.attrib.get('name') == 'OpponentSetPieceBranch')
+    raw_commands = [el.attrib.get('expected') for el in branch.iter('CheckGCCommand')]
+    assert '8' not in raw_commands and '9' not in raw_commands, (
+        'OpponentSetPieceBranch checa o comando bruto de falta (8/9); use CheckGameState '
+        'FREE_KICK e Inverter(WeAreFavored), que respeitam a fase.')
+    phases = [el.attrib.get('phase') for el in branch.iter('CheckGameState')]
+    assert 'FREE_KICK' in phases
+    assert list(branch.iter('WeAreFavored')), 'falta sem checar quem é o favorecido'

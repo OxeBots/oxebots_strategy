@@ -57,6 +57,7 @@ struct Scenario
   std::string role{"idle"};  // goalkeeper | attacker | defender | idle
   bool is_kicker{false};
   uint32_t kicker_id{999};  // NO_ROBOT
+  bool has_defender{true};  // P03: falso com só goleiro + atacante em campo
 
   // --- Cor e lado ---
   bool is_yellow{false};
@@ -94,6 +95,7 @@ struct Scenario
     bb.set("role", role);
     bb.set("is_kicker", is_kicker);
     bb.set("kicker_id", kicker_id);
+    bb.set("has_defender", has_defender);
 
     bb.set("is_yellow", is_yellow);
     bb.set("side_sign", side_sign);
@@ -133,6 +135,7 @@ inline const std::map<std::string, std::type_index> & expectedKeyTypes()
     {"role", typeid(std::string)},
     {"is_kicker", typeid(bool)},
     {"kicker_id", typeid(uint32_t)},
+    {"has_defender", typeid(bool)},
     {"is_yellow", typeid(bool)},
     {"side_sign", typeid(int)},
     {"field_length", typeid(double)},

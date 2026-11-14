@@ -13,66 +13,89 @@
      M02, passa pelo override e limita a 3 m/s, mas segue sendo folha legada das árvores antigas);
    - sem dados, UpdateBallPosition e CalculateInterception devolvem FAILURE com log (antes
      ficavam RUNNING mudos); o RetryUntilSuccessful repete no tick seguinte.
+
+  P03 — degradação (Capítulo 19): com só goleiro + atacante em campo (cartão amarelo ou robô perdido),
+  não há defensor (has_defender falso na blackboard). Enquanto a bola está no NOSSO campo, o atacante
+  cobre o gol como o defensor faria (marca o adversário com a bola, senão cobre o ângulo do gol); com a
+  bola no campo adversário ele ataca normalmente. Com defensor atribuído, o primeiro ramo nunca roda.
 -->
 <root BTCPP_format="4">
   <BehaviorTree ID="AttackerTree">
-    <RetryUntilSuccessful num_attempts="-1">
-      <ReactiveSequence name="AttackerLogicLoop">
-        <UpdateBallPosition robot_id="{robot_id}"
-                            ball_x="{ball_x}" ball_y="{ball_y}"
-                            pre_kick_x="{pkx}" pre_kick_y="{pky}"
-                            is_ready_to_kick="{is_ready}"
-                            goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+    <ReactiveFallback name="AttackerOrCoverGoal">
 
-        <CalculateInterception robot_id="{robot_id}"
-                               goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
-                               carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
-                               intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
-                               intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
-                               intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
-                               intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
-                               intercept_carry_x="{int_carry_x}" intercept_carry_y="{int_carry_y}"
-                               intercept_carry_face_x="{int_carry_face_x}" intercept_carry_face_y="{int_carry_face_y}"
-                               is_ready_to_kick="{is_ready_pred}" />
-
-        <ReactiveFallback name="AttackLogicActions">
-          <Sequence name="ChaseAndKick">
-            <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}"
-                       face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                       tolerance="120.0" ball_contact_threshold_mm="150.0" />
-
-            <ReactiveFallback name="ApproachAndKick">
-              <Sequence name="Shoot">
-                <Inverter>
-                  <IsBallInOurHalf ball_x="{ball_x}" />
-                </Inverter>
-                <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
-                <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
-              </Sequence>
-
-              <ReactiveSequence name="Realign">
-                <Inverter>
-                  <IsBallInOurHalf ball_x="{ball_x}" />
-                </Inverter>
-                <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
-                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                           tolerance="0.0" planner="straight_line" />
-              </ReactiveSequence>
-
-              <ReactiveSequence name="Carry">
-                <IsBallInOurHalf ball_x="{ball_x}" />
-                <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
-                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                           tolerance="0.0" planner="straight_line" ball_side_check="true" />
-              </ReactiveSequence>
-            </ReactiveFallback>
-
-            <Delay delay_msec="600">
-              <AlwaysSuccess/>
-            </Delay>
-          </Sequence>
+      <ReactiveSequence name="CoverGoalWhenAlone">
+        <Inverter>
+          <IsValueTrue value="{has_defender}"/>
+        </Inverter>
+        <IsBallInOurHalf ball_x="{ball_x}"/>
+        <ReactiveFallback name="CoverGoalActions">
+          <ReactiveSequence name="MarkOpponentWithBall">
+            <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
+            <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}"/>
+          </ReactiveSequence>
+          <ShadowBall ball="{ball}" ball_vel="{ball_vel}" my_goal_x="{my_goal_x}" ratio="0.35"/>
         </ReactiveFallback>
       </ReactiveSequence>
-    </RetryUntilSuccessful>
+
+        <RetryUntilSuccessful num_attempts="-1">
+          <ReactiveSequence name="AttackerLogicLoop">
+            <UpdateBallPosition robot_id="{robot_id}"
+                                ball_x="{ball_x}" ball_y="{ball_y}"
+                                pre_kick_x="{pkx}" pre_kick_y="{pky}"
+                                is_ready_to_kick="{is_ready}"
+                                goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}" />
+
+            <CalculateInterception robot_id="{robot_id}"
+                                   goal_x="{opponent_goal_x}" goal_y="{opponent_goal_y}"
+                                   carry_distance_mm="-120.0" carry_face_lookahead_mm="400.0"
+                                   intercept_x="{int_ball_x}" intercept_y="{int_ball_y}"
+                                   intercept_pk_x="{int_pk_x}" intercept_pk_y="{int_pk_y}"
+                                   intercept_pk_safe_x="{int_pk_safe_x}" intercept_pk_safe_y="{int_pk_safe_y}"
+                                   intercept_capture_x="{int_cap_x}" intercept_capture_y="{int_cap_y}"
+                                   intercept_carry_x="{int_carry_x}" intercept_carry_y="{int_carry_y}"
+                                   intercept_carry_face_x="{int_carry_face_x}" intercept_carry_face_y="{int_carry_face_y}"
+                                   is_ready_to_kick="{is_ready_pred}" />
+
+            <ReactiveFallback name="AttackLogicActions">
+              <Sequence name="ChaseAndKick">
+                <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}"
+                           face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                           tolerance="120.0" ball_contact_threshold_mm="150.0" />
+
+                <ReactiveFallback name="ApproachAndKick">
+                  <Sequence name="Shoot">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                    <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
+                  </Sequence>
+
+                  <ReactiveSequence name="Realign">
+                    <Inverter>
+                      <IsBallInOurHalf ball_x="{ball_x}" />
+                    </Inverter>
+                    <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" />
+                  </ReactiveSequence>
+
+                  <ReactiveSequence name="Carry">
+                    <IsBallInOurHalf ball_x="{ball_x}" />
+                    <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
+                  </ReactiveSequence>
+                </ReactiveFallback>
+
+                <Delay delay_msec="600">
+                  <AlwaysSuccess/>
+                </Delay>
+              </Sequence>
+            </ReactiveFallback>
+          </ReactiveSequence>
+        </RetryUntilSuccessful>
+
+    </ReactiveFallback>
   </BehaviorTree>
 </root>

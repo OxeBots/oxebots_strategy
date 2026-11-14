@@ -281,6 +281,9 @@ private:
     blackboard_->set("is_attacker", false);
     blackboard_->set("is_defender", false);
     blackboard_->set("is_kicker", false);
+    // P03: verdadeiro enquanto há um defensor atribuído. Começa verdadeiro (antes do primeiro
+    // RoleAssignment não se assume time reduzido); fica falso com só goleiro + atacante.
+    blackboard_->set("has_defender", true);
     blackboard_->set("role", std::string("idle"));
     blackboard_->set("role_epoch", 0u);
     blackboard_->set("active_ids", std::vector<uint32_t>{});
@@ -528,6 +531,8 @@ public:
       blackboard_->set("is_attacker", (my_id == roles->attacker_id));
       blackboard_->set("is_defender", (my_id == roles->defender_id));
       blackboard_->set("is_kicker", (my_id == roles->kicker_id));
+      blackboard_->set(
+        "has_defender", roles->defender_id != oxebots_interfaces::msg::RoleAssignment::NO_ROBOT);
     }
 
     // 5. GameData (robôs, bola, velocidades e idades)

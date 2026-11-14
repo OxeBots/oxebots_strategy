@@ -5,7 +5,7 @@
 // os manifestos (ID, tipo, portas) e, na fábrica da árvore, registra para cada folha um falso com o
 // MESMO manifesto. Assim o XML é validado contra as portas reais e uma folha nova no node_registry.cpp
 // entra no harness sozinha. Ficam REAIS as condições que só leem a blackboard (CheckGameState,
-// WeAreFavored, IsDataFresh, HasRole, IsCornerKick, IsThrowIn): são elas que escolhem o ramo.
+// WeAreFavored, IsDataFresh, HasRole, IsCornerKick, IsThrowIn, IsValueTrue): são elas que escolhem o ramo.
 //
 // O observador de ramo repete o StrategyNode::attachBranchObserver() (strategy_node.cpp) de propósito:
 // extraí-lo mexeria num arquivo compartilhado. Se aquele critério mudar, mude aqui também.
@@ -296,7 +296,8 @@ private:
   static bool isRealCondition(const std::string & id)
   {
     static const std::set<std::string> ids{
-      "CheckGameState", "WeAreFavored", "IsDataFresh", "HasRole", "IsCornerKick", "IsThrowIn"};
+      "CheckGameState", "WeAreFavored", "IsDataFresh", "HasRole", "IsCornerKick", "IsThrowIn",
+      "IsValueTrue"};
     return ids.count(id) > 0;
   }
 
@@ -308,6 +309,18 @@ private:
     factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
     factory_.registerNodeType<oxebots_strategy::IsCornerKickCondition>("IsCornerKick");
     factory_.registerNodeType<oxebots_strategy::IsThrowInCondition>("IsThrowIn");
+    // Réplica da lambda registrada em node_registry.cpp: lê a porta booleana (que costuma apontar
+    // para a blackboard, ex.: value="{has_defender}"). Se aquela lambda mudar, mude esta também.
+    factory_.registerSimpleCondition(
+      "IsValueTrue",
+      [](BT::TreeNode & tree_node) {
+        bool value = false;
+        if (tree_node.getInput("value", value)) {
+          return value ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+        }
+        return BT::NodeStatus::FAILURE;
+      },
+      {BT::InputPort<bool>("value", "Valor booleano a avaliar")});
   }
 
   void attachBranchObserver()

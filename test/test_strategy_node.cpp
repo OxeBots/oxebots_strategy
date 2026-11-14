@@ -272,6 +272,41 @@ TEST_F(StrategyNodeBlackboardTest, P02_RoleAssignmentUpdatesEpochKickerAndActive
     EXPECT_TRUE(is_kick);
 }
 
+// P03: has_defender diz às árvores se há defensor atribuído (falso com só goleiro + atacante).
+TEST_F(StrategyNodeBlackboardTest, P03_HasDefenderFollowsTheRoleAssignment)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    bool has_defender = false;
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_TRUE(has_defender);  // antes do primeiro RoleAssignment não se assume time reduzido
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = RoleAssignment::NO_ROBOT;  // cartão amarelo: só goleiro + atacante
+    roles->active_ids = {0, 1};
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_FALSE(has_defender);
+
+    roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->active_ids = {0, 1, 2};
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_TRUE(has_defender);
+}
+
 // ============================================================================
 // 5. Observabilidade de Transição de Ramo (/strategy/active_branch) — A04
 // ============================================================================

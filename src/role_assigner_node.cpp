@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <map>
+#include <set>
 #include <vector>
 
 class RoleAssignerNode : public rclcpp::Node
@@ -209,6 +210,21 @@ private:
       return costs[a] < costs[b];
     });
 
+    // P03: degradação por limite de robôs em campo (cartão amarelo ou vermelho: max_allowed_bots do
+    // GC). O robô retirado sai de active_ids e dos papéis (o strategy_node o vê como "idle"), e fica
+    // parado até um humano tirá-lo do campo; quando some da visão o limite passa a ser cumprido.
+    // 0 = o GC não informou o limite (sem GameState, ou GameState sem o campo): sem retirada.
+    const uint32_t max_allowed = last_game_state_ ? last_game_state_->max_allowed_bots : 0u;
+    const std::set<uint32_t> retired = selectRetiredRobots(
+      eligible_ids, active_ids.size(), max_allowed);
+    if (!retired.empty()) {
+      const auto is_retired = [&retired](uint32_t id) {return retired.count(id) > 0;};
+      eligible_ids.erase(
+        std::remove_if(eligible_ids.begin(), eligible_ids.end(), is_retired), eligible_ids.end());
+      active_ids.erase(
+        std::remove_if(active_ids.begin(), active_ids.end(), is_retired), active_ids.end());
+    }
+
     uint32_t attacker_id = kNoRobot;
     uint32_t defender_id = kNoRobot;
     uint32_t kicker_id = kNoRobot;
@@ -316,7 +332,54 @@ private:
       out_msg.defender_id, out_msg.kicker_id, out_msg.active_ids.size());
   }
 
+  // P03: escolhe quais robôs retirar quando há mais robôs em campo que max_allowed_bots.
+  //  - line_by_cost: robôs de linha visíveis (sem o goleiro), do melhor para o pior custo;
+  //  - o goleiro nunca é retirado: com max_allowed >= 1 sempre sobra robô de linha para retirar
+  //    (os de linha são visible_count - 1 ou mais, e se retira no máximo visible_count - 1);
+  //  - a escolha é pegajosa: quem já estava retirado continua sendo o primeiro a sair, para a
+  //    retirada não trocar de robô enquanto o humano o tira do campo.
+  std::set<uint32_t> selectRetiredRobots(
+    const std::vector<uint32_t> & line_by_cost, size_t visible_count, uint32_t max_allowed)
+  {
+    std::set<uint32_t> retire;
+    if (max_allowed > 0 && visible_count > max_allowed) {
+      size_t to_retire = visible_count - max_allowed;
+
+      std::vector<uint32_t> order;
+      for (auto it = line_by_cost.rbegin(); it != line_by_cost.rend(); ++it) {
+        if (retired_ids_.count(*it) > 0) {
+          order.push_back(*it);
+        }
+      }
+      for (auto it = line_by_cost.rbegin(); it != line_by_cost.rend(); ++it) {
+        if (retired_ids_.count(*it) == 0) {
+          order.push_back(*it);
+        }
+      }
+      for (size_t i = 0; i < order.size() && retire.size() < to_retire; ++i) {
+        retire.insert(order[i]);
+      }
+    }
+
+    if (retire != retired_ids_) {
+      if (retire.empty()) {
+        RCLCPP_INFO(this->get_logger(),
+          "Limite de robôs cumprido (max_allowed_bots=%u, em campo=%zu): nenhum robô retirado.",
+          max_allowed, visible_count);
+      } else {
+        for (uint32_t id : retire) {
+          RCLCPP_WARN(this->get_logger(),
+            "max_allowed_bots=%u e há %zu robôs em campo: RETIRAR o robô %u do campo "
+            "(fica parado, papel idle).", max_allowed, visible_count, id);
+        }
+      }
+      retired_ids_ = retire;
+    }
+    return retire;
+  }
+
   int goalkeeper_id_;
+  std::set<uint32_t> retired_ids_;
   uint32_t locked_kicker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
   uint32_t epoch_ = 0;
   oxebots_interfaces::msg::RoleAssignment last_published_roles_;

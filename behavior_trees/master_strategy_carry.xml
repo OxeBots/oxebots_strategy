@@ -74,9 +74,13 @@
           <!-- Kick-Off deles -->
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
-          <!-- Falta deles (Direta Amarelo 8, Direta Azul 9) -->
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="9"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="8"/></Sequence>
+          <!-- Falta deles: pela FASE e não pelo comando bruto. O GC mantém o comando DIRECT_FREE_* depois
+               que a bola entra em jogo; checar 8/9 deixava o time que sofreu a falta preso na barreira
+               (e o goleiro recuando da bola) até o próximo STOP. Em RUN a fase deixa de ser FREE_KICK. -->
+          <Sequence>
+            <CheckGameState phase="FREE_KICK"/>
+            <Inverter><WeAreFavored/></Inverter>
+          </Sequence>
           <!-- Fallback herdado do sistema anterior -->
           <IsValueTrue value="{is_opponent_foul}"/>
         </Fallback>
