@@ -396,3 +396,79 @@ TEST_F(RoleAssignerNodeTest, P03_CardDuringOurKickoffRelocksTheKickerWhenTheLock
   EXPECT_EQ(roles.defender_id, RoleAssignment::NO_ROBOT);
   ASSERT_EQ(roles.active_ids.size(), 2u);
 }
+
+// ============================================================================
+// 6. Toque na bola troca papel de atacante imediatamente (ignora histereses)
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, ImmediateAttackerSwitchWhenBallTouchesPlayer)
+{
+  auto node = std::make_shared<RoleAssignerNode>();
+  node->processGameState(makeGameState(GameState::PHASE_RUN, 0));
+
+  auto gd = std::make_shared<GameData>();
+  gd->ball.x = 0.0f;
+  gd->ball.y = 0.0f;
+  gd->robots.allies = {
+    makeRobot(0, -2000.0f, 0.0f),
+    makeRobot(1, -200.0f, 0.0f),   // Atacante inicial
+    makeRobot(2, -1000.0f, 0.0f)   // Defensor inicial
+  };
+  node->processGameData(gd);
+  ASSERT_EQ(node->getLastPublishedRoles().attacker_id, 1u);
+  ASSERT_EQ(node->getLastPublishedRoles().defender_id, 2u);
+
+  // A bola bate/encosta no robô 2 (dist = 110 mm <= 160 mm) no mesmo instante (dentro de
+  // time_hysteresis = 2.0 s e com robô 1 ainda a 690 mm dentro do bônus de histerese 2.5):
+  // robô 2 deve virar atacante NA MESMA HORA.
+  gd->ball.x = -890.0f;
+  gd->ball.y = 0.0f;
+  node->processGameData(gd);
+
+  auto roles = node->getLastPublishedRoles();
+  EXPECT_EQ(roles.attacker_id, 2u);
+  EXPECT_EQ(roles.defender_id, 1u);
+
+  // Quando o novo atacante (robô 2) recua até o ponto de pré-chute (~400 mm atrás da bola),
+  // o papel NÃO deve oscilar de volta para o robô 1.
+  gd->robots.allies[2] = makeRobot(2, -1290.0f, 0.0f);  // dist = 400 mm da bola em (-890, 0)
+  node->processGameData(gd);
+  EXPECT_EQ(node->getLastPublishedRoles().attacker_id, 2u);
+  EXPECT_EQ(node->getLastPublishedRoles().defender_id, 1u);
+}
+
+// ============================================================================
+// 7. Pós-lateral / escanteio (FREE_KICK): quem não bateu vira atacante assim que bater
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, ThrowInAndCornerKickHandoverToNonKickerImmediatelyAfterKick)
+{
+  auto node = std::make_shared<RoleAssignerNode>();
+  node->processGameState(makeGameState(GameState::PHASE_FREE_KICK, 0, /*we_favored=*/true));
+
+  auto gd = std::make_shared<GameData>();
+  gd->ball.x = 0.0f;
+  gd->ball.y = 1300.0f;
+  gd->robots.allies = {
+    makeRobot(0, -2000.0f, 0.0f),   // Goleiro
+    makeRobot(1, 0.0f, 1420.0f),    // Cobrador do lateral (dist = 120 mm)
+    makeRobot(2, 600.0f, 300.0f)    // Recebedor posicionado no meio (dist ~ 1166 mm)
+  };
+  node->processGameData(gd);
+
+  auto roles_fk = node->getLastPublishedRoles();
+  ASSERT_EQ(roles_fk.kicker_id, 1u);
+  ASSERT_EQ(roles_fk.attacker_id, 1u);
+  ASSERT_EQ(roles_fk.defender_id, 2u);
+
+  // Assim que o robô 1 bate o lateral (bola se desloca >= 50 mm e/ou fase muda para RUN),
+  // mesmo com a bola ainda colada no robô 1 (dist ~ 180 mm) e longe do robô 2,
+  // o robô 2 (que não bateu) vira atacante na mesma hora para evitar recuo maluco.
+  gd->ball.x = 30.0f;
+  gd->ball.y = 1240.0f;
+  node->processGameState(makeGameState(GameState::PHASE_RUN, 0));
+  node->processGameData(gd);
+
+  auto roles_run = node->getLastPublishedRoles();
+  EXPECT_EQ(roles_run.kicker_id, RoleAssignment::NO_ROBOT);
+  EXPECT_EQ(roles_run.attacker_id, 2u);
+  EXPECT_EQ(roles_run.defender_id, 1u);
+}

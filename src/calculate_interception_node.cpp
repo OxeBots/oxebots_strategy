@@ -386,12 +386,13 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   // bola. Quando isso acontece, mira num waypoint deslocado lateralmente (perpendicular à linha
   // bola-gol, do lado em que o robô já está) longe o bastante pra forçar o D* a rodear. Assim que
   // o robô está seguramente do lado certo, o alvo volta a ser pk_x/y diretamente.
+  double ux_g = (dist_ball_goal > 10.0) ? (dx_g / dist_ball_goal) : 0.0;
+  double uy_g = (dist_ball_goal > 10.0) ? (dy_g / dist_ball_goal) : 0.0;
+  double dot_side = ux_g * (rx - intercept_x) + uy_g * (ry - intercept_y);
+  double perp_proj_robot = (-uy_g) * (rx - intercept_x) + ux_g * (ry - intercept_y);
   {
     // Projeção normalizada (em mm) do vetor (robô - bola) na direção "atrás da bola" (dx_g, dy_g):
     // dot_side < 0 significa que o robô está na frente da bola; > 80mm significa que já passou para trás.
-    double ux_g = (dist_ball_goal > 10.0) ? (dx_g / dist_ball_goal) : 0.0;
-    double uy_g = (dist_ball_goal > 10.0) ? (dy_g / dist_ball_goal) : 0.0;
-    double dot_side = ux_g * (rx - intercept_x) + uy_g * (ry - intercept_y);
     constexpr double kSafelyBehindMarginMm = 80.0; // histerese em mm reais: só desarma com folga real
     if (dot_side < 0.0) {
       swing_active_ = true;
@@ -402,7 +403,18 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
 
   double pk_safe_x = pk_x;
   double pk_safe_y = pk_y;
-  if (swing_active_ && dist_ball_goal > 10.0) {
+  if (!swing_active_ && !area_adjusted && dist_ball_goal > 10.0 &&
+      dot_side >= 100.0 && dot_side < kPreKickDistMm &&
+      std::abs(perp_proj_robot) <= 90.0)
+  {
+    // Se o robô já está alinhado atrás da bola (entre 100mm e 400mm) na linha bola->gol,
+    // projeta pk_safe na distância longitudinal atual para não forçar recuo até 400mm (pre-kick)
+    // quando já vem carregando a bola em movimento.
+    pk_safe_x = intercept_x + ux_g * dot_side;
+    pk_safe_y = intercept_y + uy_g * dot_side;
+    clamp_out_our_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);
+    clamp_out_opp_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);
+  } else if (swing_active_ && dist_ball_goal > 10.0) {
     if (ball_on_lateral) {
       // Na lateral da área: mantém o mesmo pk_x e apenas garante uma folga lateral suave por fora da bola
       // (em direção à lateral do campo), evitando saltos bruscos de coordenada ao desarmar swing_active_.
@@ -446,20 +458,6 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   setOutput("intercept_pk_safe_x", pk_safe_x);
   setOutput("intercept_pk_safe_y", pk_safe_y);
 
-  // --- Ponto de Captura: mesma linha gol->bola, mas bem perto da bola ---
-  // Usado como alvo do GoToPoint em vez do centro exato da bola (intercept_x/y), para que o
-  // robô termine a aproximação já alinhado, em vez de bater na bola de frente.
-  double cap_x = intercept_x;
-  double cap_y = intercept_y;
-  if (dist_ball_goal > 10.0) {
-    cap_x = intercept_x + (dx_g / dist_ball_goal) * kCaptureDistanceMm;
-    cap_y = intercept_y + (dy_g / dist_ball_goal) * kCaptureDistanceMm;
-    clamp_out_our_area(cap_x, cap_y, intercept_x, intercept_y);
-    clamp_out_opp_area(cap_x, cap_y, intercept_x, intercept_y);
-  }
-  setOutput("intercept_capture_x", cap_x);
-  setOutput("intercept_capture_y", cap_y);
-
   // --- Ponto de Carga e Ponto de Mira da Carga: usados só pela árvore de carregar a bola.
   // Base é a posição BRUTA da bola (bx/by), não intercept_x/y (predição balística) como
   // pk/capture acima: ao carregar, o robô já está em contato empurrando, então a pergunta certa é
@@ -493,6 +491,8 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     carry_face_x = bx - (dx_g_raw / dist_ball_goal_raw) * effective_face_lookahead;
     carry_face_y = by - (dy_g_raw / dist_ball_goal_raw) * effective_face_lookahead;
   }
+  setOutput("intercept_capture_x", carry_x);
+  setOutput("intercept_capture_y", carry_y);
   setOutput("intercept_carry_x", carry_x);
   setOutput("intercept_carry_y", carry_y);
   setOutput("intercept_carry_face_x", carry_face_x);

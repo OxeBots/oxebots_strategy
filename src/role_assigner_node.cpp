@@ -27,6 +27,12 @@ public:
     // Distância (mm) do candidato à bola abaixo da qual ele já recepcionou a bola: o congelamento
     // acaba e a troca de papel sai na hora, sem esperar a bola desacelerar.
     this->declare_parameter<double>("receive_distance_mm", 300.0);
+    // Distância (mm) de contato/batida da bola em um robô de linha: se a bola bater em um jogador
+    // (dist <= ball_touch_distance_mm), ele se torna atacante imediatamente, ignorando histereses.
+    this->declare_parameter<double>("ball_touch_distance_mm", 160.0);
+    // Janela (s) após cobrança de falta/lateral/escanteio em que quem não bateu permanece como
+    // atacante para receber o passe e evitar recuos bruscos ou duplo toque do cobrador.
+    this->declare_parameter<double>("post_free_kick_lock_s", 1.5);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     w1_ = this->get_parameter("w1").as_double();
@@ -35,8 +41,11 @@ public:
     time_hysteresis_ = this->get_parameter("time_hysteresis").as_double();
     ball_flight_speed_mps_ = this->get_parameter("ball_flight_speed_mps").as_double();
     receive_distance_mm_ = this->get_parameter("receive_distance_mm").as_double();
+    ball_touch_distance_mm_ = this->get_parameter("ball_touch_distance_mm").as_double();
+    post_free_kick_lock_s_ = this->get_parameter("post_free_kick_lock_s").as_double();
     
     last_role_change_time_ = this->now();
+    post_free_kick_handover_time_ = last_role_change_time_;
     auto role_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
     role_pub_ = this->create_publisher<oxebots_interfaces::msg::RoleAssignment>("/role_assignment", role_qos);
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
@@ -229,6 +238,33 @@ private:
     uint32_t defender_id = kNoRobot;
     uint32_t kicker_id = kNoRobot;
 
+    const bool is_our_free_kick =
+      is_restart_phase && (phase == oxebots_interfaces::msg::GameState::PHASE_FREE_KICK);
+
+    if (is_our_free_kick) {
+      if (!was_our_free_kick_) {
+        post_free_kick_kicker_id_ = kNoRobot;
+        post_free_kick_kicker_cleared_ = false;
+      }
+      was_our_free_kick_ = true;
+    } else {
+      if (was_our_free_kick_) {
+        if (phase == oxebots_interfaces::msg::GameState::PHASE_RUN &&
+            free_kick_kicker_id_ != kNoRobot)
+        {
+          post_free_kick_kicker_id_ = free_kick_kicker_id_;
+          post_free_kick_handover_time_ = now;
+          post_free_kick_kicker_cleared_ = false;
+        }
+        was_our_free_kick_ = false;
+        free_kick_kicker_id_ = kNoRobot;
+      }
+      if (phase != oxebots_interfaces::msg::GameState::PHASE_RUN) {
+        post_free_kick_kicker_id_ = kNoRobot;
+        post_free_kick_kicker_cleared_ = false;
+      }
+    }
+
     if (is_restart_phase) {
       // Verifica se o cobrador já travado continua ativo entre os elegíveis
       bool locked_still_eligible =
@@ -249,49 +285,136 @@ private:
           break;
         }
       }
+
+      if (is_our_free_kick && locked_kicker_id_ != kNoRobot) {
+        free_kick_kicker_id_ = locked_kicker_id_;
+      }
     } else {
       // Fora de reinício: destrava o cobrador
       locked_kicker_id_ = kNoRobot;
       kicker_id = kNoRobot;
 
+      if (post_free_kick_kicker_id_ != kNoRobot) {
+        if ((now - post_free_kick_handover_time_).seconds() >= post_free_kick_lock_s_) {
+          post_free_kick_kicker_id_ = kNoRobot;
+          post_free_kick_kicker_cleared_ = false;
+        } else if (ball_dists_mm.count(post_free_kick_kicker_id_) &&
+                   ball_dists_mm[post_free_kick_kicker_id_] > 400.0)
+        {
+          post_free_kick_kicker_cleared_ = true;
+        }
+      }
+
       if (eligible_ids.size() == 1) {
         attacker_id = eligible_ids[0];
         defender_id = kNoRobot;
       } else if (eligible_ids.size() >= 2) {
-        uint32_t best_candidate = eligible_ids[0];
-        uint32_t second_best = eligible_ids[1];
-        double time_since_change = (now - last_role_change_time_).seconds();
+        // 1. Regra de toque/batida imediata: se a bola bater em um jogador de linha que NÃO era o
+        // atacante atual (dist <= ball_touch_distance_mm_) enquanto o atacante anterior está longe
+        // da bola (> ball_touch_distance_mm_ + 150 mm), ele assume o ataque na mesma hora.
+        // Restringir a id != last_attacker_id_ com folga espacial evita ping-pong quando o novo
+        // atacante recua até o ponto de pré-chute (~400 mm atrás da bola).
+        const bool current_attacker_far_from_ball =
+          (last_attacker_id_ == kNoRobot) ||
+          !ball_dists_mm.count(last_attacker_id_) ||
+          (ball_dists_mm[last_attacker_id_] > ball_touch_distance_mm_ + 150.0);
 
-        bool last_attacker_eligible =
-          (last_attacker_id_ != kNoRobot) &&
-          (std::find(eligible_ids.begin(), eligible_ids.end(), last_attacker_id_) != eligible_ids.end());
-
-        if (last_attacker_eligible && best_candidate != last_attacker_id_) {
-          // Quem vai assumir já está em cima da bola (recepcionou) e a bola quase parou: não há mais o que
-          // proteger. A condição de velocidade é essencial: o defensor que marca o chutador fica a ~400 mm
-          // dele, e a bola chutada passa a menos de receive_distance_mm dele a alta velocidade; sem ela a
-          // troca saía no meio do chute e o defensor largava a linha bola-gol.
-          const bool candidate_has_ball =
-            ball_dists_mm[best_candidate] < receive_distance_mm_ &&
-            ball_speed_mps_ < kReceiveMaxSpeedFrac * ball_flight_speed_mps_;
-          const bool frozen = ball_in_flight_ && !candidate_has_ball;
-          if (time_since_change < time_hysteresis_ || frozen) {
-            if (frozen) {
-              RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "Bola em voo (%.2f m/s): papéis congelados (atacante=%u).", ball_speed_mps_, last_attacker_id_);
+        uint32_t touch_attacker_id = kNoRobot;
+        double min_touch_dist_mm = ball_touch_distance_mm_;
+        if (current_attacker_far_from_ball) {
+          for (uint32_t id : eligible_ids) {
+            if (id == last_attacker_id_) {
+              continue;
             }
-            attacker_id = last_attacker_id_;
-            defender_id = (attacker_id == eligible_ids[0]) ? eligible_ids[1] : eligible_ids[0];
+            if (id == post_free_kick_kicker_id_ && !post_free_kick_kicker_cleared_) {
+              continue;
+            }
+            const double dist_mm = ball_dists_mm[id];
+            if (dist_mm <= min_touch_dist_mm) {
+              min_touch_dist_mm = dist_mm;
+              touch_attacker_id = id;
+            }
+          }
+        }
+
+        // 2. Regra pós-lateral / pós-escanteio / pós-free-kick: assim que bater (transição para RUN),
+        // quem não bateu vira atacante imediatamente para receber o passe e evitar recuos malucos.
+        uint32_t post_fk_receiver_id = kNoRobot;
+        if (touch_attacker_id == kNoRobot && post_free_kick_kicker_id_ != kNoRobot) {
+          for (uint32_t cand : eligible_ids) {
+            if (cand != post_free_kick_kicker_id_) {
+              post_fk_receiver_id = cand;
+              break;
+            }
+          }
+        }
+
+        if (touch_attacker_id != kNoRobot) {
+          attacker_id = touch_attacker_id;
+          post_free_kick_kicker_id_ = kNoRobot;
+          post_free_kick_kicker_cleared_ = false;
+          for (uint32_t cand : eligible_ids) {
+            if (cand != attacker_id) {
+              defender_id = cand;
+              break;
+            }
+          }
+          if (attacker_id != last_attacker_id_) {
+            last_role_change_time_ = now;
+            RCLCPP_INFO(this->get_logger(),
+              "TROCA IMEDIATA POR TOQUE NA BOLA: Novo Atacante = %u (dist=%.0f mm)",
+              attacker_id, min_touch_dist_mm);
+          }
+        } else if (post_fk_receiver_id != kNoRobot) {
+          attacker_id = post_fk_receiver_id;
+          for (uint32_t cand : eligible_ids) {
+            if (cand != attacker_id) {
+              defender_id = cand;
+              break;
+            }
+          }
+          if (attacker_id != last_attacker_id_) {
+            last_role_change_time_ = now;
+            RCLCPP_INFO(this->get_logger(),
+              "TROCA POS-COBRANCA (FREE KICK): Recebedor = %u vira Atacante imediatamente (cobrador = %u vira Defensor)",
+              attacker_id, post_free_kick_kicker_id_);
+          }
+        } else {
+          uint32_t best_candidate = eligible_ids[0];
+          uint32_t second_best = eligible_ids[1];
+          double time_since_change = (now - last_role_change_time_).seconds();
+
+          bool last_attacker_eligible =
+            (last_attacker_id_ != kNoRobot) &&
+            (std::find(eligible_ids.begin(), eligible_ids.end(), last_attacker_id_) != eligible_ids.end());
+
+          if (last_attacker_eligible && best_candidate != last_attacker_id_) {
+            // Quem vai assumir já está em cima da bola (recepcionou) e a bola quase parou: não há mais o que
+            // proteger. A condição de velocidade é essencial: o defensor que marca o chutador fica a ~400 mm
+            // dele, e a bola chutada passa a menos de receive_distance_mm dele a alta velocidade; sem ela a
+            // troca saía no meio do chute e o defensor largava a linha bola-gol.
+            const bool candidate_has_ball =
+              ball_dists_mm[best_candidate] < receive_distance_mm_ &&
+              ball_speed_mps_ < kReceiveMaxSpeedFrac * ball_flight_speed_mps_;
+            const bool frozen = ball_in_flight_ && !candidate_has_ball;
+            if (time_since_change < time_hysteresis_ || frozen) {
+              if (frozen) {
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                  "Bola em voo (%.2f m/s): papéis congelados (atacante=%u).", ball_speed_mps_, last_attacker_id_);
+              }
+              attacker_id = last_attacker_id_;
+              defender_id = (attacker_id == eligible_ids[0]) ? eligible_ids[1] : eligible_ids[0];
+            } else {
+              attacker_id = best_candidate;
+              defender_id = second_best;
+              last_role_change_time_ = now;
+              RCLCPP_INFO(this->get_logger(), "TROCA DE PAPEL: Novo Atacante = %u", attacker_id);
+            }
           } else {
             attacker_id = best_candidate;
             defender_id = second_best;
-            last_role_change_time_ = now;
-            RCLCPP_INFO(this->get_logger(), "TROCA DE PAPEL: Novo Atacante = %u", attacker_id);
+            if (!last_attacker_eligible) last_role_change_time_ = now;
           }
-        } else {
-          attacker_id = best_candidate;
-          defender_id = second_best;
-          if (!last_attacker_eligible) last_role_change_time_ = now;
         }
       }
     }
@@ -387,6 +510,8 @@ private:
   double w1_, w2_, hysteresis_, time_hysteresis_;
   double ball_flight_speed_mps_ = 1.0;
   double receive_distance_mm_ = 300.0;
+  double ball_touch_distance_mm_ = 160.0;
+  double post_free_kick_lock_s_ = 1.5;
   static constexpr double kReceiveMaxSpeedFrac = 0.8;  // da velocidade de voo
   double ball_speed_mps_ = 0.0;
   bool ball_in_flight_ = false;
@@ -394,6 +519,11 @@ private:
   rclcpp::Time last_ball_change_;
   uint32_t last_attacker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
   rclcpp::Time last_time_, last_role_change_time_;
+  bool was_our_free_kick_ = false;
+  uint32_t free_kick_kicker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
+  uint32_t post_free_kick_kicker_id_ = oxebots_interfaces::msg::RoleAssignment::NO_ROBOT;
+  rclcpp::Time post_free_kick_handover_time_;
+  bool post_free_kick_kicker_cleared_ = false;
   oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
   Vector2D last_ball_pos_;

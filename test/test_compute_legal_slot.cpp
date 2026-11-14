@@ -353,6 +353,73 @@ TEST_F(ComputeLegalSlotTest, StopDefPlacesBetweenBallAndOwnGoal)
   EXPECT_NEAR(sw, 0.0, 0.05);
 }
 
+TEST_F(ComputeLegalSlotTest, StopSlotsBypassBallExclusionZoneWhenRobotStartsInFrontOfBall)
+{
+  auto factory = makeFactory();
+  const std::string xml_retreat =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestRetreat">
+           <ComputeLegalSlot slot="retreat" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+  const std::string xml_shadow =
+    R"(<root BTCPP_format="4">
+         <BehaviorTree ID="TestShadow">
+           <ComputeLegalSlot slot="stop_shadow" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
+         </BehaviorTree>
+       </root>)";
+
+  auto bb = makeStandardBlackboard(/*blue_defends_negative_x=*/true);
+  // Bola em (0, 0), nosso gol em -2250. Robô começa na FRENTE da bola em (+550, 50).
+  bb->set("ball_x", 0.0);
+  bb->set("ball_y", 0.0);
+  bb->set("robot_x", 550.0);
+  bb->set("robot_y", 50.0);
+
+  // 1. No primeiro passo (retreat), não empurra o robô reto para frente (+X, y~0), mas gera
+  // um waypoint lateral de contorno (>= 650 mm da bola e deslocado em Y).
+  auto tree_ret = factory.createTreeFromText(xml_retreat, bb);
+  EXPECT_EQ(tree_ret.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+  double rx_wp = 0.0, ry_wp = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", rx_wp));
+  ASSERT_TRUE(bb->get("slot_y", ry_wp));
+  EXPECT_GE(std::hypot(rx_wp, ry_wp), 650.0);
+  EXPECT_GT(ry_wp, 350.0);
+
+  // 2. Seguindo os waypoints de stop_shadow passo a passo, o robô contorna a bola por fora
+  // da zona de exclusão de 500 mm até convergir em (-700, 0) atrás da bola.
+  auto tree_sh = factory.createTreeFromText(xml_shadow, bb);
+  for (int step = 0; step < 6; ++step) {
+    EXPECT_EQ(tree_sh.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+    double sx = 0.0, sy = 0.0;
+    ASSERT_TRUE(bb->get("slot_x", sx));
+    ASSERT_TRUE(bb->get("slot_y", sy));
+    EXPECT_GE(std::hypot(sx, sy), 650.0);
+    bb->set("robot_x", sx);
+    bb->set("robot_y", sy);
+  }
+
+  double final_x = 0.0, final_y = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", final_x));
+  ASSERT_TRUE(bb->get("slot_y", final_y));
+  EXPECT_NEAR(final_x, -700.0, 5.0);
+  EXPECT_NEAR(final_y, 0.0, 5.0);
+
+  // 3. Com a bola deslocada na lateral (0, 1000), stop_shadow mantém o robô na linha entre a bola
+  // e o nosso gol (-2250, 0), ou seja, com 0 < slot_y < 1000 (na frente do gol e atrás da bola).
+  bb->set("ball_x", 0.0);
+  bb->set("ball_y", 1000.0);
+  bb->set("robot_x", -800.0);
+  bb->set("robot_y", 700.0);
+  EXPECT_EQ(tree_sh.tickExactlyOnce(), BT::NodeStatus::SUCCESS);
+  double wing_x = 0.0, wing_y = 0.0;
+  ASSERT_TRUE(bb->get("slot_x", wing_x));
+  ASSERT_TRUE(bb->get("slot_y", wing_y));
+  EXPECT_LT(wing_x, -500.0);
+  EXPECT_GT(wing_y, 500.0);
+  EXPECT_LT(wing_y, 850.0);
+}
+
 TEST_F(ComputeLegalSlotTest, StopSubTreeRetreatsWhenBallIsCloseAndShadowsByRoleWhenSafe)
 {
   BT::BehaviorTreeFactory factory;

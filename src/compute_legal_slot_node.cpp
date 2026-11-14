@@ -304,32 +304,26 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
       return BT::NodeStatus::FAILURE;
     }
 
-    const double dx = robot_x - ball_x;
-    const double dy = robot_y - ball_y;
-    const double dist = std::hypot(dx, dy);
-
-    double dir_angle = 0.0;
-    if (dist > 1e-3) {
-      dir_angle = std::atan2(dy, dx);
-    } else {
-      // Se robô e bola coincidem, recua na direção do próprio gol
-      dir_angle = std::atan2(0.0 - ball_y, own_goal_x - ball_x);
-    }
+    // Recua sempre para a linha entre a bola e o nosso gol (na frente do nosso gol e atrás da bola).
+    // Se o robô estiver do lado oposto (na frente da bola), o passo de contorno angular abaixo o guia
+    // por fora da zona de exclusão até alinhar nessa barreira.
+    const double dir_angle = std::atan2(0.0 - ball_y, own_goal_x - ball_x);
 
     slot_x = ball_x + min_stop_ball_dist * std::cos(dir_angle);
     slot_y = ball_y + min_stop_ball_dist * std::sin(dir_angle);
     enforce_ball_clearance = true;
   } else if (slot == "stop_shadow") {
-    // Atacante no STOP: posiciona-se atrás da bola na linha bola -> gol adversário a >= 700 mm
-    const double gx = opp_goal_x - ball_x;
-    const double gy = 0.0 - ball_y;
-    const double g_norm = std::hypot(gx, gy);
-    const double ux = (g_norm > 1e-3) ? (gx / g_norm) : attack_sign;
-    const double uy = (g_norm > 1e-3) ? (gy / g_norm) : 0.0;
+    // Atacante no STOP: posiciona-se entre a bola e o nosso gol (na frente do gol e atrás da bola)
+    // a >= 700 mm, formando a barreira principal.
+    const double dx = own_goal_x - ball_x;
+    const double dy = 0.0 - ball_y;
+    const double dist = std::hypot(dx, dy);
+    const double ux = (dist > 1e-3) ? (dx / dist) : our_half_sign;
+    const double uy = (dist > 1e-3) ? (dy / dist) : 0.0;
     const double shadow_dist = std::max(700.0, min_stop_ball_dist + 50.0);
 
-    slot_x = ball_x - ux * shadow_dist;
-    slot_y = ball_y - uy * shadow_dist;
+    slot_x = ball_x + ux * shadow_dist;
+    slot_y = ball_y + uy * shadow_dist;
     slot_w = std::atan2(0.0 - slot_y, opp_goal_x - slot_x);
     enforce_ball_clearance = true;
   } else if (slot == "stop_def") {
@@ -497,45 +491,102 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     return BT::NodeStatus::FAILURE;
   }
 
-  // 7. Filtro final: mantém dentro do campo e fora das áreas proibidas
-  const double desired_x = slot_x;
-  const double desired_y = slot_y;
-  clampToLegalField(slot_x, slot_y, own_goal_x, field_length, field_width,
-                    penalty_depth, penalty_width, margin, is_goalkeeper);
+  auto enforce_legal_point = [&](double& px, double& py) {
+    const double des_x = px;
+    const double des_y = py;
+    clampToLegalField(px, py, own_goal_x, field_length, field_width,
+                      penalty_depth, penalty_width, margin, is_goalkeeper);
 
-  // Se o filtro final aproximou o ponto da bola abaixo do mínimo regulamentar (ex: bola perto da
-  // lateral ou da área no STOP/wall/freekick_support), busca o ângulo válido mais próximo ao redor da bola.
-  if (enforce_ball_clearance &&
-      std::hypot(slot_x - ball_x, slot_y - ball_y) < (min_stop_ball_dist - 1.0)) {
-    const double base_ang = std::atan2(desired_y - ball_y, desired_x - ball_x);
-    double best_x = slot_x;
-    double best_y = slot_y;
-    double best_cost = std::numeric_limits<double>::infinity();
-    const double ref_x = has_robot_pose ? robot_x : desired_x;
-    const double ref_y = has_robot_pose ? robot_y : desired_y;
+    if (enforce_ball_clearance &&
+        std::hypot(px - ball_x, py - ball_y) < (min_stop_ball_dist - 1.0)) {
+      const double base_ang = std::atan2(des_y - ball_y, des_x - ball_x);
+      double best_x = px;
+      double best_y = py;
+      double best_cost = std::numeric_limits<double>::infinity();
 
-    for (int step = 1; step <= 12; ++step) {
-      for (int sign : {1, -1}) {
-        const double ang = base_ang + sign * step * (M_PI / 12.0);
-        double cx = ball_x + min_stop_ball_dist * std::cos(ang);
-        double cy = ball_y + min_stop_ball_dist * std::sin(ang);
-        clampToLegalField(cx, cy, own_goal_x, field_length, field_width,
-                          penalty_depth, penalty_width, margin, is_goalkeeper);
-        if (std::hypot(cx - ball_x, cy - ball_y) >= 500.0 + std::min(margin, 100.0)) {
-          const double cost = std::hypot(cx - ref_x, cy - ref_y);
-          if (cost < best_cost) {
-            best_cost = cost;
-            best_x = cx;
-            best_y = cy;
+      for (int step = 1; step <= 12; ++step) {
+        for (int sign : {1, -1}) {
+          const double ang = base_ang + sign * step * (M_PI / 12.0);
+          double cx = ball_x + min_stop_ball_dist * std::cos(ang);
+          double cy = ball_y + min_stop_ball_dist * std::sin(ang);
+          clampToLegalField(cx, cy, own_goal_x, field_length, field_width,
+                            penalty_depth, penalty_width, margin, is_goalkeeper);
+          if (std::hypot(cx - ball_x, cy - ball_y) >= 500.0 + std::min(margin, 100.0)) {
+            const double cost = std::hypot(cx - des_x, cy - des_y);
+            if (cost < best_cost) {
+              best_cost = cost;
+              best_x = cx;
+              best_y = cy;
+            }
           }
         }
+        if (std::isfinite(best_cost)) {
+          break;
+        }
       }
-      if (std::isfinite(best_cost)) {
-        break;
+      px = best_x;
+      py = best_y;
+    }
+  };
+
+  // 7. Filtro final no destino tático: mantém dentro do campo, fora das áreas e a >= 0,5m da bola
+  enforce_legal_point(slot_x, slot_y);
+
+  // 7.5. Contorno angular estacionário da zona de exclusão da bola:
+  // Se o robô está no lado oposto/lateral da bola em relação ao slot final (|diff| > 75 graus),
+  // a linha reta cruzaria a zona de exclusão de 500 mm. Em vez de somar um passo em cima de
+  // theta_robot (o que mudaria o alvo a cada frame e causaria replanejamentos/oscilações), usa
+  // waypoints angulares FIXOS ancorados em theta_slot (-90 graus quando |diff| > 135 graus e
+  // -45 graus quando 75 graus < |diff| <= 135 graus). Assim o alvo fica 100% imóvel enquanto o
+  // robô percorre cada setor e converge monotonicamente até o slot na barreira bola -> nosso gol.
+  if (enforce_ball_clearance && has_robot_pose) {
+    const double rx_rel = robot_x - ball_x;
+    const double ry_rel = robot_y - ball_y;
+    const double dist_robot_ball = std::hypot(rx_rel, ry_rel);
+    const double sx_rel = slot_x - ball_x;
+    const double sy_rel = slot_y - ball_y;
+    const double dist_slot_ball = std::hypot(sx_rel, sy_rel);
+
+    if (dist_robot_ball > 10.0 && dist_slot_ball > 10.0) {
+      const double theta_robot = std::atan2(ry_rel, rx_rel);
+      const double theta_slot = std::atan2(sy_rel, sx_rel);
+      const double diff = normalizeAngle(theta_slot - theta_robot);
+      constexpr double kDirectSectorRad = 5.0 * M_PI / 12.0;  // 75 graus
+      constexpr double kFarSectorRad = 3.0 * M_PI / 4.0;      // 135 graus
+
+      if (std::abs(diff) > kDirectSectorRad) {
+        const double bypass_radius = std::max({dist_slot_ball, min_stop_ball_dist + 100.0, 750.0});
+
+        // sign indica o sentido de theta_robot até theta_slot; o waypoint fixo fica em
+        // theta_slot - sign * offset_angle (no mesmo hemisfério do robô).
+        double sign = (diff >= 0.0) ? 1.0 : -1.0;
+        if (std::abs(diff) > (M_PI - 0.15)) {
+          const double test_y_pos = ball_y + bypass_radius * std::sin(theta_slot - (M_PI / 2.0));
+          const double test_y_neg = ball_y + bypass_radius * std::sin(theta_slot + (M_PI / 2.0));
+          sign = (std::abs(test_y_pos) <= std::abs(test_y_neg)) ? 1.0 : -1.0;
+        }
+
+        auto side_clearance = [&](double s) {
+          const double ang_mid = theta_slot - s * (M_PI / 2.0);
+          double mx = ball_x + bypass_radius * std::cos(ang_mid);
+          double my = ball_y + bypass_radius * std::sin(ang_mid);
+          clampToLegalField(mx, my, own_goal_x, field_length, field_width,
+                            penalty_depth, penalty_width, margin, is_goalkeeper);
+          return std::hypot(mx - ball_x, my - ball_y);
+        };
+
+        if (side_clearance(sign) < min_stop_ball_dist &&
+            side_clearance(-sign) > side_clearance(sign) + 50.0) {
+          sign = -sign;
+        }
+
+        const double offset_angle = (std::abs(diff) > kFarSectorRad) ? (M_PI / 2.0) : (M_PI / 4.0);
+        const double waypoint_angle = theta_slot - sign * offset_angle;
+        slot_x = ball_x + bypass_radius * std::cos(waypoint_angle);
+        slot_y = ball_y + bypass_radius * std::sin(waypoint_angle);
+        enforce_legal_point(slot_x, slot_y);
       }
     }
-    slot_x = best_x;
-    slot_y = best_y;
   }
 
   if (slot == "retreat" || slot == "stop_def" || slot == "wall" || slot == "def_box_guard" ||

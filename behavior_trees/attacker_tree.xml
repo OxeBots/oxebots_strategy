@@ -67,28 +67,20 @@
                     <Inverter>
                       <IsBallInOurHalf ball_x="{ball_x}" />
                     </Inverter>
-                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="118.0" angle_threshold_deg="12.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
                   </Sequence>
 
-                  <ReactiveSequence name="Realign">
-                    <Inverter>
-                      <IsBallInOurHalf ball_x="{ball_x}" />
-                    </Inverter>
-                    <GoToPoint robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
-                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                               tolerance="0.0" planner="straight_line" />
-                  </ReactiveSequence>
+                  <GoToPoint name="Carry" robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
+                             face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                             tolerance="0.0" planner="straight_line" ball_side_check="true" />
 
-                  <ReactiveSequence name="Carry">
-                    <IsBallInOurHalf ball_x="{ball_x}" />
-                    <GoToPoint robot_id="{robot_id}" x="{int_carry_x}" y="{int_carry_y}"
-                               face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                               tolerance="0.0" planner="straight_line" ball_side_check="true" />
-                  </ReactiveSequence>
+                  <GoToPoint name="Realign" robot_id="{robot_id}" x="{int_cap_x}" y="{int_cap_y}"
+                             face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
+                             tolerance="0.0" planner="straight_line" ball_side_check="true" />
                 </ReactiveFallback>
 
-                <Delay delay_msec="600">
+                <Delay delay_msec="150">
                   <AlwaysSuccess/>
                 </Delay>
               </Sequence>

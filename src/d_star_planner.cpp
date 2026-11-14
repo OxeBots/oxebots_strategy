@@ -99,6 +99,9 @@ void DStarPlanner::setDynamicObstacles(const std::vector<DynamicObstacle> & obst
         {
             for (int dy = -radius_cells; dy <= radius_cells; ++dy)
             {
+                if (std::hypot(dx * resolution_, dy * resolution_) > obstacle.radius_m + 1e-6) {
+                    continue;
+                }
                 GridCell cell = {center.x + dx, center.y + dy};
                 // Apenas adiciona se estiver dentro dos limites do mapa
                 if (cell.x >= 0 && cell.x < grid_width_ && cell.y >= 0 && cell.y < grid_height_) {
@@ -453,8 +456,26 @@ void DStarPlanner::updateMapAndReplan(const GridCell & current_pos)
     if (!start_cell_)
         return;
 
+    const GridCell prev_start = *start_cell_;
+    start_cell_ = current_pos;
+
     std::vector<DStarNode *> changed;
     int range = static_cast<int>(config_.sensor_range);
+
+    // Se a célula do robô mudou desde o último ciclo, reavalia também a vizinhança [-3, +3]
+    // da posição anterior para remover a isenção da pegada antiga do próprio robô no /map.
+    if (prev_start.x != current_pos.x || prev_start.y != current_pos.y)
+    {
+        for (int dx = -3; dx <= 3; ++dx)
+        {
+            for (int dy = -3; dy <= 3; ++dy)
+            {
+                auto u = getNode(prev_start.x + dx, prev_start.y + dy);
+                if (u)
+                    changed.push_back(u);
+            }
+        }
+    }
 
     // Identify Changed Nodes
     // We scan a window around the robot. In a real system, we'd compare the old map vs new map to
@@ -778,16 +799,17 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
             obstacles.push_back({r.x / 1000.0f, r.y / 1000.0f, ally_safety_radius_m_});
     }
 
-    // Adiciona a BOLA como um obstáculo dinâmico (raio bem menor que o dos aliados, ver
-    // ball_safety_radius_m_) para que o caminho contorne a bola em vez de atravessá-la, sem
-    // bloquear o ponto de captura do atacante logo atrás dela.
-    obstacles.push_back({msg->ball.x / 1000.0f, msg->ball.y / 1000.0f, ball_safety_radius_m_});
-
     // Guardado à parte (não só dentro do vetor de obstáculos do D*) porque plan_straight_line
     // precisa da posição da bola para o desvio local, mesmo quando planner_type é straight_line
     // e a grade de obstáculos do D* nem é consultada.
     ball_x_ = msg->ball.x / 1000.0f;
     ball_y_ = msg->ball.y / 1000.0f;
+
+    // Adiciona a BOLA como um obstáculo dinâmico para TODOS os robôs (inclusive o atacante).
+    // Para o atacante isso é seguro porque o CalculateInterceptionNode mira primeiro um ponto de
+    // pré-chute a ~400mm atrás da bola (bem fora de ball_safety_radius_m_) usando D*, e só troca
+    // para PLANNER_STRAIGHT_LINE na aproximação final (Fase 2), que não consulta esta grade.
+    obstacles.push_back({ball_x_, ball_y_, ball_safety_radius_m_});
 
     if (planner_)
         planner_->setDynamicObstacles(obstacles);

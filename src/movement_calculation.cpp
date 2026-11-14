@@ -605,7 +605,7 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
-            constexpr double kKickAdvanceSpeed = 0.5;
+            constexpr double kKickAdvanceSpeed = 1.2;
             cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0f;
