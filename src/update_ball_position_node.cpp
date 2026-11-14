@@ -1,4 +1,8 @@
 #include "oxebots_strategy/update_ball_position_node.h"
+
+#include <algorithm>
+#include <cmath>
+
 #include "oxebots_strategy/kick_readiness.hpp"
 
 namespace oxebots_strategy
@@ -86,11 +90,71 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
     double dist_ball_goal = std::hypot(dx, dy);
 
     if (dist_ball_goal > 10.0) {
-      // Define um ponto a 400mm da bola, seguindo a linha reta que vem do gol
-      double pre_kick_dist = 400.0; 
-      double pk_x = ball_x + (dx / dist_ball_goal) * pre_kick_dist;
-      double pk_y = ball_y + (dy / dist_ball_goal) * pre_kick_dist;
-      
+      // Define um ponto a até 400mm atrás da bola, seguindo a linha reta que vem do alvo.
+      // Quando a bola está nas bordas (lateral ou escanteio), o ponto a 400mm cairia fora da margem
+      // navegável / atrás da mureta física (boundary_width = 300mm, raio do robô ~90mm), travando
+      // o GoToPoint no muro antes da cobrança. Primeiro encurtamos sobre a mesma reta (preservando
+      // o alinhamento bola->alvo) até kMinPreKickDistMm; se a bola estiver colada na linha, limita
+      // na borda segura e compensa no outro eixo para manter distância segura da bola (> 150mm).
+      double field_length = 4500.0;
+      double field_width = 3000.0;
+      if (root_bb) {
+        if (!root_bb->get("field_length", field_length) || field_length <= 1.0) {
+          field_length = 4500.0;
+        }
+        if (!root_bb->get("field_width", field_width) || field_width <= 1.0) {
+          field_width = 3000.0;
+        }
+      }
+
+      constexpr double kDefaultPreKickDistMm = 400.0;
+      constexpr double kMinPreKickDistMm = 230.0;
+      constexpr double kOutsideLineAllowanceMm = 120.0;  // 180mm antes da mureta de 300mm
+      const double max_pk_x = (field_length / 2.0) + kOutsideLineAllowanceMm;
+      const double max_pk_y = (field_width / 2.0) + kOutsideLineAllowanceMm;
+
+      const double ux = dx / dist_ball_goal;
+      const double uy = dy / dist_ball_goal;
+
+      double d_ray = kDefaultPreKickDistMm;
+      if (ux > 1e-6) {
+        d_ray = std::min(d_ray, std::max(0.0, (max_pk_x - ball_x) / ux));
+      } else if (ux < -1e-6) {
+        d_ray = std::min(d_ray, std::max(0.0, (-max_pk_x - ball_x) / ux));
+      }
+      if (uy > 1e-6) {
+        d_ray = std::min(d_ray, std::max(0.0, (max_pk_y - ball_y) / uy));
+      } else if (uy < -1e-6) {
+        d_ray = std::min(d_ray, std::max(0.0, (-max_pk_y - ball_y) / uy));
+      }
+
+      const double pre_kick_dist = std::clamp(d_ray, kMinPreKickDistMm, kDefaultPreKickDistMm);
+      double pk_x = ball_x + ux * pre_kick_dist;
+      double pk_y = ball_y + uy * pre_kick_dist;
+
+      const bool clamped_x = std::abs(pk_x) > max_pk_x;
+      const bool clamped_y = std::abs(pk_y) > max_pk_y;
+      pk_x = std::clamp(pk_x, -max_pk_x, max_pk_x);
+      pk_y = std::clamp(pk_y, -max_pk_y, max_pk_y);
+
+      if (clamped_y && !clamped_x) {
+        const double dy_actual = pk_y - ball_y;
+        const double rem_x = std::sqrt(
+          std::max(0.0, kMinPreKickDistMm * kMinPreKickDistMm - dy_actual * dy_actual));
+        const double sign_x = (std::abs(ux) > 1e-3) ? ((ux >= 0.0) ? 1.0 : -1.0) :
+          ((ball_x >= 0.0) ? -1.0 : 1.0);
+        pk_x = std::clamp(ball_x + sign_x * std::max( std::abs(pk_x - ball_x), rem_x),
+                          -max_pk_x, max_pk_x);
+      } else if (clamped_x && !clamped_y) {
+        const double dx_actual = pk_x - ball_x;
+        const double rem_y = std::sqrt(
+          std::max(0.0, kMinPreKickDistMm * kMinPreKickDistMm - dx_actual * dx_actual));
+        const double sign_y = (std::abs(uy) > 1e-3) ? ((uy >= 0.0) ? 1.0 : -1.0) :
+          ((ball_y >= 0.0) ? -1.0 : 1.0);
+        pk_y = std::clamp(ball_y + sign_y * std::max(std::abs(pk_y - ball_y), rem_y),
+                          -max_pk_y, max_pk_y);
+      }
+
       setOutput("pre_kick_x", pk_x);
       setOutput("pre_kick_y", pk_y);
 

@@ -134,7 +134,17 @@ std::optional<oxebots_interfaces::msg::RobotGameData> GoToPointNode::getRobotDat
 double GoToPointNode::resolveFaceAngle() {
     double face_x, face_y;
     if (getInput<double>("face_x", face_x) && getInput<double>("face_y", face_y)) {
-        return std::atan2(face_y - target_pos_.y, face_x - target_pos_.x);
+        double dx = face_x - target_pos_.x;
+        double dy = face_y - target_pos_.y;
+        // Quando o próprio destino é o ponto de mira (ex: avançar em direção à bola olhando para a
+        // bola na Fase 2 da cobrança), calcula o ângulo a partir da posição atual do robô.
+        if (std::hypot(dx, dy) < 1.0) {
+            if (auto robot = getRobotData(robot_id_)) {
+                dx = face_x - robot->x;
+                dy = face_y - robot->y;
+            }
+        }
+        return std::atan2(dy, dx);
     }
 
     double op_x, op_y;
