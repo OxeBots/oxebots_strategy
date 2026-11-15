@@ -1,27 +1,12 @@
 # achados conhecidos do validate_bt.py (um por linha)
-R4|free_kick.xml|KeepDistance|robot_x
-R4|free_kick.xml|KeepDistance|robot_y
-R4|opp_set_piece.xml|KeepDistance|robot_x
-R4|opp_set_piece.xml|KeepDistance|robot_y
 R6|master_strategy_carry.xml|key|is_corner_kick
 R6|master_strategy_carry.xml|key|is_kick_in
 R6|master_strategy_carry.xml|key|is_opponent_foul
-R7|corner_kick.xml|out|dummy_pkx
-R7|corner_kick.xml|out|dummy_pky
-R7|corner_kick.xml|out|dummy_ready
-R7|corner_kick.xml|out|is_ready
-R7|free_kick.xml|out|dummy_ready
 R7|attacker_tree.xml|out|int_ball_x
 R7|attacker_tree.xml|out|int_ball_y
 R7|attacker_tree.xml|out|int_pk_x
 R7|attacker_tree.xml|out|int_pk_y
 R7|attacker_tree.xml|out|is_ready
 R7|attacker_tree.xml|out|is_ready_pred
-R7|opp_set_piece.xml|out|is_ready
 R7|penalty.xml|out|is_ready
 R7|stop.xml|out|slot_w
-R7|throw_in.xml|out|dummy_ready
-# portas da RestartKickerTree: quem escreve são os chamadores (kick-off, pênalti e free kick: E05 a E07)
-R6|restart_kicker.xml|key|kick_speed
-R6|restart_kicker.xml|key|target_x
-R6|restart_kicker.xml|key|target_y

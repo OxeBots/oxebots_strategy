@@ -3,10 +3,10 @@
     <Fallback name="OppSetPieceRoles">
 
         <!-- 1. GOLEIRO: Lógica padrão de defesa, fica na linha do gol -->
-        <Sequence name="GoalkeeperDefend">
-            <IsRobotId robot_id="0"/>
+        <ReactiveSequence name="GoalkeeperDefend">
+            <HasRole role="goalkeeper"/>
             <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-        </Sequence>
+        </ReactiveSequence>
 
         <!-- 2. ZAGUEIRO: Protege a entrada da área para bloquear chutes -->
         <Sequence name="DefenderWall">

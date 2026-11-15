@@ -12,6 +12,7 @@
 
 #define STRATEGY_NODE_NO_MAIN
 #include "../src/strategy_node.cpp"
+#include "master_tree_scenario.hpp"
 
 using GameState = oxebots_interfaces::msg::GameState;
 using GameData = oxebots_interfaces::msg::GameData;
@@ -209,7 +210,105 @@ TEST_F(StrategyNodeBlackboardTest, RefreshComputesStampsAndPoses)
 }
 
 // ============================================================================
-// 4. Observabilidade de Transição de Ramo (/strategy/active_branch) — A04
+// 4. Consumo da RoleAssignment ampliada na Blackboard (P02)
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, P02_RoleAssignmentUpdatesEpochKickerAndActiveIds)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 2);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    // Antes de receber RoleAssignment, o papel deve iniciar como "idle" (sem papéis fixos chumbados)
+    std::string initial_role;
+    uint32_t initial_epoch = 999;
+    ASSERT_TRUE(bb->get("role", initial_role));
+    ASSERT_TRUE(bb->get("role_epoch", initial_epoch));
+    EXPECT_EQ(initial_role, "idle");
+    EXPECT_EQ(initial_epoch, 0u);
+
+    // Publica um RoleAssignment com robô 2 como atacante e cobrador (epoch = 3)
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 2;
+    roles->defender_id = 1;
+    roles->kicker_id = 2;
+    roles->epoch = 3;
+    roles->active_ids = {0, 1, 2};
+
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+
+    std::string role;
+    uint32_t gk_id = 999, att_id = 999, def_id = 999, kick_id = 999, epoch = 0;
+    bool is_gk = true, is_att = false, is_def = true, is_kick = false;
+    std::vector<uint32_t> active_ids;
+
+    ASSERT_TRUE(bb->get("role", role));
+    ASSERT_TRUE(bb->get("goalkeeper_id", gk_id));
+    ASSERT_TRUE(bb->get("attacker_id", att_id));
+    ASSERT_TRUE(bb->get("defender_id", def_id));
+    ASSERT_TRUE(bb->get("kicker_id", kick_id));
+    ASSERT_TRUE(bb->get("role_epoch", epoch));
+    ASSERT_TRUE(bb->get("active_ids", active_ids));
+    ASSERT_TRUE(bb->get("is_goalkeeper", is_gk));
+    ASSERT_TRUE(bb->get("is_attacker", is_att));
+    ASSERT_TRUE(bb->get("is_defender", is_def));
+    ASSERT_TRUE(bb->get("is_kicker", is_kick));
+
+    EXPECT_EQ(role, "attacker");
+    EXPECT_EQ(gk_id, 0u);
+    EXPECT_EQ(att_id, 2u);
+    EXPECT_EQ(def_id, 1u);
+    EXPECT_EQ(kick_id, 2u);
+    EXPECT_EQ(epoch, 3u);
+    ASSERT_EQ(active_ids.size(), 3u);
+    EXPECT_FALSE(is_gk);
+    EXPECT_TRUE(is_att);
+    EXPECT_FALSE(is_def);
+    EXPECT_TRUE(is_kick);
+}
+
+// P03: has_defender diz às árvores se há defensor atribuído (falso com só goleiro + atacante).
+TEST_F(StrategyNodeBlackboardTest, P03_HasDefenderFollowsTheRoleAssignment)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    bool has_defender = false;
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_TRUE(has_defender);  // antes do primeiro RoleAssignment não se assume time reduzido
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = RoleAssignment::NO_ROBOT;  // cartão amarelo: só goleiro + atacante
+    roles->active_ids = {0, 1};
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_FALSE(has_defender);
+
+    roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->active_ids = {0, 1, 2};
+    node->setLastRoleAssignment(roles);
+    node->refresh();
+    ASSERT_TRUE(bb->get("has_defender", has_defender));
+    EXPECT_TRUE(has_defender);
+}
+
+// ============================================================================
+// 5. Observabilidade de Transição de Ramo (/strategy/active_branch) — A04
 // ============================================================================
 
 TEST_F(StrategyNodeBlackboardTest, BranchTransitionPublishesAndUpdatesActiveBranch)
@@ -345,7 +444,7 @@ TEST_F(StrategyNodeBlackboardTest, BranchTransitionPublishesAndUpdatesActiveBran
 }
 
 // ============================================================================
-// 5. Registro Único de Nós e TreeNodesModel para Groot2 — A05
+// 6. Registro Único de Nós e TreeNodesModel para Groot2 — A05
 // ============================================================================
 
 TEST_F(StrategyNodeBlackboardTest, NodeRegistryAndTreeNodesModelForGroot2)
@@ -384,4 +483,423 @@ TEST_F(StrategyNodeBlackboardTest, NodeRegistryAndTreeNodesModelForGroot2)
             << "Nó ausente em tree_nodes_model.xml: " << id;
     }
     EXPECT_GE(custom_count, 32u);
+}
+
+// ============================================================================
+// 7. Free Kick Unificado (E07) — Transição e Roteamento de FreeKickBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, FreeKickBranchTransitionsOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    auto pub_node = std::make_shared<rclcpp::Node>("test_fk_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 200.0f;
+    gd->ball.y = -300.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = 0.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    // 1) Free Kick Nosso (we_favored = true) -> Kicker executa RestartKickerTree (sem criar barreira)
+    node->getBlackboard()->unset("slot_x");
+    node->getBlackboard()->unset("slot_y");
+    auto gs_our = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/true);
+    gs_our->header.stamp = node->now();
+    node->setLastGameState(gs_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+    double dummy_x = 0.0;
+    // Kicker executa RestartKickerTree, não o slot de barreira (wall)
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", dummy_x));
+
+    // 2) Free Kick Deles (we_favored = false) -> Linha forma WallRole a >= 500 mm da bola
+    auto gs_their = makeGameState(false, GameState::PHASE_FREE_KICK, /*we_favored=*/false);
+    gs_their->header.stamp = node->now();
+    node->setLastGameState(gs_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+
+    EXPECT_EQ(node->getActiveBranch(), "FreeKickBranch");
+    double wall_x = 0.0, wall_y = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", wall_x));
+    ASSERT_TRUE(node->getBlackboard()->get("slot_y", wall_y));
+    const double dist_wall_ball = std::hypot(wall_x - 200.0, wall_y - (-300.0));
+    EXPECT_GE(dist_wall_ball, 500.0 - 1.0);
+}
+
+// ============================================================================
+// 8. Kick-off Unificado (E05) — Transição de PrepareKickoffBranch e KickoffBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, PrepareKickoffAndKickoffBranchesTransitionOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    auto pub_node = std::make_shared<rclcpp::Node>("test_ko_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 0.0f;
+    gd->ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -280.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    // 1) PREPARE_KICKOFF Nosso (we_favored = true) -> Cobrador vai para o círculo central
+    auto gs_prep_our = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/true);
+    gs_prep_our->header.stamp = node->now();
+    node->setLastGameState(gs_prep_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+    double prep_our_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_our_x));
+    EXPECT_LT(prep_our_x, 0.0);
+    EXPECT_LE(std::abs(prep_our_x), 500.0); // No círculo central (SC-05)
+
+    // 2) PREPARE_KICKOFF Deles (we_favored = false) -> Defensor fica fora do círculo central
+    auto gs_prep_their = makeGameState(false, GameState::PHASE_PREPARE_KICKOFF, /*we_favored=*/false);
+    gs_prep_their->header.stamp = node->now();
+    node->setLastGameState(gs_prep_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PrepareKickoffBranch");
+    double prep_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_their_x));
+    EXPECT_LT(prep_their_x, 0.0);
+    EXPECT_GE(std::abs(prep_their_x), 500.0); // Fora do círculo central (SC-06)
+
+    // 3) KICKOFF Nosso (we_favored = true) -> Cobrador executa RestartKickerTree (sem slot de espera)
+    node->getBlackboard()->unset("slot_x");
+    auto gs_kick_our = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/true);
+    gs_kick_our->header.stamp = node->now();
+    node->setLastGameState(gs_kick_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+    double kick_slot_x = 0.0;
+    // Cobrador executa RestartKickerTree, não o slot de espera defensiva
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", kick_slot_x));
+
+    // 4) KICKOFF Deles (we_favored = false) -> Permanece em espera legal fora do círculo (slot_x <= -500)
+    auto gs_kick_their = makeGameState(false, GameState::PHASE_KICKOFF, /*we_favored=*/false);
+    gs_kick_their->header.stamp = node->now();
+    node->setLastGameState(gs_kick_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "KickoffBranch");
+    double kick_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", kick_their_x));
+    EXPECT_LT(kick_their_x, 0.0);
+    EXPECT_GE(std::abs(kick_their_x), 500.0);
+}
+
+// ============================================================================
+// 9. Seleção Dinâmica de Canto do Gol (opp_goal_y / opponent_goal_y)
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, DynamicGoalTargetYSelectsOpenCornerAndRespectsHysteresis)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    auto geom = makeGeometry(4500.0, 3000.0);
+    geom->field.goal_width = 800;  // corner_y = 800/2 - 150 = 250 mm
+    node->setLastGeometry(geom);
+    node->setLastGameState(makeGameState(/*our_goal_positive_x=*/false));
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 1000.0f;
+    gd->ball.y = 0.0f;
+
+    // 1) Sem goleiro adversário -> mira no centro (0.0)
+    node->setLastGameData(gd);
+    node->refresh();
+    double opp_goal_y = 999.0;
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, 0.0);
+
+    // 2) Goleiro adversário fechando o canto superior (y = +120 mm) -> mira no canto inferior (-250 mm)
+    oxebots_interfaces::msg::RobotGameData enemy_gk;
+    enemy_gk.id = 0;
+    enemy_gk.x = 2150.0f;
+    enemy_gk.y = 120.0f;
+    gd->robots.enemies = {enemy_gk};
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, -250.0);
+
+    // 3) Histerese: goleiro vai quase pro centro (y = -5 mm), mas o canto inferior (-250) mantém-se escolhido
+    gd->robots.enemies[0].y = -5.0f;
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, -250.0);
+
+    // 4) Goleiro fecha claramente o canto inferior (y = -150 mm) -> vira para o canto superior (+250 mm)
+    gd->robots.enemies[0].y = -150.0f;
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("opp_goal_y", opp_goal_y));
+    EXPECT_DOUBLE_EQ(opp_goal_y, 250.0);
+}
+
+// ============================================================================
+// 10. Pênalti Unificado (E06) — Transição de PreparePenaltyBranch e PenaltyBranch
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, PreparePenaltyAndPenaltyBranchesTransitionOurAndTheir)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("bt_xml_path", "master_strategy_el.xml");
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    ASSERT_TRUE(node->init());
+
+    auto pub_node = std::make_shared<rclcpp::Node>("test_pen_pub");
+    auto gd_pub = pub_node->create_publisher<GameData>("/game_data", 10);
+    auto spin_both = [&]() {
+        rclcpp::executors::SingleThreadedExecutor exec;
+        exec.add_node(node);
+        exec.add_node(pub_node);
+        for (int i = 0; i < 5; ++i) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    for (int i = 0; i < 30 && gd_pub->get_subscription_count() < 1; ++i) {
+        spin_both();
+    }
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 1000.0f; // Marca do pênalti no ataque
+    gd->ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = 600.0f;
+    ally.y = 0.0f;
+    ally.orientation = 0.0f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    // 1) PREPARE_PENALTY Nosso (we_favored = true) -> Cobrador (kicker) se posiciona atrás da bola no slot penalty_kicker
+    auto gs_prep_our = makeGameState(false, GameState::PHASE_PREPARE_PENALTY, /*we_favored=*/true);
+    gs_prep_our->header.stamp = node->now();
+    node->setLastGameState(gs_prep_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PreparePenaltyBranch");
+    double prep_our_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_our_x));
+    // Fica atrás da bola (ball_x = 1000, opp_goal_x = 2250 -> slot_x < 1000)
+    EXPECT_LT(prep_our_x, 1000.0);
+    EXPECT_GE(prep_our_x, 600.0);
+
+    // 2) PREPARE_PENALTY Deles (we_favored = false) -> Robô de linha fica >= 1 m atrás da bola (slot penalty_behind)
+    gd->ball.x = -1000.0f; // Marca de pênalti na nossa defesa (defendemos my_goal_x = -2250)
+    gd->ball.y = 0.0f;
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    auto gs_prep_their = makeGameState(false, GameState::PHASE_PREPARE_PENALTY, /*we_favored=*/false);
+    gs_prep_their->header.stamp = node->now();
+    node->setLastGameState(gs_prep_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PreparePenaltyBranch");
+    double prep_their_x = 0.0;
+    ASSERT_TRUE(node->getBlackboard()->get("slot_x", prep_their_x));
+    // penalty_behind: >= 1 m atrás da bola na direção oposta ao ataque adversário (+X)
+    EXPECT_GT(prep_their_x, -1000.0);
+    EXPECT_GE(prep_their_x - (-1000.0), 1000.0 - 1.0); // SC-10: >= 1 m atrás da bola
+
+    // 3) PENALTY Nosso (we_favored = true) -> Cobrador executa RestartKickerTree
+    gd->ball.x = 1000.0f;
+    node->setLastGameData(gd);
+    gd_pub->publish(*gd);
+    spin_both();
+
+    node->getBlackboard()->unset("slot_x");
+    auto gs_pen_our = makeGameState(false, GameState::PHASE_PENALTY, /*we_favored=*/true);
+    gs_pen_our->header.stamp = node->now();
+    node->setLastGameState(gs_pen_our);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PenaltyBranch");
+    double kick_slot_x = 0.0;
+    EXPECT_FALSE(node->getBlackboard()->get("slot_x", kick_slot_x));
+
+    // 4) PENALTY Deles (we_favored = false) -> Robô de linha (robot_id=1) segura posição (HoldPosition)
+    auto gs_pen_their = makeGameState(false, GameState::PHASE_PENALTY, /*we_favored=*/false);
+    gs_pen_their->header.stamp = node->now();
+    node->setLastGameState(gs_pen_their);
+    node->refresh();
+    node->tickOnce();
+    spin_both();
+    EXPECT_EQ(node->getActiveBranch(), "PenaltyBranch");
+}
+
+
+// ============================================================================
+// 11. Contrato do mock da Master Tree (T05)
+// ============================================================================
+
+// test_master_tree.cpp monta a blackboard com master_tree_test::Scenario. Este teste prova que o
+// refresh() real escreve as MESMAS chaves, com os MESMOS tipos, e com o papel/cobrador no formato que
+// o Scenario assume. Se o refresh() mudar um nome ou tipo, o mock da Master Tree deixa de ser fiel e
+// este teste falha, em vez de os testes da árvore passarem contra uma blackboard que não existe.
+TEST_F(StrategyNodeBlackboardTest, MasterTreeScenarioMatchesRefreshKeysAndTypes)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+
+    auto gs = makeGameState(false, GameState::PHASE_STOP, /*we_favored=*/true);
+    gs->header.stamp = node->now();
+    node->setLastGameState(gs);
+
+    auto roles = std::make_shared<RoleAssignment>();
+    roles->goalkeeper_id = 0;
+    roles->attacker_id = 1;
+    roles->defender_id = 2;
+    roles->kicker_id = 1;
+    roles->epoch = 1;
+    roles->active_ids = {0, 1, 2};
+    node->setLastRoleAssignment(roles);
+
+    auto gd = std::make_shared<GameData>();
+    gd->ball.x = 100.0f;
+    gd->ball.y = -50.0f;
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -800.0f;
+    ally.y = 200.0f;
+    ally.orientation = 0.3f;
+    gd->robots.allies.push_back(ally);
+    node->setLastGameData(gd);
+
+    node->refresh();
+
+    for (const auto & [key, type] : master_tree_test::expectedKeyTypes()) {
+        const BT::TypeInfo * info = bb->entryInfo(key);
+        ASSERT_NE(info, nullptr) << "o refresh() não escreve a chave do Scenario: " << key;
+        EXPECT_EQ(info->type(), type)
+            << "tipo diferente para a chave " << key << " (refresh: " << info->type().name()
+            << ", Scenario: " << type.name() << ")";
+    }
+
+    // O refresh() nunca grava role="kicker": o cobrador é atacante/defensor com is_kicker ligado.
+    std::string role;
+    bool is_kicker = false;
+    int phase = -1;
+    ASSERT_TRUE(bb->get("role", role));
+    ASSERT_TRUE(bb->get("is_kicker", is_kicker));
+    ASSERT_TRUE(bb->get("phase", phase));
+    EXPECT_EQ(role, "attacker");
+    EXPECT_TRUE(is_kicker);
+    EXPECT_EQ(phase, static_cast<int>(GameState::PHASE_STOP));
 }

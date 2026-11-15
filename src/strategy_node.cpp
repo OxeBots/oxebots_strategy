@@ -72,7 +72,8 @@ public:
     setup_blackboard();
 
     role_sub_ = this->create_subscription<oxebots_interfaces::msg::RoleAssignment>(
-      "/role_assignment", 10, std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
+      "/role_assignment", rclcpp::QoS(1).transient_local().reliable(),
+      std::bind(&StrategyNode::role_callback, this, std::placeholders::_1));
     
     game_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
       "game_data", 10, std::bind(&StrategyNode::game_callback, this, std::placeholders::_1));
@@ -271,14 +272,19 @@ private:
   {
     // D03: is_yellow volta a significar a cor real do time (invert_sides fica exclusivo da visão/simulador)
     blackboard_->set("is_yellow", is_yellow_);
+    blackboard_->set("goalkeeper_id", goalkeeper_id_);
     blackboard_->set("attacker_id", attacker_id_);
     blackboard_->set("defender_id", defender_id_);
+    blackboard_->set("kicker_id", kicker_id_);
     blackboard_->set("robot_id", static_cast<uint32_t>(robot_id_));
-    blackboard_->set("is_goalkeeper", (robot_id_ == 0));
-    blackboard_->set("is_attacker", (static_cast<uint32_t>(robot_id_) == attacker_id_));
-    blackboard_->set("is_defender", (static_cast<uint32_t>(robot_id_) == defender_id_));
-    blackboard_->set("role", (robot_id_ == 0) ? std::string("goalkeeper") : std::string("idle"));
-    blackboard_->set("kicker_id", 0u);
+    blackboard_->set("is_goalkeeper", false);
+    blackboard_->set("is_attacker", false);
+    blackboard_->set("is_defender", false);
+    blackboard_->set("is_kicker", false);
+    // P03: verdadeiro enquanto há um defensor atribuído. Começa verdadeiro (antes do primeiro
+    // RoleAssignment não se assume time reduzido); fica falso com só goleiro + atacante.
+    blackboard_->set("has_defender", true);
+    blackboard_->set("role", std::string("idle"));
     blackboard_->set("role_epoch", 0u);
     blackboard_->set("active_ids", std::vector<uint32_t>{});
 
@@ -497,7 +503,39 @@ public:
       blackboard_->set("gc_age_ms", 0.0);
     }
 
-    // 4. GameData (robôs, bola, velocidades e idades)
+    // 4. Papéis (RoleAssignment) — atualizado antes de GameData para que attacker_ball_dist use o attacker_id_ atual
+    if (roles) {
+      goalkeeper_id_ = roles->goalkeeper_id;
+      attacker_id_ = roles->attacker_id;
+      defender_id_ = roles->defender_id;
+      kicker_id_ = roles->kicker_id;
+
+      blackboard_->set("goalkeeper_id", roles->goalkeeper_id);
+      blackboard_->set("attacker_id", roles->attacker_id);
+      blackboard_->set("defender_id", roles->defender_id);
+      blackboard_->set("kicker_id", roles->kicker_id);
+      blackboard_->set("role_epoch", roles->epoch);
+      blackboard_->set("active_ids", roles->active_ids);
+
+      const uint32_t my_id = static_cast<uint32_t>(robot_id_);
+      std::string my_role = "idle";
+      if (my_id == roles->goalkeeper_id) {
+        my_role = "goalkeeper";
+      } else if (my_id == roles->attacker_id) {
+        my_role = "attacker";
+      } else if (my_id == roles->defender_id) {
+        my_role = "defender";
+      }
+      blackboard_->set("role", my_role);
+      blackboard_->set("is_goalkeeper", (my_id == roles->goalkeeper_id));
+      blackboard_->set("is_attacker", (my_id == roles->attacker_id));
+      blackboard_->set("is_defender", (my_id == roles->defender_id));
+      blackboard_->set("is_kicker", (my_id == roles->kicker_id));
+      blackboard_->set(
+        "has_defender", roles->defender_id != oxebots_interfaces::msg::RoleAssignment::NO_ROBOT);
+    }
+
+    // 5. GameData (robôs, bola, velocidades e idades)
     if (gd) {
       const double ball_x = static_cast<double>(gd->ball.x);
       const double ball_y = static_cast<double>(gd->ball.y);
@@ -608,27 +646,20 @@ public:
       double ball_age_ms = (now_time - last_game_data_time_).nanoseconds() / 1e6;
       if (ball_age_ms < 0.0) ball_age_ms = 0.0;
       blackboard_->set("ball_age_ms", ball_age_ms);
-    }
 
-    // 5. Papéis (RoleAssignment)
-    if (roles) {
-      attacker_id_ = roles->attacker_id;
-      defender_id_ = roles->defender_id;
-      blackboard_->set("attacker_id", roles->attacker_id);
-      blackboard_->set("defender_id", roles->defender_id);
-
-      const uint32_t my_id = static_cast<uint32_t>(robot_id_);
-      std::string my_role = "idle";
-      if (my_id == roles->attacker_id) {
-        my_role = "attacker";
-      } else if (my_id == roles->defender_id) {
-        my_role = "defender";
-      } else if (my_id == 0) {
-        my_role = "goalkeeper";
+      // Seleção dinâmica do canto livre do gol adversário (opp_goal_y / opponent_goal_y)
+      double opp_goal_x = 0.0;
+      double goal_width = 800.0;
+      (void)blackboard_->get("opp_goal_x", opp_goal_x);
+      if (!blackboard_->get("goal_width", goal_width) || goal_width <= 1.0) {
+        goal_width = 800.0;
       }
-      blackboard_->set("role", my_role);
-      blackboard_->set("is_attacker", (my_id == roles->attacker_id));
-      blackboard_->set("is_defender", (my_id == roles->defender_id));
+      if (std::abs(opp_goal_x) > 1.0) {
+        const double best_goal_y = selectBestGoalTargetY(
+          ball_x, ball_y, opp_goal_x, goal_width, gd->robots.enemies);
+        blackboard_->set("opp_goal_y", best_goal_y);
+        blackboard_->set("opponent_goal_y", best_goal_y);
+      }
     }
   }
 
@@ -750,11 +781,87 @@ public:
     return "phase=" + phase_str;
   }
 
+  double selectBestGoalTargetY(
+    double ball_x,
+    double ball_y,
+    double opp_goal_x,
+    double goal_width,
+    const std::vector<oxebots_interfaces::msg::RobotGameData> & enemies)
+  {
+    const double corner_y = std::max(150.0, (goal_width / 2.0) - 150.0);
+    const double attack_sign = (opp_goal_x > 0.0) ? 1.0 : -1.0;
+
+    auto point_to_ray_dist = [](double px, double py,
+                                double ax, double ay,
+                                double bx, double by) -> double {
+      const double vx = bx - ax;
+      const double vy = by - ay;
+      const double len2 = vx * vx + vy * vy;
+      if (len2 < 1e-6) {
+        return std::hypot(px - ax, py - ay);
+      }
+      const double t = std::clamp(((px - ax) * vx + (py - ay) * vy) / len2, 0.0, 1.0);
+      const double proj_x = ax + t * vx;
+      const double proj_y = ay + t * vy;
+      return std::hypot(px - proj_x, py - proj_y);
+    };
+
+    auto eval_clearance = [&](double target_y, bool & has_blocker) -> double {
+      double min_clear = std::numeric_limits<double>::infinity();
+      for (const auto & e : enemies) {
+        const double ex = static_cast<double>(e.x);
+        const double ey = static_cast<double>(e.y);
+        // Considera apenas adversários entre a bola e a linha de fundo adversária
+        if ((ex - ball_x) * attack_sign < -50.0) {
+          continue;
+        }
+        if (std::abs(opp_goal_x - ex) <= 1200.0 && std::abs(ey) <= (goal_width / 2.0 + 350.0)) {
+          has_blocker = true;
+        }
+        const double d = point_to_ray_dist(ex, ey, ball_x, ball_y, opp_goal_x, target_y);
+        if (d < min_clear) {
+          min_clear = d;
+        }
+      }
+      return min_clear;
+    };
+
+    bool has_blocker = false;
+    const double clear_top = eval_clearance(corner_y, has_blocker);
+    const double clear_bot = eval_clearance(-corner_y, has_blocker);
+
+    // Sem goleiro/defensor adversário na frente do gol: mira no centro (maior margem contra as traves)
+    if (!has_blocker) {
+      last_selected_goal_y_ = 0.0;
+      return 0.0;
+    }
+
+    // Histerese anti-oscilação: mantém o canto já escolhido a menos que o outro tenha >= 40 mm a mais de folga
+    constexpr double kHysteresisMm = 40.0;
+    double score_top = clear_top;
+    double score_bot = clear_bot;
+    if (std::abs(last_selected_goal_y_ - corner_y) < 1.0) {
+      score_top += kHysteresisMm;
+    } else if (std::abs(last_selected_goal_y_ - (-corner_y)) < 1.0) {
+      score_bot += kHysteresisMm;
+    }
+
+    if (std::abs(score_top - score_bot) < 1e-3) {
+      last_selected_goal_y_ = (ball_y >= 0.0) ? -corner_y : corner_y;
+    } else {
+      last_selected_goal_y_ = (score_top > score_bot) ? corner_y : -corner_y;
+    }
+    return last_selected_goal_y_;
+  }
+
   bool is_yellow_;
   bool invert_sides_;
   int robot_id_;
-  uint32_t attacker_id_{2};
-  uint32_t defender_id_{1};
+  double last_selected_goal_y_{0.0};
+  uint32_t goalkeeper_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t attacker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t defender_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
+  uint32_t kicker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
 
   double possession_distance_mm_{220.0};
   bool require_gc_{true};

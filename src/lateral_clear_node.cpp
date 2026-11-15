@@ -104,7 +104,7 @@ BT::NodeStatus LateralClearNode::onStart()
     contact_since_valid_ = false;
     engage_start_ = node_->now();
 
-    return BT::NodeStatus::RUNNING;
+    return onRunning();
 }
 
 // Escolhe para onde chutar. Passe: o aliado à frente da bola com corredor livre de adversários (cápsula que
@@ -244,13 +244,13 @@ BT::NodeStatus LateralClearNode::onRunning()
         return BT::NodeStatus::FAILURE;
     }
 
-    // Geometria e pose vêm do Blackboard raiz; sem elas o nó espera (sem assumir valores padrão)
+    // Geometria e pose vêm do Blackboard raiz; sem elas o nó falha (sem assumir valores padrão)
     gk::FieldGeometry geo;
     double rx, ry, ryaw;
     if (!gk::readFieldGeometry(config(), geo) || !gk::readRobotPose(config(), rx, ry, ryaw)) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
             "LateralClear: aguardando geometria do campo e pose do robô no Blackboard raiz");
-        return BT::NodeStatus::RUNNING;
+        return BT::NodeStatus::FAILURE;
     }
     const double my_goal_x = geo.my_goal_x;
     const double p_depth = geo.penalty_area_depth;

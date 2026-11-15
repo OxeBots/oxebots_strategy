@@ -24,7 +24,7 @@
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
         </Fallback>
-        <SubTree ID="KickOffTree" _autoremap="true" />
+        <SubTree ID="PrepareKickoffOurTree" _autoremap="true" />
       </ReactiveSequence>
 
       <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
@@ -33,46 +33,64 @@
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
         </Fallback>
-        <SubTree ID="PenaltyTree" _autoremap="true" />
+        <SubTree ID="PreparePenaltyOurTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- NOSSAS FALTAS / LATERAIS (Já resolvidas no C++) -->
-      <ReactiveSequence name="CornerBranch">
-          <IsValueTrue value="{is_corner_kick}"/>
-          <SubTree ID="CornerTree" _autoremap="true" />
+      <!-- BOLA PARADA DO ADVERSÁRIO: PÊNALTI DELES (Amarelo 7, Azul 6) -->
+      <ReactiveSequence name="TheirPenaltyBranch">
+        <Fallback>
+          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
+          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
+        </Fallback>
+        <SubTree ID="PreparePenaltyTheirTree" _autoremap="true" />
       </ReactiveSequence>
-      <ReactiveSequence name="ThrowInBranch">
-          <IsValueTrue value="{is_kick_in}"/>
-          <SubTree ID="ThrowInTree" _autoremap="true" />
+
+      <!-- EXECUÇÃO DO PÊNALTI APÓS NORMAL_START (fase PENALTY) -->
+      <ReactiveSequence name="PenaltyExecuteBranch">
+        <CheckGameState phase="PENALTY"/>
+        <ReactiveFallback>
+          <ReactiveSequence>
+            <WeAreFavored/>
+            <SubTree ID="PenaltyExecuteOurTree" _autoremap="true"/>
+          </ReactiveSequence>
+          <SubTree ID="PenaltyDefendTheirTree" _autoremap="true"/>
+        </ReactiveFallback>
       </ReactiveSequence>
+
+      <!-- NOSSAS FALTAS / LATERAIS / ESCANTEIOS (unificadas E07) -->
       <ReactiveSequence name="FreeKickBranch">
+        <Fallback>
           <IsValueTrue value="{is_free_kick}"/>
-          <SubTree ID="FreeKickTree" _autoremap="true" />
+          <IsValueTrue value="{is_corner_kick}"/>
+          <IsValueTrue value="{is_kick_in}"/>
+        </Fallback>
+        <SubTree ID="FreeKickOurTree" _autoremap="true" />
       </ReactiveSequence>
 
       <!-- ========================================================= -->
-      <!-- BOLA PARADA DO ADVERSÁRIO: Usa o OppSetPieceTree para RECUAR -->
+      <!-- BOLA PARADA DO ADVERSÁRIO: Barreira legal a >= 0.5m (E07) -->
       <ReactiveSequence name="OpponentSetPieceBranch">
         <Fallback>
           <!-- Kick-Off deles -->
           <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
           <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
-          <!-- Pênalti deles -->
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
-          <!-- Falta deles (Direta Amarelo 8, Direta Azul 9) -->
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="9"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="8"/></Sequence>
+          <!-- Falta deles: pela FASE e não pelo comando bruto. O GC mantém o comando DIRECT_FREE_* depois
+               que a bola entra em jogo; checar 8/9 deixava o time que sofreu a falta preso na barreira
+               (e o goleiro recuando da bola) até o próximo STOP. Em RUN a fase deixa de ser FREE_KICK. -->
+          <Sequence>
+            <CheckGameState phase="FREE_KICK"/>
+            <Inverter><WeAreFavored/></Inverter>
+          </Sequence>
           <!-- Fallback herdado do sistema anterior -->
           <IsValueTrue value="{is_opponent_foul}"/>
         </Fallback>
-        <SubTree ID="OppSetPieceTree" _autoremap="true" />
+        <SubTree ID="FreeKickTheirTree" _autoremap="true" />
       </ReactiveSequence>
       <!-- ========================================================= -->
 
       <!-- JOGO ROLANDO -->
       <ReactiveSequence name="GoalkeeperRole">
-        <IsRobotId robot_id="0" />
+        <HasRole role="goalkeeper" />
         <SubTree ID="GoalkeeperTree" _autoremap="true" />
       </ReactiveSequence>
 

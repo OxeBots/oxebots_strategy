@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  Árvore de TESTE do T06 (não entra em jogo): serve ao launch test test/test_halt_preempt.launch.py.
+
+  É a MainTreeEL reduzida ao que o teste de preempção do HALT precisa: SafetyGuard e HaltBranch são
+  CÓPIAS idênticas dos da master_strategy_el.xml (test_trees_policy.py confere que continuam iguais) e
+  o RunBranch faz o robô andar (GoToPoint para longe), o que a MainTreeEL ainda não faz porque o seu
+  RunBranch é provisório (A06). Quando o A06 entrar, o teste pode passar a usar a master_strategy_el.xml
+  e esta árvore sai.
+
+  Uso (o teste faz isto sozinho): bt_xml_path:=test_halt_preempt.xml
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTreeHaltPreemptTest">
+  <BehaviorTree ID="MainTreeHaltPreemptTest">
+    <ReactiveFallback name="MasterHaltPreemptTest">
+
+      <ReactiveSequence name="SafetyGuard">
+        <Inverter>
+          <IsDataFresh max_gc_ms="500" max_pose_ms="150" max_ball_ms="300"/>
+        </Inverter>
+        <SubTree ID="DegradedModeTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="HaltBranch">
+        <CheckGameState phase="HALT"/>
+        <SubTree ID="HaltSubTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="RunBranch">
+        <CheckGameState phase="RUN"/>
+        <GoToPoint robot_id="{robot_id}" x="{opp_goal_x}" y="0.0" planner="straight_line"/>
+      </ReactiveSequence>
+
+      <Halt reason="unknown_phase"/>
+
+    </ReactiveFallback>
+  </BehaviorTree>
+</root>

@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<!--
+  E05 — Kickoff legal unificado (SC-05, SC-06, R-11, R-12, R-28).
+  - PrepareKickoffOurTree: goleiro na meta; cobrador (kicker) no círculo central (kickoff_kicker);
+    demais robôs na própria metade fora do círculo (kickoff_def).
+  - PrepareKickoffTheirTree: goleiro na meta; todos na própria metade fora do círculo central (kickoff_def).
+    Usada também como espera durante o KICKOFF do adversário.
+  - KickoffExecuteOurTree: cobrador executa RestartKickerTree (SC-05); demais robôs seguram posição (HoldPosition, R-12).
+-->
+<root BTCPP_format="4">
+
+  <!-- 1. Preparação para o nosso kick-off (SC-05, R-11) -->
+  <BehaviorTree ID="PrepareKickoffOurTree">
+    <ReactiveFallback name="PrepareKickoffOurRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="KickerRole">
+        <HasRole role="kicker"/>
+        <ComputeLegalSlot slot="kickoff_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="LineDefendersRole">
+        <ComputeLegalSlot slot="kickoff_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 2. Preparação para kick-off adversário e espera durante execução adversária (SC-06, R-11, R-28) -->
+  <BehaviorTree ID="PrepareKickoffTheirTree">
+    <ReactiveFallback name="PrepareKickoffTheirRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="AttackerDefendingRole">
+        <HasRole role="attacker"/>
+        <ComputeLegalSlot slot="kickoff_def" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="DefenderRole">
+        <ComputeLegalSlot slot="kickoff_def" index="1" slot_x="{slot_x}" slot_y="{slot_y}"/>
+        <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+  <!-- 3. Execução do nosso kick-off após NORMAL_START (SC-05, R-12) -->
+  <BehaviorTree ID="KickoffExecuteOurTree">
+    <ReactiveFallback name="KickoffExecuteOurRoles">
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="KickerRole">
+        <HasRole role="kicker"/>
+        <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="HoldOtherRobotsRole">
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+    </ReactiveFallback>
+  </BehaviorTree>
+
+</root>

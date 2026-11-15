@@ -3,10 +3,10 @@
     <Fallback name="KickOffRoles">
         
         <!-- 1. GOLEIRO -->
-        <Sequence name="GoalKeeperRole">
-            <IsRobotId robot_id="0"/>
+        <ReactiveSequence name="GoalKeeperRole">
+            <HasRole role="goalkeeper"/>
             <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-        </Sequence>
+        </ReactiveSequence>
 
         <!-- 2. ATACANTE (No próprio campo aguardando o apito) -->
         <Sequence name="Kicker">

@@ -23,8 +23,12 @@ PRODUCTION = [
     'master_strategy_el.xml',
     'attacker_tree.xml',
     'defender_tree.xml',
+    'goalkeeper_tree.xml',
     'restart_kicker.xml',
     'stop.xml',
+    'free_kick.xml',
+    'kickoff.xml',
+    'penalty.xml',
 ]
 
 MAX_KICK_SPEED = 3.0
@@ -78,6 +82,18 @@ def test_atacante_no_mestre_usa_hasrole_e_a_subarvore():
     assert children[1].tag == 'SubTree' and children[1].attrib.get('ID') == 'AttackerTree'
 
 
+def test_goleiro_usa_hasrole_sem_robot_id_fixo():
+    root = load('master_strategy_carry.xml')
+    gk_role = next(el for el in root.iter('ReactiveSequence') if el.attrib.get('name') == 'GoalkeeperRole')
+    children = list(gk_role)
+    assert children[0].tag == 'HasRole' and children[0].attrib.get('role') == 'goalkeeper'
+    assert children[1].tag == 'SubTree' and children[1].attrib.get('ID') == 'GoalkeeperTree'
+
+    gk_tree = load('goalkeeper_tree.xml')
+    assert [el.attrib.get('role') for el in gk_tree.iter('HasRole')] == ['goalkeeper']
+    assert not list(gk_tree.iter('IsRobotId'))
+
+
 def test_arvore_do_atacante_nao_tem_guarda_de_papel():
     # A guarda mora em quem chama; assim a árvore é só comportamento.
     root = load('attacker_tree.xml')
@@ -104,3 +120,156 @@ def test_restart_kicker_expoe_as_portas_e_termina_em_kickonce():
     assert kick[0].attrib['target_x'] == '{target_x}' and kick[0].attrib['target_y'] == '{target_y}'
     # O IsBallClose antes do KickOnce garante o contato exigido pelo controlador.
     assert list(tree.iter('IsBallClose'))
+
+
+def test_free_kick_trees_estrutura_e_papeis():
+    root = load('free_kick.xml')
+    our_tree = root.find("./BehaviorTree[@ID='FreeKickOurTree']")
+    their_tree = root.find("./BehaviorTree[@ID='FreeKickTheirTree']")
+    assert our_tree is not None, 'FreeKickOurTree ausente em free_kick.xml'
+    assert their_tree is not None, 'FreeKickTheirTree ausente em free_kick.xml'
+
+    # FreeKickOurTree usa RestartKickerTree (cruzamento no escanteio, passe no lateral e chute direto no gol)
+    kicker_subtrees = [el for el in our_tree.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(kicker_subtrees) >= 1
+    targets = [(el.attrib.get('target_x'), el.attrib.get('target_y')) for el in kicker_subtrees]
+    assert ('{opp_goal_x}', '{opp_goal_y}') in targets
+    assert ('{cross_x}', '{cross_y}') in targets
+    assert ('{pass_x}', '{pass_y}') in targets
+
+    our_slots = [el.attrib.get('slot') for el in our_tree.iter('ComputeLegalSlot')]
+    assert 'freekick_support' in our_slots
+    assert 'corner_target' in our_slots
+    assert 'corner_receiver' in our_slots
+    assert 'throwin_target' in our_slots
+    assert 'throwin_receiver' in our_slots
+
+    # FreeKickTheirTree usa retreat (emergência), wall (barreira) e def_box_guard (proteção da área/2º na barreira)
+    their_slots = [el.attrib.get('slot') for el in their_tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in their_slots
+    assert 'wall' in their_slots
+    assert 'def_box_guard' in their_slots
+
+
+def test_kickoff_trees_estrutura_e_papeis():
+    root = load('kickoff.xml')
+    prep_our = root.find("./BehaviorTree[@ID='PrepareKickoffOurTree']")
+    prep_their = root.find("./BehaviorTree[@ID='PrepareKickoffTheirTree']")
+    exec_our = root.find("./BehaviorTree[@ID='KickoffExecuteOurTree']")
+
+    assert prep_our is not None, 'PrepareKickoffOurTree ausente em kickoff.xml'
+    assert prep_their is not None, 'PrepareKickoffTheirTree ausente em kickoff.xml'
+    assert exec_our is not None, 'KickoffExecuteOurTree ausente em kickoff.xml'
+
+    # PrepareKickoffOurTree tem cobrador com kickoff_kicker e defensores com kickoff_def
+    prep_our_slots = [el.attrib.get('slot') for el in prep_our.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' in prep_our_slots
+    assert 'kickoff_def' in prep_our_slots
+
+    # PrepareKickoffTheirTree só tem kickoff_def (ninguém no círculo central)
+    prep_their_slots = [el.attrib.get('slot') for el in prep_their.iter('ComputeLegalSlot')]
+    assert 'kickoff_kicker' not in prep_their_slots
+    assert 'kickoff_def' in prep_their_slots
+
+    # KickoffExecuteOurTree tem cobrador com RestartKickerTree e outros em HoldPosition
+    exec_kicker = [el for el in exec_our.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(exec_kicker) == 1
+    assert exec_kicker[0].attrib['target_x'] == '{opp_goal_x}'
+    assert exec_kicker[0].attrib['target_y'] == '{opp_goal_y}'
+    assert list(exec_our.iter('HoldPosition')), 'HoldPosition ausente para demais robôs em KickoffExecuteOurTree'
+
+
+def test_stop_tree_estrutura_e_papeis():
+    root = load('stop.xml')
+    tree = root.find("./BehaviorTree[@ID='StopSubTree']")
+    assert tree is not None, 'StopSubTree ausente em stop.xml'
+
+    # Limite regulamentar de velocidade (<= 0,75 m/s)
+    limits = [numeric(el.attrib.get('limit_mps', '99')) for el in tree.iter('SetMotionLimit')]
+    assert limits and all(v is not None and v <= 0.75 for v in limits)
+
+    # Slots de emergência (retreat), sombra ofensiva (stop_shadow) e barreira defensiva (stop_def)
+    slots = [el.attrib.get('slot') for el in tree.iter('ComputeLegalSlot')]
+    assert 'retreat' in slots
+    assert 'stop_shadow' in slots
+    assert 'stop_def' in slots
+
+    # Goleiro usa GoalLineDefend (sem sair para chutar) e fallback usa HoldPosition
+    assert list(tree.iter('GoalLineDefend'))
+    assert list(tree.iter('HoldPosition'))
+
+
+def test_penalty_trees_estrutura_e_papeis():
+    root = load('penalty.xml')
+    prep_our = root.find("./BehaviorTree[@ID='PreparePenaltyOurTree']")
+    prep_their = root.find("./BehaviorTree[@ID='PreparePenaltyTheirTree']")
+    exec_our = root.find("./BehaviorTree[@ID='PenaltyExecuteOurTree']")
+    def_their = root.find("./BehaviorTree[@ID='PenaltyDefendTheirTree']")
+
+    assert prep_our is not None, 'PreparePenaltyOurTree ausente em penalty.xml'
+    assert prep_their is not None, 'PreparePenaltyTheirTree ausente em penalty.xml'
+    assert exec_our is not None, 'PenaltyExecuteOurTree ausente em penalty.xml'
+    assert def_their is not None, 'PenaltyDefendTheirTree ausente em penalty.xml'
+
+    # PreparePenaltyOurTree: cobrador com penalty_kicker e defensores/atacantes com penalty_behind
+    prep_our_slots = [el.attrib.get('slot') for el in prep_our.iter('ComputeLegalSlot')]
+    assert 'penalty_kicker' in prep_our_slots
+    assert 'penalty_behind' in prep_our_slots
+    assert any(el.attrib.get('ID') == 'GoalkeeperTree' for el in prep_our.iter('SubTree'))
+
+    # PreparePenaltyTheirTree: goleiro na linha com PenaltyKeeperLine, robôs atrás com penalty_behind
+    prep_their_slots = [el.attrib.get('slot') for el in prep_their.iter('ComputeLegalSlot')]
+    assert 'penalty_behind' in prep_their_slots
+    assert 'penalty_kicker' not in prep_their_slots
+    assert list(prep_their.iter('PenaltyKeeperLine'))
+
+    # PenaltyExecuteOurTree: cobrador com RestartKickerTree e demais em HoldPosition
+    exec_kicker = [el for el in exec_our.iter('SubTree') if el.attrib.get('ID') == 'RestartKickerTree']
+    assert len(exec_kicker) == 1
+    assert exec_kicker[0].attrib['target_x'] == '{opp_goal_x}'
+    assert exec_kicker[0].attrib['target_y'] == '{opp_goal_y}'
+    assert list(exec_our.iter('HoldPosition'))
+
+    # PenaltyDefendTheirTree: goleiro com WaitBallInPlay + PenaltyKeeperLine e GoalkeeperTree, demais em HoldPosition
+    assert list(def_their.iter('WaitBallInPlay'))
+    assert list(def_their.iter('PenaltyKeeperLine'))
+    assert any(el.attrib.get('ID') == 'GoalkeeperTree' for el in def_their.iter('SubTree'))
+    assert list(def_their.iter('HoldPosition'))
+
+
+
+
+
+
+def canonical(el):
+    """Forma comparável de um nó: tag, atributos e filhos (comentários e espaços não contam)."""
+    return (el.tag, tuple(sorted(el.attrib.items())), tuple(canonical(child) for child in el))
+
+
+def test_arvore_de_teste_do_halt_copia_safetyguard_e_haltbranch_da_mestre():
+    # T06: o launch test mede o HALT com test_halt_preempt.xml. Se o SafetyGuard ou o HaltBranch da
+    # MainTreeEL mudarem e a árvore de teste não, o teste mediria uma árvore que não é a do jogo.
+    master = load('master_strategy_el.xml')
+    test_tree = load('test_halt_preempt.xml')
+    for name in ('SafetyGuard', 'HaltBranch'):
+        in_master = next(el for el in master.iter() if el.attrib.get('name') == name)
+        in_test = next(el for el in test_tree.iter() if el.attrib.get('name') == name)
+        assert canonical(in_master) == canonical(in_test), (
+            f'"{name}" de test_halt_preempt.xml diverge de master_strategy_el.xml; '
+            'atualize a árvore de teste do T06.')
+
+
+def test_falta_do_adversario_na_carry_decide_pela_fase_e_nao_pelo_comando():
+    # O GC mantém o comando DIRECT_FREE_* depois que a bola entra em jogo (H-01). Se este ramo
+    # voltar a checar o comando bruto (8/9), o time que sofreu a falta fica preso na barreira, e o
+    # goleiro recuando da bola, até o próximo STOP.
+    root = load('master_strategy_carry.xml')
+    branch = next(el for el in root.iter('ReactiveSequence')
+                  if el.attrib.get('name') == 'OpponentSetPieceBranch')
+    raw_commands = [el.attrib.get('expected') for el in branch.iter('CheckGCCommand')]
+    assert '8' not in raw_commands and '9' not in raw_commands, (
+        'OpponentSetPieceBranch checa o comando bruto de falta (8/9); use CheckGameState '
+        'FREE_KICK e Inverter(WeAreFavored), que respeitam a fase.')
+    phases = [el.attrib.get('phase') for el in branch.iter('CheckGameState')]
+    assert 'FREE_KICK' in phases
+    assert list(branch.iter('WeAreFavored')), 'falta sem checar quem é o favorecido'

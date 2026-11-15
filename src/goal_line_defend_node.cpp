@@ -117,7 +117,7 @@ BT::NodeStatus GoalLineDefendNode::onStart()
         last_ball_pred_.reset();
     }
     intercepting_ = false;
-    return BT::NodeStatus::RUNNING;
+    return onRunning();
 }
 
 BT::NodeStatus GoalLineDefendNode::onRunning()
@@ -125,13 +125,13 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     double ball_x, ball_y;
     if (!getInput<double>("ball_x", ball_x) || !getInput<double>("ball_y", ball_y)) return BT::NodeStatus::FAILURE;
 
-    // Geometria atualizada por /field_geometry no Blackboard raiz; sem ela o nó espera, em vez de assumir
+    // Geometria atualizada por /field_geometry no Blackboard raiz; sem ela o nó falha, em vez de assumir
     // valores padrão (que poderiam inverter o lado do gol ou usar uma área de outro campo)
     goalkeeper::FieldGeometry geo;
     if (!goalkeeper::readFieldGeometry(config(), geo)) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
             "GoalLineDefend: aguardando a geometria do campo no Blackboard raiz");
-        return BT::NodeStatus::RUNNING;
+        return BT::NodeStatus::FAILURE;
     }
     my_goal_x_ = geo.my_goal_x;
     const double area_depth = geo.penalty_area_depth;
