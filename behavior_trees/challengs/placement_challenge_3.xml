@@ -1,0 +1,60 @@
+<root BTCPP_format="4">
+    <BehaviorTree ID="PlacementKickOff">
+        <Fallback>
+            
+            <Sequence>
+                <Fallback>
+                    <CheckGCCommand expected="4"/>
+                    <CheckGCCommand expected="2"/>
+                </Fallback>
+                
+                <Fallback>
+                    
+                    <!-- ROBÔ ID 0 -->
+                    <Sequence>
+                        <IsThisNodeID id="0"/>
+                        <GoToPoint robot_id="0" x="-500" y="-1000" face_x="1000" face_y="-1300" tolerance="50.0" ignore_area="true" planner="straight_line"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="0" x="2100" y="0" face_x="1100" face_y="0" tolerance="50.0" ignore_area="true"/>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 1 -->
+                    <Sequence>
+                        <IsThisNodeID id="1"/>
+                        <!-- Contorna o centro por cima -->
+                        <GoToPoint robot_id="1" x="-700" y="1200" face_x="250" face_y="700" tolerance="100.0" ignore_area="true" planner="straight_line"/>
+                        <!-- Alvo final travado -->
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="1" x="250" y="700" face_x="-750" face_y="700" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+
+                    <!-- ROBÔ ID 2 (Cobrador / Kicker) -->
+                    <Sequence>
+                        <IsThisNodeID id="2"/>
+                        <!-- TIME DE ESPERA: Aguarda 1.5s para que os Robôs 0 e 1 liberem a saída frontal -->
+                        <Sleep msec="1500"/>
+                        <!-- Contorna pelo corredor inferior (-Y) garantindo isolamento total do Robô 1 (+Y) e margem da bola -->
+                        <GoToPoint robot_id="2" x="-500" y="-700" face_x="250" face_y="-700" tolerance="100.0" ignore_area="true" planner="straight_line"/>
+                        <GoToPoint robot_id="2" x="250" y="-700" face_x="250" face_y="0" tolerance="100.0"/>
+                        <Repeat num_cycles="-1">
+                            <GoToPoint robot_id="2" x="250" y="0" face_x="-750" face_y="0" tolerance="50.0"/>
+                        </Repeat>
+                    </Sequence>
+                    
+                    <!-- DEMAIS ROBÔS ESTÁTICOS -->
+                    <Repeat num_cycles="-1">
+                        <Sequence><Halt reason="assistindo"/><Sleep msec="100"/></Sequence>
+                    </Repeat>
+
+                </Fallback>
+            </Sequence>
+
+            <Sequence>
+                <Halt reason="aguardando_juiz"/>
+            </Sequence>
+
+        </Fallback>
+    </BehaviorTree>
+</root>

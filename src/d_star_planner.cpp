@@ -165,11 +165,22 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     int idx = u.y * grid_width_ + u.x;
 
     // Parede de área de pênalti (valor 101): NUNCA pode ser ignorada pela vizinhança do alvo!
-    // Exceção apenas para a vizinhança imediata do robô (dist <= 3 células = 15cm) com custo alto,
-    // caso o robô tenha escorregado ou sido repelido pela bola para dentro da margem, para conseguir sair.
+    // Exceção para a vizinhança imediata do robô (dist <= 3 células = 15cm) ou quando o próprio
+    // robô já iniciou dentro da área (ou em modo relax_obstacles_), aplicando custo alto (25..50)
+    // para que o D* sempre planeje a rota mais curta de saída em vez de travar com custo infinito.
     if (current_grid_->data[idx] > 100) {
-        if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 3 && std::abs(u.y - start_cell_->y) <= 3) {
-            return 25.0;
+        if (start_cell_.has_value()) {
+            if (std::abs(u.x - start_cell_->x) <= 3 && std::abs(u.y - start_cell_->y) <= 3) {
+                return 25.0;
+            }
+            int start_idx = start_cell_->y * grid_width_ + start_cell_->x;
+            if (start_idx >= 0 && start_idx < static_cast<int>(current_grid_->data.size()) &&
+                current_grid_->data[start_idx] > 100) {
+                return 50.0;
+            }
+        }
+        if (relax_obstacles_) {
+            return 50.0;
         }
         return std::numeric_limits<double>::infinity();
     }
@@ -437,7 +448,7 @@ PlannerStatus DStarPlanner::plan()
     auto t2 = std::chrono::steady_clock::now();
     metrics_.planning_time = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
 
-    if (s_node->tag == Tag::CLOSED)
+    if (s_node->tag == Tag::CLOSED && std::isfinite(s_node->h))
     {
         metrics_.path_cost = s_node->h;
         RCLCPP_INFO(logger_, "Path found: %d expansions, cost %.2f after %ld us", steps, s_node->h,
