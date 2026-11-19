@@ -56,6 +56,7 @@ void DStarPlanner::setOccupancyGrid(const nav_msgs::msg::OccupancyGrid::SharedPt
         grid_nodes_.clear();
         grid_nodes_.reserve(grid_width_ * grid_height_);
         dynamic_obstacle_map_.assign(grid_width_ * grid_height_, false);
+        strict_dynamic_obstacle_map_.assign(grid_width_ * grid_height_, false);
         for (int y = 0; y < grid_height_; ++y)
         {
             for (int x = 0; x < grid_width_; ++x)
@@ -80,7 +81,10 @@ void DStarPlanner::setDynamicObstacles(const std::vector<DynamicObstacle> & obst
     std::vector<GridCell> old_obstacles = dynamic_obstacles_;
     for (const auto & obs : old_obstacles) {
         int idx = obs.y * grid_width_ + obs.x;
-        if (idx >= 0 && idx < (int)dynamic_obstacle_map_.size()) dynamic_obstacle_map_[idx] = false;
+        if (idx >= 0 && idx < (int)dynamic_obstacle_map_.size()) {
+            dynamic_obstacle_map_[idx] = false;
+            strict_dynamic_obstacle_map_[idx] = false;
+        }
     }
     dynamic_obstacles_.clear();
 
@@ -99,14 +103,19 @@ void DStarPlanner::setDynamicObstacles(const std::vector<DynamicObstacle> & obst
         {
             for (int dy = -radius_cells; dy <= radius_cells; ++dy)
             {
-                if (std::hypot(dx * resolution_, dy * resolution_) > obstacle.radius_m + 1e-6) {
+                const double dist_m = std::hypot(dx * resolution_, dy * resolution_);
+                if (dist_m > obstacle.radius_m + 1e-6) {
                     continue;
                 }
                 GridCell cell = {center.x + dx, center.y + dy};
                 // Apenas adiciona se estiver dentro dos limites do mapa
                 if (cell.x >= 0 && cell.x < grid_width_ && cell.y >= 0 && cell.y < grid_height_) {
+                    const int idx = cell.y * grid_width_ + cell.x;
                     dynamic_obstacles_.push_back(cell);
-                    dynamic_obstacle_map_[cell.y * grid_width_ + cell.x] = true;
+                    dynamic_obstacle_map_[idx] = true;
+                    if (obstacle.strict_radius_m > 0.0 && dist_m <= obstacle.strict_radius_m + 1e-6) {
+                        strict_dynamic_obstacle_map_[idx] = true;
+                    }
                 }
             }
         }
@@ -197,8 +206,12 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     // anteriormente, liberar <= 8 células (400mm!) ao redor de goal_cell_ apagava inteiramente o
     // obstáculo da bola (já que o ponto de pré-chute fica a 400mm da bola), fazendo o D* planejar
     // linha reta por cima da bola em vez de dar a volta!
-    if (dynamic_obstacle_map_[idx])
+    if (dynamic_obstacle_map_[idx]) {
+        if (idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) && strict_dynamic_obstacle_map_[idx]) {
+            return std::numeric_limits<double>::infinity();
+        }
         return relax_obstacles_ ? 30.0 : std::numeric_limits<double>::infinity();
+    }
 
     // Ignorar a inflação do próprio robô no mapa estático (/map marca o próprio robô com 3 células)
     if (start_cell_.has_value() && std::abs(u.x - start_cell_->x) <= 3 && std::abs(u.y - start_cell_->y) <= 3) {
@@ -576,6 +589,7 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     };
 
     robot_id_ = safe_param("robot_id", 0).as_int();
+    default_goalkeeper_id_ = safe_param("goalkeeper_id", 0).as_int();
     is_yellow_ = safe_param("is_yellow_team", false).as_bool();
     invert_sides_ = safe_param("invert_sides", false).as_bool();
     planning_rate_hz_ = safe_param("planning_rate_hz", 10.0).as_double();
@@ -670,7 +684,8 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
     }
 
     PenaltyAreaBounds bounds;
-    if (robot_id_ == 0) {
+    const int active_gk_id = our_goalkeeper_id_.value_or(default_goalkeeper_id_);
+    if (robot_id_ == active_gk_id) {
         // O goleiro pode entrar na própria área, mas não na adversária
         if (effective_is_yellow) {
             bounds.block_positive = false;
@@ -765,12 +780,26 @@ void DStarPlannerNode::game_state_callback(const oxebots_interfaces::msg::GameSt
 {
     if (!msg) return;
     std::lock_guard<std::mutex> lock(node_mutex_);
-    const bool changed = !own_goal_positive_x_.has_value() || *own_goal_positive_x_ != msg->our_goal_positive_x;
+    const bool side_changed = !own_goal_positive_x_.has_value() || *own_goal_positive_x_ != msg->our_goal_positive_x;
     own_goal_positive_x_ = msg->our_goal_positive_x;
-    // Troca de lados: as paredes de área já desenhadas no grid ficam no lado errado; redesenha.
-    if (changed && raw_map_data_ && last_geometry_) {
-        RCLCPP_INFO(get_logger(), "D* [Robô %d]: lado do campo mudou (nosso gol em x %s); redesenhando as áreas.",
-                    robot_id_, msg->our_goal_positive_x ? "positivo" : "negativo");
+
+    bool gk_changed = false;
+    if (!msg->stale) {
+        const int new_gk_id = static_cast<int>(msg->our_goalkeeper_id);
+        gk_changed = !our_goalkeeper_id_.has_value() || *our_goalkeeper_id_ != new_gk_id;
+        our_goalkeeper_id_ = new_gk_id;
+        ball_min_distance_m_ = (msg->ball_min_distance_mm > 0.0f)
+            ? static_cast<double>(msg->ball_min_distance_mm) / 1000.0
+            : 0.0;
+    } else {
+        ball_min_distance_m_ = 0.0;
+    }
+
+    // Troca de lados ou de goleiro (R-02, SC-17, SC-22): redesenha as paredes de área no grid.
+    if ((side_changed || gk_changed) && raw_map_data_ && last_geometry_) {
+        RCLCPP_INFO(get_logger(), "D* [Robô %d]: estado de área mudou (nosso gol em x %s, goleiro=%d); redesenhando as áreas.",
+                    robot_id_, msg->our_goal_positive_x ? "positivo" : "negativo",
+                    our_goalkeeper_id_.value_or(default_goalkeeper_id_));
         applyMapWithPenaltyBounds(raw_map_data_);
     }
 }
@@ -820,7 +849,13 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
     // Para o atacante isso é seguro porque o CalculateInterceptionNode mira primeiro um ponto de
     // pré-chute a ~400mm atrás da bola (bem fora de ball_safety_radius_m_) usando D*, e só troca
     // para PLANNER_STRAIGHT_LINE na aproximação final (Fase 2), que não consulta esta grade.
-    obstacles.push_back({ball_x_, ball_y_, ball_safety_radius_m_});
+    // Quando o GameState exige distância mínima à bola (ex.: 500 mm em STOP ou reinício adversário),
+    // infla o raio do obstáculo para ball_min_distance_m_ + 0.08 m (ex.: 0.58 m para R-06).
+    const double effective_ball_radius_m = (ball_min_distance_m_ > 0.0)
+        ? std::max(ball_safety_radius_m_, ball_min_distance_m_ + 0.08)
+        : ball_safety_radius_m_;
+    const double strict_ball_radius_m = (ball_min_distance_m_ > 0.0) ? ball_min_distance_m_ : 0.0;
+    obstacles.push_back({ball_x_, ball_y_, effective_ball_radius_m, strict_ball_radius_m});
 
     if (planner_)
         planner_->setDynamicObstacles(obstacles);
@@ -850,7 +885,10 @@ void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& targe
     // Raio de segurança total (robô + bola + margem). Só se aplica ANTES do trecho final: o
     // próprio alvo (int_cap_x/y) fica de propósito a ~115mm da bola (kCaptureDistanceMm), então
     // fechar essa distância no fim é o objetivo, não um risco de colisão a evitar.
-    constexpr double kClearanceM = 0.20;
+    // Se ball_min_distance_m_ > 0 (ex.: STOP / reinício adversário), respeita o raio expandido.
+    const double kClearanceM = (ball_min_distance_m_ > 0.0)
+        ? std::max(0.20, ball_min_distance_m_ + 0.08)
+        : 0.20;
 
     if (dist > 1e-6) {
         double ux = dx / dist;
@@ -1036,6 +1074,7 @@ void DStarPlannerNode::plan_and_publish()
 
 }  // namespace planning
 
+#ifndef D_STAR_PLANNER_NO_MAIN
 int main(int argc, char ** argv)
 {
     rclcpp::init(argc, argv);
@@ -1043,3 +1082,4 @@ int main(int argc, char ** argv)
     rclcpp::shutdown();
     return 0;
 }
+#endif

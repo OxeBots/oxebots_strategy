@@ -58,6 +58,13 @@ if(BUILD_TESTING)
     test/test_strategy.cpp
     src/is_ball_in_our_half_condition.cpp
     src/is_ball_in_area_condition.cpp
+    src/d_star_planner.cpp
+    src/movement_calculation.cpp
+    src/go_to_point_node.cpp
+  )
+  target_compile_definitions(test_strategy PRIVATE
+    D_STAR_PLANNER_NO_MAIN
+    MOVEMENT_CALCULATION_NO_MAIN
   )
   ament_target_dependencies(test_strategy
     rclcpp
@@ -65,6 +72,8 @@ if(BUILD_TESTING)
     behaviortree_cpp
     geometry_msgs
     nav_msgs
+    std_msgs
+    visualization_msgs
   )
   target_include_directories(test_strategy PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -408,8 +417,9 @@ if(BUILD_TESTING)
     src/ball_held_timer_condition.cpp
     src/goal_line_defend_node.cpp
     src/lateral_clear_node.cpp
+    src/go_to_point_node.cpp
   )
-  ament_target_dependencies(test_goalkeeper_k01_k02 rclcpp behaviortree_cpp oxebots_interfaces)
+  ament_target_dependencies(test_goalkeeper_k01_k02 rclcpp behaviortree_cpp oxebots_interfaces visualization_msgs)
   target_include_directories(test_goalkeeper_k01_k02 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )

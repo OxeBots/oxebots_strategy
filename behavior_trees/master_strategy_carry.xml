@@ -18,30 +18,30 @@
       </ReactiveSequence>
 
       <!-- ========================================================= -->
-      <!-- NOSSA BOLA PARADA: KICK-OFF (Amarelo 4, Azul 5) -->
+      <!-- NOSSA BOLA PARADA: KICK-OFF (PREPARE_KICKOFF e KICKOFF) -->
       <ReactiveSequence name="OurKickOffBranch">
-        <Fallback>
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="4"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="5"/></Sequence>
-        </Fallback>
+        <CheckGameState phase="PREPARE_KICKOFF"/>
+        <WeAreFavored/>
         <SubTree ID="PrepareKickoffOurTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- NOSSA BOLA PARADA: PÊNALTI (Amarelo 6, Azul 7) -->
+      <ReactiveSequence name="OurKickOffExecuteBranch">
+        <CheckGameState phase="KICKOFF"/>
+        <WeAreFavored/>
+        <SubTree ID="KickoffExecuteOurTree" _autoremap="true" />
+      </ReactiveSequence>
+
+      <!-- NOSSA BOLA PARADA: PÊNALTI (PREPARE_PENALTY) -->
       <ReactiveSequence name="OurPenaltyBranch">
-        <Fallback>
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="6"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="7"/></Sequence>
-        </Fallback>
+        <CheckGameState phase="PREPARE_PENALTY"/>
+        <WeAreFavored/>
         <SubTree ID="PreparePenaltyOurTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- BOLA PARADA DO ADVERSÁRIO: PÊNALTI DELES (Amarelo 7, Azul 6) -->
+      <!-- BOLA PARADA DO ADVERSÁRIO: PÊNALTI DELES (PREPARE_PENALTY) -->
       <ReactiveSequence name="TheirPenaltyBranch">
-        <Fallback>
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="7"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="6"/></Sequence>
-        </Fallback>
+        <CheckGameState phase="PREPARE_PENALTY"/>
+        <Inverter><WeAreFavored/></Inverter>
         <SubTree ID="PreparePenaltyTheirTree" _autoremap="true" />
       </ReactiveSequence>
 
@@ -72,8 +72,14 @@
       <ReactiveSequence name="OpponentSetPieceBranch">
         <Fallback>
           <!-- Kick-Off deles -->
-          <Sequence><IsValueTrue value="{is_yellow}"/><CheckGCCommand expected="5"/></Sequence>
-          <Sequence><Inverter><IsValueTrue value="{is_yellow}"/></Inverter><CheckGCCommand expected="4"/></Sequence>
+          <Sequence>
+            <CheckGameState phase="PREPARE_KICKOFF"/>
+            <Inverter><WeAreFavored/></Inverter>
+          </Sequence>
+          <Sequence>
+            <CheckGameState phase="KICKOFF"/>
+            <Inverter><WeAreFavored/></Inverter>
+          </Sequence>
           <!-- Falta deles: pela FASE e não pelo comando bruto. O GC mantém o comando DIRECT_FREE_* depois
                que a bola entra em jogo; checar 8/9 deixava o time que sofreu a falta preso na barreira
                (e o goleiro recuando da bola) até o próximo STOP. Em RUN a fase deixa de ser FREE_KICK. -->

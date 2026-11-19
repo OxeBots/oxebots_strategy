@@ -88,6 +88,7 @@ BT::PortsList GoToPointNode::providedPorts() {
                  "com face_y), mantém o padrão de sempre olhar para o gol adversário."),
              BT::InputPort<double>("face_y", "Opcional: Y do alvo de orientação. Ver face_x."),
              BT::InputPort<double>("tolerance", -1.0, "Tolerância para sucesso (se <= 0, nunca retorna SUCCESS)"),
+             BT::InputPort<double>("timeout_s", -1.0, "Opcional: tempo máximo (s) para atingir o alvo quando tolerance > 0 (<= 0 desativa; retorna FAILURE se expirar)"),
              BT::InputPort<double>("max_speed", 0.0, "Velocidade linear máxima opcional em m/s (<= 0 usa o padrão do controlador)"),
              BT::InputPort<std::string>("planner", "dstar",
                  "Estratégia de planejamento: \"dstar\" (padrão, evita obstáculos), "
@@ -203,7 +204,7 @@ void GoToPointNode::publishMarkers() {
     uint32_t attacker_id, defender_id;
     auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
 
-    if (blackboard && blackboard->get("is_goalkeeper", is_gk) && is_gk && robot_id_ == 0) {
+    if (blackboard && blackboard->get("is_goalkeeper", is_gk) && is_gk) {
         r = 0.1; g = 0.1; b = 0.1; role_name = "GK"; // Preto
     } else if (blackboard && blackboard->get("attacker_id", attacker_id) && robot_id_ == attacker_id) {
         r = 1.0; g = 0.5; b = 0.0; role_name = "ATT"; // Laranja
@@ -268,6 +269,7 @@ BT::NodeStatus GoToPointNode::onStart() {
     ball_contact_since_.reset();
     ball_wrong_side_since_.reset();
     robot_missing_since_.reset();
+    start_time_ = node_->now();
 
     unsigned int input_id;
     if (!getInput<unsigned int>("robot_id", input_id)) return BT::NodeStatus::FAILURE;
@@ -306,10 +308,13 @@ BT::NodeStatus GoToPointNode::onStart() {
         (void)blackboard->get("opponent_goal_x", opponent_goal_x);
         (void)blackboard->get("penalty_area_depth", p_depth);
         (void)blackboard->get("penalty_area_width", p_width);
-        (void)blackboard->get("is_goalkeeper", is_gk);
+        if (!blackboard->get("is_goalkeeper", is_gk)) {
+            uint32_t gk_id = 999u;
+            if (blackboard->get("goalkeeper_id", gk_id)) {
+                is_gk = (robot_id_ == gk_id);
+            }
+        }
     }
-
-    if (robot_id_ == 0) is_gk = true;
 
     bool ignore_area = false;
     getInput<bool>("ignore_area", ignore_area);
@@ -349,13 +354,16 @@ BT::NodeStatus GoToPointNode::onRunning() {
             (void)blackboard->get("opponent_goal_x", opponent_goal_x);
             (void)blackboard->get("penalty_area_depth", p_depth);
             (void)blackboard->get("penalty_area_width", p_width);
-            (void)blackboard->get("is_goalkeeper", is_gk);
+            if (!blackboard->get("is_goalkeeper", is_gk)) {
+                uint32_t gk_id = 999u;
+                if (blackboard->get("goalkeeper_id", gk_id)) {
+                    is_gk = (robot_id_ == gk_id);
+                }
+            }
         }
 
         double clamped_x = tx;
         double clamped_y = ty;
-
-        if (robot_id_ == 0) is_gk = true;
 
         bool ignore_area = false;
         getInput<bool>("ignore_area", ignore_area);
@@ -497,6 +505,18 @@ BT::NodeStatus GoToPointNode::onRunning() {
             return BT::NodeStatus::SUCCESS;
         }
 
+        double timeout_s = -1.0;
+        getInput<double>("timeout_s", timeout_s);
+        if (timeout_s > 0.0 && start_time_.has_value()) {
+            const double elapsed_s = (node_->now() - *start_time_).seconds();
+            if (elapsed_s >= timeout_s) {
+                RCLCPP_WARN(node_->get_logger(),
+                    "Robô %d GoToPoint expirou timeout (%.1f s >= %.1f s, dist=%.1f, tol=%.1f) -> FAILURE.",
+                    robot_id_, elapsed_s, timeout_s, dist, tolerance);
+                return BT::NodeStatus::FAILURE;
+            }
+        }
+
         // Log throttled: sem isso, o GoToPoint fica em silêncio total enquanto RUNNING (só loga
         // no SUCCESS). Se pos_ok já for verdade mas ori_ok nunca fechar (robô não consegue ficar
         // de frente pro alvo de orientação), o nó nunca retorna SUCCESS e nada no log explica
@@ -516,6 +536,7 @@ void GoToPointNode::onHalted() {
     ball_contact_since_.reset();
     ball_wrong_side_since_.reset();
     robot_missing_since_.reset();
+    start_time_.reset();
 
     auto robot = getRobotData(robot_id_);
     if (!robot) return;

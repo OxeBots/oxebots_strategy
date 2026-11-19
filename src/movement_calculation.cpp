@@ -34,6 +34,8 @@ bool sanitizeCmd(oxebots_interfaces::msg::RobotCmdData& cmd) {
 PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
+    this->declare_parameter("goalkeeper_id", 0);
+    default_goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     this->declare_parameter("is_yellow_team", false);
     this->declare_parameter("invert_sides", false);
     is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
@@ -100,11 +102,16 @@ void PathFollowerNode::geometry_callback(const oxebots_interfaces::msg::SSLGeome
 void PathFollowerNode::game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg) {
     if (!msg) return;
     std::lock_guard<std::mutex> lock(data_mutex_);
+    // Limpa o override de velocidade (0,75 m/s de SetMotionLimit usado em STOP e BALL_PLACEMENT)
+    // assim que a fase transiciona para qualquer fase que não seja STOP nem BALL_PLACEMENT (ex.: reinícios ou RUN).
     if (last_game_state_ && last_game_state_->phase != msg->phase &&
-        msg->phase == oxebots_interfaces::msg::GameState::PHASE_RUN) {
-        motion_limit_mps_ = 0.0f; // Restaura teto nominal do jogo ao entrar em PHASE_RUN
+        msg->phase != oxebots_interfaces::msg::GameState::PHASE_STOP &&
+        msg->phase != oxebots_interfaces::msg::GameState::PHASE_BALL_PLACEMENT) {
+        motion_limit_mps_ = 0.0f;
     }
     last_game_state_ = msg;
+    last_game_state_time_ = std::chrono::steady_clock::now();
+    has_received_game_state_ = true;
 }
 
 void PathFollowerNode::motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg) {
@@ -147,7 +154,12 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
     bool block_positive = true;
     bool block_negative = true;
 
-    if (robot_id_ == 0) {
+    int active_gk_id = default_goalkeeper_id_;
+    if (last_game_state_ && !last_game_state_->stale) {
+        active_gk_id = static_cast<int>(last_game_state_->our_goalkeeper_id);
+    }
+
+    if (robot_id_ == active_gk_id) {
         // O goleiro pode entrar na própria área, mas não na adversária
         if (effective_is_yellow) {
             block_positive = false;
@@ -605,7 +617,8 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
-            constexpr double kKickAdvanceSpeed = 1.2;
+            // Velocidade nominal de avanço durante a janela de disparo, alinhada ao teto de R-24 (1,0 m/s).
+            constexpr double kKickAdvanceSpeed = 1.0;
             cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
             cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0f;
@@ -648,11 +661,14 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
         active_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
     }
 
-    // 2. Regra 1 (HALT zera a velocidade - Capítulo 17.5 e SC-02):
-    // Se o GameState indica HALT (ou TIMEOUT), o comando é zero, mesmo que um override ou rota digam o contrário.
+    // 2. Regra 1 (HALT, TIMEOUT ou GameState stale/expirado zera a velocidade - Capítulo 17.5, SC-02 e A8):
+    // Se o GameState indica HALT/TIMEOUT ou se o sinal do Game Controller caiu (stale=true ou sem
+    // atualização há mais de kGameStateTimeout após ter conectado), o comando é zero (defesa em profundidade).
     if (last_game_state_) {
+        const bool gc_expired = has_received_game_state_ && (now - last_game_state_time_) > kGameStateTimeout;
         if (last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_HALT ||
-            last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_TIMEOUT) {
+            last_game_state_->phase == oxebots_interfaces::msg::GameState::PHASE_TIMEOUT ||
+            last_game_state_->stale || gc_expired) {
             cmd.x_velocity = 0.0f;
             cmd.y_velocity = 0.0f;
             cmd.angular_velocity = 0.0f;
@@ -707,9 +723,11 @@ void PathFollowerNode::publishCommand(oxebots_interfaces::msg::RobotCmdData cmd_
     }
 }
 
+#ifndef MOVEMENT_CALCULATION_NO_MAIN
 int main(int argc, char *argv[]) {
     rclcpp::init(argc, argv);
     rclcpp::spin(std::make_shared<PathFollowerNode>());
     rclcpp::shutdown();
     return 0;
 }
+#endif

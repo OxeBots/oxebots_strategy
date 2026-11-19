@@ -8,5 +8,6 @@ R7|attacker_tree.xml|out|int_pk_x
 R7|attacker_tree.xml|out|int_pk_y
 R7|attacker_tree.xml|out|is_ready
 R7|attacker_tree.xml|out|is_ready_pred
+R7|free_kick.xml|out|slot_w
 R7|penalty.xml|out|is_ready
 R7|stop.xml|out|slot_w

@@ -903,3 +903,56 @@ TEST_F(StrategyNodeBlackboardTest, MasterTreeScenarioMatchesRefreshKeysAndTypes)
     EXPECT_TRUE(is_kicker);
     EXPECT_EQ(phase, static_cast<int>(GameState::PHASE_STOP));
 }
+
+// ============================================================================
+// 12. Idade real dos dados via stamp e confidence (A3 / SC-20)
+// ============================================================================
+
+TEST_F(StrategyNodeBlackboardTest, RefreshUsesDetectionStampAndBallConfidenceForAges)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    node->setLastGeometry(makeGeometry(4500.0, 3000.0));
+    node->setLastGameState(makeGameState(false));
+
+    const auto now = node->now();
+    auto gd = std::make_shared<GameData>();
+    gd->header.stamp = now;
+    gd->ball.x = 100.0f;
+    gd->ball.y = -50.0f;
+    gd->ball.confidence = 0.9f;
+    // Carimbo da bola 250 ms no passado
+    gd->ball.stamp = now - rclcpp::Duration::from_seconds(0.25);
+
+    oxebots_interfaces::msg::RobotGameData ally;
+    ally.id = 1;
+    ally.x = -500.0f;
+    ally.y = 100.0f;
+    ally.orientation = 0.0f;
+    ally.confidence = 0.95f;
+    // Carimbo do robô 180 ms no passado (excede o limite de 150 ms mesmo com GameData recém-chegado)
+    ally.stamp = now - rclcpp::Duration::from_seconds(0.18);
+    gd->robots.allies.push_back(ally);
+
+    node->setLastGameData(gd);
+    node->refresh();
+
+    double pose_age_ms = 0.0;
+    double ball_age_ms = 0.0;
+    ASSERT_TRUE(bb->get("pose_age_ms", pose_age_ms));
+    ASSERT_TRUE(bb->get("ball_age_ms", ball_age_ms));
+    EXPECT_GE(pose_age_ms, 175.0);
+    EXPECT_GE(ball_age_ms, 245.0);
+
+    // Bola expirada/perdida no observer: confidence == 0.0f com stamp preenchido -> ball_age_ms = inf
+    gd->ball.confidence = 0.0f;
+    node->setLastGameData(gd);
+    node->refresh();
+    ASSERT_TRUE(bb->get("ball_age_ms", ball_age_ms));
+    EXPECT_TRUE(std::isinf(ball_age_ms));
+}

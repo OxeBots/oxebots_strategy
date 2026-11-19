@@ -439,13 +439,15 @@ TEST_F(MasterTreeTest, BallPlacementTheirsMovesOutOfTheCorridorBeforeHolding)
   EXPECT_TRUE(h->ran("HoldPosition"));
 }
 
-TEST_F(MasterTreeTest, BallPlacementOursIsStillAnExplicitSafeHalt)
+TEST_F(MasterTreeTest, BallPlacementOursOptOutAlsoAvoidsTheCorridor)
 {
-  // E04 ainda não existe: o ramo para com o motivo registrado. Substituir ao implementar o E04.
+  // E04 ainda não existe (opt-out): seguimos a recomendação do Cap. 18 (D7/A5) de reutilizar
+  // BallPlacementTheirTree para recuar da bola e do corredor a <= 0,75 m/s (R-08).
   goTo(kBallPlacement, true, "kicker");
   EXPECT_EQ(tickBranch(), "BallPlacementBranch");
-  EXPECT_TRUE(h->ran("Halt:ball_placement_our_not_implemented"));
-  EXPECT_TRUE(h->runningLeaves().empty());
+  EXPECT_EQ(h->rawPort("SetMotionLimit", "limit_mps"), "0.75");
+  EXPECT_TRUE(h->ran("AvoidPlacementCorridor"));
+  EXPECT_TRUE(h->ran("HoldPosition"));
 }
 
 // ============================================================================
@@ -464,11 +466,17 @@ TEST_F(MasterTreeTest, PrepareKickoffOursDispatchesGoalkeeperKickerAndLine)
   EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "kickoff_kicker");
   EXPECT_TRUE(h->ran("GoToPoint"));
 
-  for (const char * role : {"attacker", "defender", "idle"}) {
+  for (const char * role : {"attacker", "defender"}) {
     goTo(kPrepareKickoff, true, role);
     h->tick();
     EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "kickoff_def") << role;
   }
+
+  // R-17 (A4): robô retirado/idle permanece parado em vez de caminhar para o slot do defensor.
+  goTo(kPrepareKickoff, true, "idle");
+  h->tick();
+  EXPECT_TRUE(h->ran("HoldPosition"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
 }
 
 TEST_F(MasterTreeTest, KickerFlagWinsOverTheAttackerRoleString)
@@ -666,7 +674,8 @@ TEST_F(MasterTreeTest, FreeKickTheirsFormsWallAndNeverKicks)
 
   goTo(kFreeKick, false, "idle");
   h->tick();
-  EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "wall");
+  EXPECT_TRUE(h->ran("HoldPosition"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
 
   goTo(kFreeKick, false, "goalkeeper");
   h->tick();
@@ -762,7 +771,8 @@ TEST_F(MasterTreeTest, PreparePenaltyOursDispatchesKickerBehindAndGoalkeeper)
 
   goTo(kPreparePenalty, true, "idle");
   h->tick();
-  EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "penalty_behind");
+  EXPECT_TRUE(h->ran("HoldPosition"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
 }
 
 TEST_F(MasterTreeTest, PreparePenaltyTheirsKeepsGoalkeeperOnTheLineAndOthersBehind)
@@ -772,12 +782,17 @@ TEST_F(MasterTreeTest, PreparePenaltyTheirsKeepsGoalkeeperOnTheLineAndOthersBehi
   EXPECT_TRUE(h->ran("PenaltyKeeperLine"));
   EXPECT_EQ(h->rawPort("PenaltyKeeperLine", "side"), "defend");
 
-  for (const char * role : {"attacker", "defender", "idle", "kicker"}) {
+  for (const char * role : {"attacker", "defender", "kicker"}) {
     goTo(kPreparePenalty, false, role);
     h->tick();
     EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "penalty_behind") << role;
     EXPECT_FALSE(h->ran("PenaltyKeeperLine")) << role;  // só o goleiro vai à linha
   }
+
+  goTo(kPreparePenalty, false, "idle");
+  h->tick();
+  EXPECT_TRUE(h->ran("HoldPosition"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
 }
 
 TEST_F(MasterTreeTest, OnlyTheKickerTouchesTheBallInOurPenalty)

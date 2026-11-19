@@ -180,6 +180,7 @@ class DStarPlanner
         float x = 0.0f;
         float y = 0.0f;
         double radius_m = 0.0;
+        double strict_radius_m = 0.0; ///< Raio (m) que permanece bloqueado mesmo com relax_obstacles_ = true (ex.: R-06 0.5 m da bola).
     };
 
     /**
@@ -289,6 +290,7 @@ class DStarPlanner
     nav_msgs::msg::OccupancyGrid::SharedPtr current_grid_;
     std::vector<DStarNode> grid_nodes_;  ///< Flat storage for all graph nodes.
     std::vector<bool> dynamic_obstacle_map_; ///< Fast lookup for dynamic obstacles.
+    std::vector<bool> strict_dynamic_obstacle_map_; ///< Fast lookup for strict dynamic obstacles (never relaxed, e.g. R-06 ball zone).
     int grid_width_ = 0;
     int grid_height_ = 0;
 
@@ -341,10 +343,13 @@ class DStarPlannerNode : public rclcpp::Node
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
 
-    /// Lado do campo vindo do GameState (troca de lados). Sem ele vale is_yellow_/invert_sides_.
+    /// Lado do campo, ID do goleiro e distância mínima à bola vindos do GameState.
     void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg);
     rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
     std::optional<bool> own_goal_positive_x_;
+    std::optional<int> our_goalkeeper_id_;
+    int default_goalkeeper_id_ = 0;
+    double ball_min_distance_m_ = 0.0;
 
     /**
      * @brief Timer callback to trigger planning iteration.

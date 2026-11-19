@@ -57,7 +57,7 @@ Executa o motor de árvore de comportamento (**BehaviorTree.CPP v4**) para um ro
   - `robot_id` (int, default: `1`): ID do robô controlado por esta instância.
   - `is_yellow_team` (bool, default: `false`): `true` se o time for Amarelo; `false` se Azul.
   - `invert_sides` (bool, default: `false`): Espelha coordenadas do campo.
-  - `bt_xml_path` (string, default: `""`): Caminho do arquivo XML da árvore (ex.: `master_strategy_carry.xml`).
+  - `bt_xml_path` (string, default: `""`): Caminho do arquivo XML da árvore (padrão: `master_strategy_el.xml`).
   - `execution_rate` (double, default: `60.0` Hz): Taxa de execução de ticks da Behavior Tree.
   - `game_state_topic` (string, default: `"/game_state"`): Tópico de estado consolidado do árbitro.
   - `gc_topic` (string, default: `"/gc_multicast_bridge/referee_messages"`): Tópico com mensagens brutas do Game Controller.

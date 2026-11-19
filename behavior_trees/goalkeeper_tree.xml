@@ -28,7 +28,7 @@
                        <!-- 1b. Emergência (> 8s retida na área própria, SC-25): afastamento urgente imediato -->
                        <ReactiveSequence name="State3_EmergencyClear">
                            <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
-                           <Goalkeeper robot_id="{robot_id}" mode="normal" max_hold_s="0.01" kick_speed="3.0"/>
+                           <Goalkeeper robot_id="{robot_id}" mode="urgent_clear" kick_speed="3.0"/>
                        </ReactiveSequence>
 
                        <!-- 2. Bola fora da área, mais perto do goleiro que de qualquer outro robô: sair, buscar e chutar -->

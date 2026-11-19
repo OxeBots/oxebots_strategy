@@ -39,6 +39,11 @@
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
       </ReactiveSequence>
 
+      <ReactiveSequence name="IdleRole">
+        <HasRole role="idle"/>
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+
       <ReactiveSequence name="LineDefendersBehindFallback">
         <ComputeLegalSlot slot="penalty_behind" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
@@ -64,6 +69,11 @@
         <HasRole role="defender"/>
         <ComputeLegalSlot slot="penalty_behind" index="1" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="IdleRole">
+        <HasRole role="idle"/>
+        <HoldPosition robot_id="{robot_id}"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="LineDefendersBehindFallback">

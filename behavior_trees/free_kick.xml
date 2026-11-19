@@ -37,6 +37,11 @@
         </ReactiveFallback>
       </ReactiveSequence>
 
+      <ReactiveSequence name="IdleRole">
+        <HasRole role="idle"/>
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+
       <ReactiveSequence name="SupportRole">
         <ReactiveFallback name="SupportSetPieceChoice">
           <!-- 1. Escanteio ofensivo: recebedor infiltra na cabeça da área para finalizar de primeira -->
@@ -93,7 +98,13 @@
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>
       </ReactiveSequence>
 
-      <!-- 5. Fallback seguro para barreira -->
+      <!-- 5. Robô sem papel ativo (idle / retirado por cartão): mantém posição (R-17) -->
+      <ReactiveSequence name="IdleRole">
+        <HasRole role="idle"/>
+        <HoldPosition robot_id="{robot_id}"/>
+      </ReactiveSequence>
+
+      <!-- 6. Fallback seguro para barreira -->
       <ReactiveSequence name="WallRole">
         <ComputeLegalSlot slot="wall" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>

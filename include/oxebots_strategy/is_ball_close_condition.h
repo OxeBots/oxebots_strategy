@@ -24,6 +24,7 @@ private:
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
   oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
+  rclcpp::Time last_game_data_time_;
   std::mutex data_mutex_;
 };
 

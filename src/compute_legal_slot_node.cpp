@@ -221,8 +221,11 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     std::string role_str;
     if (getFromBlackboards(local_bb, root_bb, "role", role_str)) {
       is_goalkeeper = (role_str == "goalkeeper");
-    } else if (has_robot_id && robot_id == 0) {
-      is_goalkeeper = true;
+    } else {
+      uint32_t gk_id = 999u;
+      if (has_robot_id && getFromBlackboards(local_bb, root_bb, "goalkeeper_id", gk_id)) {
+        is_goalkeeper = (robot_id == gk_id);
+      }
     }
   }
 

@@ -5,9 +5,9 @@
       <!-- Regra §5.1.1: <= 0,75 m/s (SafetyGate aplica o teto no controlador) -->
       <SetMotionLimit limit_mps="0.75"/>
       <ReactiveFallback name="StopAction">
-        <!-- 1. Emergência: perto da bola (< 0,55 m) -> qualquer robô recua imediatamente -->
+        <!-- 1. Emergência: perto da bola (< 0,60 m) -> qualquer robô recua imediatamente -->
         <ReactiveSequence name="RetreatIfClose">
-          <IsBallClose robot_id="{robot_id}" distance_threshold="550.0"/>
+          <IsBallClose robot_id="{robot_id}" distance_threshold="600.0"/>
           <ComputeLegalSlot slot="retreat" index="0" slot_x="{slot_x}" slot_y="{slot_y}" slot_w="{slot_w}"/>
           <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}"
                      face_x="{ball_x}" face_y="{ball_y}" tolerance="80.0"/>

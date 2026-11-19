@@ -46,6 +46,7 @@ public:
         this->declare_parameter<double>("stop_speed_mps", 0.75);
         this->declare_parameter<double>("play_speed_mps", 1.5);
         this->declare_parameter<bool>("require_gc", true);
+        this->declare_parameter<bool>("penalty_to_run", false);
 
         is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
         stale_timeout_ms_ = this->get_parameter("stale_timeout_ms").as_double();
@@ -54,6 +55,7 @@ public:
         stop_speed_mps_ = this->get_parameter("stop_speed_mps").as_double();
         play_speed_mps_ = this->get_parameter("play_speed_mps").as_double();
         require_gc_ = this->get_parameter("require_gc").as_bool();
+        penalty_to_run_ = this->get_parameter("penalty_to_run").as_bool();
 
         const auto gc_topic = this->get_parameter("gc_topic").as_string();
         const auto ball_topic = this->get_parameter("ball_topic").as_string();
@@ -195,10 +197,20 @@ public:
             return;
         }
 
+        // Ignora leituras de bola expiradas ou sem confiança (ex.: confidence == 0.0f quando perdida)
+        if ((msg->stamp.sec != 0 || msg->stamp.nanosec != 0) && msg->confidence <= 0.0f)
+        {
+            return;
+        }
+
         const std::pair<double, double> current_ball{msg->x, msg->y};
         last_ball_pos_ = current_ball;
 
-        if (state_.phase != GameState::PHASE_KICKOFF && state_.phase != GameState::PHASE_FREE_KICK)
+        const bool is_restart_with_ball_play =
+            state_.phase == GameState::PHASE_KICKOFF ||
+            state_.phase == GameState::PHASE_FREE_KICK ||
+            (penalty_to_run_ && state_.phase == GameState::PHASE_PENALTY);
+        if (!is_restart_with_ball_play)
         {
             return;
         }
@@ -386,7 +398,14 @@ private:
                     state_.phase = GameState::PHASE_PENALTY;
                     state_.restart_ctx = GameState::RESTART_PENALTY;
                     state_.we_favored = prev_favored;
-                    clearRestartTracking();
+                    if (penalty_to_run_)
+                    {
+                        startRestartTracking();
+                    }
+                    else
+                    {
+                        clearRestartTracking();
+                    }
                 }
                 else
                 {
@@ -522,7 +541,11 @@ private:
 
     void checkRestartTimeout()
     {
-        if (state_.phase != GameState::PHASE_KICKOFF && state_.phase != GameState::PHASE_FREE_KICK)
+        const bool is_restart_with_ball_play =
+            state_.phase == GameState::PHASE_KICKOFF ||
+            state_.phase == GameState::PHASE_FREE_KICK ||
+            (penalty_to_run_ && state_.phase == GameState::PHASE_PENALTY);
+        if (!is_restart_with_ball_play)
         {
             return;
         }
@@ -551,6 +574,7 @@ private:
 
     bool is_yellow_team_{false};
     bool require_gc_{true};
+    bool penalty_to_run_{false};
     double stale_timeout_ms_{500.0};
     double ball_moved_mm_{50.0};
     double kick_timeout_s_{10.0};

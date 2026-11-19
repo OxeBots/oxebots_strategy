@@ -70,7 +70,7 @@ BT::PortsList GoalkeeperNode::providedPorts()
     BT::InputPort<uint32_t>("robot_id", "{robot_id}", "ID do robô goleiro"),
     BT::InputPort<double>("kick_speed", 3.0, "Velocidade do chute em m/s"),
     BT::InputPort<std::string>(
-      "mode", "normal", "Modo de operação do goleiro: normal, penalty_def ou hold"),
+      "mode", "normal", "Modo de operação do goleiro: normal, urgent_clear, penalty_def ou hold"),
     BT::InputPort<double>(
       "max_hold_s", 8.0,
       "Tempo máximo (s) com a bola na área antes de forçar afastamento urgente (regra dos 10 s)")
@@ -234,11 +234,11 @@ BT::NodeStatus GoalkeeperNode::onRunning()
   max_hold_s_ = 8.0;
   (void)getInput<double>("max_hold_s", max_hold_s_);
 
-  if (mode_ != "normal" && mode_ != "penalty_def" && mode_ != "hold") {
+  if (mode_ != "normal" && mode_ != "urgent_clear" && mode_ != "penalty_def" && mode_ != "hold") {
     releaseKickOverride();
     RCLCPP_ERROR_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 2000,
-      "GoalkeeperNode: modo inválido '%s' (esperado normal, penalty_def ou hold)",
+      "GoalkeeperNode: modo inválido '%s' (esperado normal, urgent_clear, penalty_def ou hold)",
       mode_.c_str());
     return BT::NodeStatus::FAILURE;
   }
@@ -386,7 +386,7 @@ BT::NodeStatus GoalkeeperNode::onRunning()
       ball_in_area_since_ = now;
     }
     const double held_s = (now - *ball_in_area_since_).seconds();
-    const bool urgent_clear = (held_s >= max_hold_s_);
+    const bool urgent_clear = (mode_ == "urgent_clear") || (held_s >= max_hold_s_);
 
     // --- ESTADO 1: Bola na área -> Sair, ir até a bola e afastar para as laterais ---
     double lateral_y = (field_width_ / 2.0) + 500.0;

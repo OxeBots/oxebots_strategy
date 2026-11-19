@@ -96,7 +96,11 @@ private:
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
+    std::chrono::steady_clock::time_point last_game_state_time_;
+    bool has_received_game_state_ = false;
+    static constexpr std::chrono::milliseconds kGameStateTimeout{500};
     int robot_id_ = 0;
+    int default_goalkeeper_id_ = 0;
     bool game_data_received_ = false;
 
     bool is_yellow_team_ = false;

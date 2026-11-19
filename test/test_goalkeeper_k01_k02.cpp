@@ -12,6 +12,7 @@
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_strategy/ball_held_timer_condition.hpp"
+#include "oxebots_strategy/go_to_point_node.h"
 #include "oxebots_strategy/goal_line_defend_node.h"
 #include "oxebots_strategy/goalkeeper_node.h"
 #include "oxebots_strategy/lateral_clear_node.h"
@@ -53,6 +54,7 @@ protected:
     factory_.registerNodeType<BallHeldTimerCondition>("BallHeldTimer");
     factory_.registerNodeType<GoalLineDefendNode>("GoalLineDefend", node_);
     factory_.registerNodeType<LateralClearNode>("LateralClear", node_);
+    factory_.registerNodeType<GoToPointNode>("GoToPoint", node_);
 
     bb_ = BT::Blackboard::create();
   }
@@ -369,6 +371,58 @@ TEST_F(GoalkeeperK01K02Test, K02_GoalkeeperModesPenaltyDefAndHold)
   EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, -4250.0, 1.0);
   EXPECT_NEAR(last_goal_->pose.pose.position.y * 1000.0, -120.0, 1.0);
   EXPECT_TRUE(last_goal_->disable_arrival_latch);
+}
+
+// A1 / SC-17 / R-22: GoToPoint não trata robot_id == 0 como goleiro quando is_goalkeeper=false
+TEST_F(GoalkeeperK01K02Test, A1_GoToPointClampsRobot0OutsidePenaltyAreaWhenNotGoalkeeper)
+{
+  populateStandardGeometry(-4500.0);
+  bb_->set("opponent_goal_x", 4500.0);
+  // Robô 0 é jogador de linha (goleiro é o robô 1 ou está ausente)
+  bb_->set("robot_id", 0u);
+  bb_->set("goalkeeper_id", 1u);
+  bb_->set("is_goalkeeper", false);
+
+  auto tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoToPoint robot_id="0" x="-4100.0" y="0.0"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  last_goal_.reset();
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_EQ(last_goal_->robot_id, 0u);
+  // Área própria: my_goal_x = -4500, depth = 1000 -> borda frontal em x = -3500 mm.
+  // Como robot_id=0 NÃO é goleiro, o alvo (-4100, 0) deve ser empurrado para fora da área (x >= -3500).
+  EXPECT_GE(last_goal_->pose.pose.position.x * 1000.0, -3500.0 - 1.0);
+
+  // Agora robô 1 é o goleiro (is_goalkeeper=true): pode receber alvo dentro da própria área (-4100, 0)
+  bb_->set("robot_id", 1u);
+  bb_->set("goalkeeper_id", 1u);
+  bb_->set("is_goalkeeper", true);
+
+  auto gk_tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoToPoint robot_id="1" x="-4100.0" y="0.0"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  last_goal_.reset();
+  EXPECT_EQ(gk_tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_EQ(last_goal_->robot_id, 1u);
+  EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, -4100.0, 1.0);
 }
 
 }  // namespace oxebots_strategy

@@ -120,6 +120,7 @@ public:
   void setLastRoleAssignment(const oxebots_interfaces::msg::RoleAssignment::SharedPtr& msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_role_assignment_ = msg;
+    last_role_assignment_time_ = this->now();
   }
 
   bool init()
@@ -129,7 +130,7 @@ public:
       
       std::string tree_path = this->get_parameter("bt_xml_path").as_string();
       if (tree_path.empty()) {
-        tree_path = package_share_directory + "/behavior_trees/master_strategy_carry.xml";
+        tree_path = package_share_directory + "/behavior_trees/master_strategy_el.xml";
       } else if (tree_path.find("/") == std::string::npos) {
         tree_path = package_share_directory + "/behavior_trees/" + tree_path;
       }
@@ -345,12 +346,14 @@ private:
     blackboard_->set("gc_age_ms", require_gc_ ? std::numeric_limits<double>::infinity() : 0.0);
     blackboard_->set("pose_age_ms", std::numeric_limits<double>::infinity());
     blackboard_->set("ball_age_ms", std::numeric_limits<double>::infinity());
+    blackboard_->set("role_age_ms", std::numeric_limits<double>::infinity());
   }
 
   void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg)
   {
     std::lock_guard<std::mutex> lock(data_mutex_);
     last_role_assignment_ = msg;
+    last_role_assignment_time_ = this->now();
   }
 
   void game_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg)
@@ -505,6 +508,13 @@ public:
 
     // 4. Papéis (RoleAssignment) — atualizado antes de GameData para que attacker_ball_dist use o attacker_id_ atual
     if (roles) {
+      double role_age_ms = 0.0;
+      if (last_role_assignment_time_.nanoseconds() != 0) {
+        role_age_ms = (now_time - last_role_assignment_time_).nanoseconds() / 1e6;
+        if (role_age_ms < 0.0) role_age_ms = 0.0;
+      }
+      blackboard_->set("role_age_ms", role_age_ms);
+
       goalkeeper_id_ = roles->goalkeeper_id;
       attacker_id_ = roles->attacker_id;
       defender_id_ = roles->defender_id;
@@ -533,6 +543,9 @@ public:
       blackboard_->set("is_kicker", (my_id == roles->kicker_id));
       blackboard_->set(
         "has_defender", roles->defender_id != oxebots_interfaces::msg::RoleAssignment::NO_ROBOT);
+    } else {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "Robô %d sem /role_assignment recebido: assumindo papel 'idle'.", robot_id_);
     }
 
     // 5. GameData (robôs, bola, velocidades e idades)
@@ -555,7 +568,10 @@ public:
           blackboard_->set("robot_yaw", ryaw);
           blackboard_->set("robot_pose", Pose2D{rx, ry, ryaw});
 
-          double pose_age_ms = (now_time - last_game_data_time_).nanoseconds() / 1e6;
+          const bool has_robot_stamp = (robot.stamp.sec != 0 || robot.stamp.nanosec != 0);
+          const rclcpp::Time robot_time =
+            has_robot_stamp ? rclcpp::Time(robot.stamp, now_time.get_clock_type()) : last_game_data_time_;
+          double pose_age_ms = (now_time - robot_time).nanoseconds() / 1e6;
           if (pose_age_ms < 0.0) pose_age_ms = 0.0;
           blackboard_->set("pose_age_ms", pose_age_ms);
           break;
@@ -643,8 +659,16 @@ public:
       blackboard_->set("attacker_ball_dist", attacker_ball_dist);
       blackboard_->set("defender_ball_dist", defender_ball_dist);
 
-      double ball_age_ms = (now_time - last_game_data_time_).nanoseconds() / 1e6;
-      if (ball_age_ms < 0.0) ball_age_ms = 0.0;
+      const bool has_ball_stamp = (gd->ball.stamp.sec != 0 || gd->ball.stamp.nanosec != 0);
+      double ball_age_ms = 0.0;
+      if (has_ball_stamp && gd->ball.confidence <= 0.0f) {
+        ball_age_ms = std::numeric_limits<double>::infinity();
+      } else {
+        const rclcpp::Time ball_time =
+          has_ball_stamp ? rclcpp::Time(gd->ball.stamp, now_time.get_clock_type()) : last_game_data_time_;
+        ball_age_ms = (now_time - ball_time).nanoseconds() / 1e6;
+        if (ball_age_ms < 0.0) ball_age_ms = 0.0;
+      }
       blackboard_->set("ball_age_ms", ball_age_ms);
 
       // Seleção dinâmica do canto livre do gol adversário (opp_goal_y / opponent_goal_y)
@@ -900,6 +924,7 @@ public:
   rclcpp::Time last_game_data_time_;
   oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
   oxebots_interfaces::msg::RoleAssignment::SharedPtr last_role_assignment_;
+  rclcpp::Time last_role_assignment_time_;
   ssl_league_msgs::msg::Referee::SharedPtr last_referee_;
 };
 

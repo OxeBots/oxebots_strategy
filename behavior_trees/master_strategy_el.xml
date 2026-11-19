@@ -29,7 +29,7 @@
         <SubTree ID="StopSubTree" _autoremap="true"/>
       </ReactiveSequence>
 
-      <!-- BALL_PLACEMENT: só o time favorecido pode posicionar; E04 ainda não existe. -->
+      <!-- BALL_PLACEMENT: enquanto E04 ainda não existe (opt-out), nosso time usa o mesmo recuo do corredor e da bola (Cap. 18, R-08). -->
       <ReactiveSequence name="BallPlacementBranch">
         <CheckGameState phase="BALL_PLACEMENT"/>
         <ReactiveFallback name="BallPlacementAction">
@@ -39,7 +39,7 @@
             </Inverter>
             <SubTree ID="BallPlacementTheirTree" _autoremap="true"/>
           </ReactiveSequence>
-          <Halt reason="ball_placement_our_not_implemented"/>
+          <SubTree ID="BallPlacementTheirTree" _autoremap="true"/>
         </ReactiveFallback>
       </ReactiveSequence>
 

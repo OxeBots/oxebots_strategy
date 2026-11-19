@@ -295,7 +295,9 @@ def main():
     parser.add_argument('--optional-ports',
                         default=str(PACKAGE_DIR / 'scripts' / 'validate_bt_optional_ports.txt'))
     parser.add_argument('--model', help='saída salva do dump_bt_model (senão roda ros2 run)')
-    parser.add_argument('--baseline', help='arquivo com achados já conhecidos (não falham)')
+    parser.add_argument('--baseline',
+                        default=str(PACKAGE_DIR / 'scripts' / 'validate_bt_baseline.txt'),
+                        help='arquivo com achados já conhecidos (não falham)')
     parser.add_argument('--write-baseline', help='grava os achados atuais neste arquivo')
     parser.add_argument('--strict', action='store_true',
                         help='ignora o baseline e conta avisos como falha')
