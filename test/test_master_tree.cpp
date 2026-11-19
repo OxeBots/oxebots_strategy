@@ -847,7 +847,7 @@ TEST_F(MasterTreeTest, PenaltyTheirsOtherRobotsHoldPositionAndNeverKick)
 TEST_F(MasterTreeTest, RunBranchDispatchesGoalkeeperAttackerDefenderAndIdle)
 {
   // Goleiro: defesa de linha por padrão; na área faz LateralClear e, se passar de 8s (SC-25),
-  // aciona o afastamento de emergência (Goalkeeper com max_hold_s="0.01").
+  // aciona o afastamento de emergência (Goalkeeper com mode="urgent_clear").
   goTo(kRun, false, "goalkeeper");
   EXPECT_EQ(tickBranch(), kRunBranch);
   EXPECT_TRUE(h->ran("UpdateBallPosition"));
@@ -864,7 +864,7 @@ TEST_F(MasterTreeTest, RunBranchDispatchesGoalkeeperAttackerDefenderAndIdle)
   h->tick();
   EXPECT_EQ(h->branch(), kRunBranch);
   EXPECT_TRUE(h->ran("Goalkeeper"));
-  EXPECT_EQ(h->rawPort("Goalkeeper", "max_hold_s"), "0.01");
+  EXPECT_EQ(h->rawPort("Goalkeeper", "mode"), "urgent_clear");
   EXPECT_EQ(h->rawPort("Goalkeeper", "kick_speed"), "3.0");
   EXPECT_EQ(h->stats("LateralClear").halts, 1);
 
