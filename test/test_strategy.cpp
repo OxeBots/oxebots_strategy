@@ -385,14 +385,9 @@ TEST(GoToPointUnitTest, OnHaltedPublishesCurrentPoseZeroSpeedAndTimeoutFails)
     ASSERT_TRUE(last_goal.has_value());
     EXPECT_NEAR(last_goal->pose.pose.position.x, 0.5, 1e-3);
 
-    // SC-14 / M03: halt() na árvore dispara GoToPointNode::onHalted() que publica a pose atual com max_speed = 0
+    // halt() na árvore limpa o estado interno de GoToPoint sem sobrescrever /robot_goal
+    // (evita que o halt de um ramo à direita apague o novo objetivo já publicado por um ramo à esquerda)
     tree.haltTree();
-    exec.spin_some();
-    ASSERT_TRUE(last_goal.has_value());
-    EXPECT_NEAR(last_goal->pose.pose.position.x, -0.5, 1e-3);
-    EXPECT_NEAR(last_goal->pose.pose.position.y, -0.1, 1e-3);
-    EXPECT_FLOAT_EQ(last_goal->max_speed, 0.0f);
-    EXPECT_TRUE(last_goal->disable_arrival_latch);
 
     // §5.5: se o alvo é inalcançável e timeout_s expira, retorna FAILURE
     EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);

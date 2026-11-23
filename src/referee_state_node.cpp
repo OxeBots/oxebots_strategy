@@ -160,10 +160,31 @@ public:
         // Extrair informações do nosso TeamInfo (can_place_ball, max_allowed_bots, our_goalkeeper_id)
         updateTeamInfo(*msg);
 
+        // Detectar incremento de placar (evento de Gol no Game Controller): na versão atual do GC,
+        // clicar em "Goal" incrementa o placar como evento sem necessariamente emitir os comandos
+        // legados 14/15 (GOAL_YELLOW / GOAL_BLUE). Se o placar subir durante o jogo, entra em STOP.
+        const uint32_t yellow_score = msg->yellow.score;
+        const uint32_t blue_score = msg->blue.score;
+        const bool score_increased = has_received_score_ &&
+            (yellow_score > last_yellow_score_ || blue_score > last_blue_score_);
+        has_received_score_ = true;
+        last_yellow_score_ = yellow_score;
+        last_blue_score_ = blue_score;
+
         // 2 & 3. Mapear comando -> fase e atualizar contexto de reinício (apenas quando command_counter avança)
         if (is_new_command)
         {
             applyCommandTransition(msg->command);
+        }
+        else if (score_increased && state_.phase == GameState::PHASE_RUN)
+        {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Gol detectado pelo placar (Y:%u x B:%u) -> transicionando para PHASE_STOP.",
+                yellow_score, blue_score);
+            state_.phase = GameState::PHASE_STOP;
+            state_.restart_ctx = GameState::RESTART_NONE;
+            clearRestartTracking();
         }
         else
         {
@@ -582,6 +603,9 @@ private:
     double play_speed_mps_{1.5};
 
     bool has_received_gc_{false};
+    bool has_received_score_{false};
+    uint32_t last_yellow_score_{0};
+    uint32_t last_blue_score_{0};
     uint32_t last_command_counter_{0};
     std::optional<rclcpp::Time> last_gc_rx_time_;
 

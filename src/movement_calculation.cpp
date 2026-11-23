@@ -50,9 +50,9 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("d_gain_angular", 0.25);
     this->declare_parameter("angle_tolerance", 0.04);
     // --- Distância de Lookahead (Pure Pursuit) ---
-    // Padrão calibrado: 140.0 mm (~2.8 células do grid do D* de 50 mm).
+    // Padrão calibrado: 200.0 mm (4 células do grid do D* de 50 mm).
     // Filtra o efeito escada da grade e evita correções agressivas de rota/zigue-zague sem cortar curvas.
-    this->declare_parameter("lookahead_distance", 140.0); // mm
+    this->declare_parameter("lookahead_distance", 200.0); // mm
 
     std::string robot_prefix = "/robot_" + std::to_string(robot_id_);
     
@@ -345,9 +345,12 @@ void PathFollowerNode::calculate_and_move() {
     movement::Coordinate target_pt;
     bool target_found = false;
 
-    // --- Seguir Rota do D* ---
+    // --- Seguir Rota do D* (com interpolação contínua do ponto de lookahead no segmento) ---
     if (last_path_ && !last_path_->poses.empty()) {
             double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
+            float prev_px = current_pos.x;
+            float prev_py = current_pos.y;
+            double prev_d = 0.0;
             for (const auto& pose_stamped : last_path_->poses) {
                 float px = pose_stamped.pose.position.x * 1000.0f;
                 float py = pose_stamped.pose.position.y * 1000.0f;
@@ -356,10 +359,19 @@ void PathFollowerNode::calculate_and_move() {
                 if (d > lookahead_dist) {
                     const auto& q = pose_stamped.pose.orientation;
                     float qw = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
-                    target_pt = {px, py, qw};
+                    // Interpola suavemente ao longo do segmento entre o ponto anterior (<= lookahead)
+                    // e o ponto atual (> lookahead), eliminando saltos discretos de 50mm entre células!
+                    double denom = d - prev_d;
+                    double t = (denom > 1e-3) ? std::clamp((lookahead_dist - prev_d) / denom, 0.0, 1.0) : 1.0;
+                    float interp_x = static_cast<float>(prev_px + t * (px - prev_px));
+                    float interp_y = static_cast<float>(prev_py + t * (py - prev_py));
+                    target_pt = {interp_x, interp_y, qw};
                     target_found = true;
                     break;
                 }
+                prev_px = px;
+                prev_py = py;
+                prev_d = d;
             }
             if (!target_found) {
                 const auto& q = last_path_->poses.back().pose.orientation;
@@ -461,7 +473,9 @@ void PathFollowerNode::calculate_and_move() {
         double vx = (target_pt.x - current_pos.x) / dist_to_target;
         double vy = (target_pt.y - current_pos.y) / dist_to_target;
 
-        double speed = std::min(max_lin, (dist_to_target / 1000.0) * p_lin);
+        // Usa a distância ao destino final (check_dist) para a rampa proporcional de chegada,
+        // evitando que o robô desacelere prematuramente a cada waypoint intermediário de lookahead!
+        double speed = std::min(max_lin, (check_dist / 1000.0) * p_lin);
 
         // Prioriza alinhar antes de avançar, mas só perto do alvo final: erro angular alto reduz
         // a velocidade linear (gira mais no lugar), alinhado mantém velocidade cheia. Evita que o
@@ -477,17 +491,17 @@ void PathFollowerNode::calculate_and_move() {
         cmd_data.y_velocity = vy * speed;
     }
 
-    // Repulsão de contato — só na Fase 1 (D*), onde qualquer contato com a bola é acidental (na
-    // Fase 2/straight_line, chegar perto é o objetivo). Age no mesmo ciclo de 50ms em que o
-    // contato é detectado, sem esperar o roundtrip árvore→D*→path. Histerese (entra a 100mm, só
-    // desarma a 130mm) evita flapping na borda; complementa o ball_contact_threshold_mm do
-    // GoToPoint, que força um replanejamento completo se o contato persistir.
+    // Repulsão / Deslizamento tangencial de contato — só na Fase 1 (D*), onde qualquer contato com
+    // a bola é acidental (na Fase 2/straight_line, chegar perto é o objetivo). Em vez de substituir
+    // o vetor por repulsão puramente radial e zerar angular_velocity (o que criava efeito ioiô contra
+    // a rota do D*), remove a componente de velocidade que aponta para dentro da bola (mantendo o
+    // deslizamento tangencial ao redor dela) e soma um afastamento radial suave.
     if (last_game_data_ && !arrived && target_planner_type_ == oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR) {
         double bdx = current_pos.x - last_game_data_->ball.x;
         double bdy = current_pos.y - last_game_data_->ball.y;
         double ball_dist = std::hypot(bdx, bdy);
-        constexpr double kContactEnterMm = 100.0;
-        constexpr double kContactExitMm = 130.0;
+        constexpr double kContactEnterMm = 105.0;
+        constexpr double kContactExitMm = 135.0;
 
         if (contact_repulsion_active_) {
             if (ball_dist > kContactExitMm) contact_repulsion_active_ = false;
@@ -496,11 +510,18 @@ void PathFollowerNode::calculate_and_move() {
         }
 
         if (contact_repulsion_active_ && ball_dist > 1e-3) {
+            double nx = bdx / ball_dist; // normal apontando da bola para o robô
+            double ny = bdy / ball_dist;
+            double v_radial = cmd_data.x_velocity * nx + cmd_data.y_velocity * ny;
+            if (v_radial < 0.0) {
+                // Remove apenas a componente que empurraria o robô contra a bola, preservando a tangencial
+                cmd_data.x_velocity -= static_cast<float>(v_radial * nx);
+                cmd_data.y_velocity -= static_cast<float>(v_radial * ny);
+            }
             double max_lin = this->get_parameter("max_linear_speed").as_double();
-            double repel_speed = max_lin * std::clamp(1.0 - ball_dist / kContactExitMm, 0.0, 1.0);
-            cmd_data.x_velocity = (bdx / ball_dist) * repel_speed;
-            cmd_data.y_velocity = (bdy / ball_dist) * repel_speed;
-            cmd_data.angular_velocity = 0.0;
+            double repel_speed = 0.6 * max_lin * std::clamp(1.0 - ball_dist / kContactExitMm, 0.0, 1.0);
+            cmd_data.x_velocity += static_cast<float>(nx * repel_speed);
+            cmd_data.y_velocity += static_cast<float>(ny * repel_speed);
         }
     }
 

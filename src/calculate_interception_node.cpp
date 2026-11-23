@@ -404,12 +404,12 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   double pk_safe_x = pk_x;
   double pk_safe_y = pk_y;
   if (!swing_active_ && !area_adjusted && dist_ball_goal > 10.0 &&
-      dot_side >= 100.0 && dot_side < kPreKickDistMm &&
-      std::abs(perp_proj_robot) <= 90.0)
+      dot_side >= 80.0 && dot_side < kPreKickDistMm &&
+      std::abs(perp_proj_robot) <= 130.0)
   {
-    // Se o robô já está alinhado atrás da bola (entre 100mm e 400mm) na linha bola->gol,
+    // Se o robô já está alinhado atrás da bola (entre 80mm e 400mm) na linha bola->gol,
     // projeta pk_safe na distância longitudinal atual para não forçar recuo até 400mm (pre-kick)
-    // quando já vem carregando a bola em movimento.
+    // quando já vem carregando a bola em movimento ou acabou de chutar!
     pk_safe_x = intercept_x + ux_g * dot_side;
     pk_safe_y = intercept_y + uy_g * dot_side;
     clamp_out_our_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);

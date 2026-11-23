@@ -93,6 +93,10 @@ private:
     double filtered_omega_ = 0.0;
     std::chrono::steady_clock::time_point prev_control_time_;
 
+    // Filtro de suavização de velocidade linear para eliminar solavancos do efeito escada do grid de 5cm do D*
+    float prev_vx_ = 0.0f;
+    float prev_vy_ = 0.0f;
+
     oxebots_interfaces::msg::GameData::SharedPtr last_game_data_;
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;

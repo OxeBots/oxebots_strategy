@@ -132,6 +132,27 @@ BT::NodeStatus UpdateBallPositionNode::onRunning()
       double pk_x = ball_x + ux * pre_kick_dist;
       double pk_y = ball_y + uy * pre_kick_dist;
 
+      // Se o robô já está posicionado e alinhado atrás da bola entre kMinPreKickDistMm (230 mm)
+      // e pre_kick_dist (400 mm) — por exemplo, vindo do slot kickoff_kicker (280 mm) ou
+      // penalty_kicker (300 mm) — ancora o ponto de pré-chute na distância longitudinal atual
+      // do robô para que ele não precise dar marcha à ré até 400 mm antes de avançar para o chute.
+      unsigned int check_rid = 0;
+      if (getInput<unsigned int>("robot_id", check_rid)) {
+        for (const auto& ally : last_game_data_->robots.allies) {
+          if (ally.id == check_rid) {
+            const double rx_rel = ally.x - ball_x;
+            const double ry_rel = ally.y - ball_y;
+            const double along_back = rx_rel * ux + ry_rel * uy;
+            const double perp_err = std::abs(-rx_rel * uy + ry_rel * ux);
+            if (along_back >= 180.0 && along_back < pre_kick_dist && perp_err <= 80.0) {
+              pk_x = ball_x + ux * along_back;
+              pk_y = ball_y + uy * along_back;
+            }
+            break;
+          }
+        }
+      }
+
       const bool clamped_x = std::abs(pk_x) > max_pk_x;
       const bool clamped_y = std::abs(pk_y) > max_pk_y;
       pk_x = std::clamp(pk_x, -max_pk_x, max_pk_x);

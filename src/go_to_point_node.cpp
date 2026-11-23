@@ -537,24 +537,6 @@ void GoToPointNode::onHalted() {
     ball_wrong_side_since_.reset();
     robot_missing_since_.reset();
     start_time_.reset();
-
-    auto robot = getRobotData(robot_id_);
-    if (!robot) return;
-
-    auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
-    goal_msg->robot_id = robot_id_;
-    goal_msg->pose.header.stamp = node_->now();
-    goal_msg->pose.header.frame_id = "map";
-    goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
-    goal_msg->disable_arrival_latch = true;
-    goal_msg->max_speed = 0.0f;
-
-    goal_msg->pose.pose.position.x = robot->x / 1000.0;
-    goal_msg->pose.pose.position.y = robot->y / 1000.0;
-    goal_msg->pose.pose.orientation.z = std::sin(robot->orientation * 0.5);
-    goal_msg->pose.pose.orientation.w = std::cos(robot->orientation * 0.5);
-
-    goal_pub_->publish(std::move(goal_msg));
 }
 
 } // namespace oxebots_strategy

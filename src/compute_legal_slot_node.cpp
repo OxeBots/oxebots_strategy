@@ -557,7 +557,24 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
       constexpr double kDirectSectorRad = 5.0 * M_PI / 12.0;  // 75 graus
       constexpr double kFarSectorRad = 3.0 * M_PI / 4.0;      // 135 graus
 
-      if (std::abs(diff) > kDirectSectorRad) {
+      // Verifica se a reta entre a posição atual do robô e o slot realmente cruza o disco
+      // de exclusão da bola (min_stop_ball_dist). Se o robô já está suficientemente afastado
+      // da bola e a corda robô->slot não chega perto da bola (ou se a bola está na lateral/quina),
+      // não precisa de waypoint angular intermediário (que perto das laterais é achatado pelo
+      // clampToLegalField e pode travar o robô a >80mm do slot final!).
+      const double seg_dx = slot_x - robot_x;
+      const double seg_dy = slot_y - robot_y;
+      const double seg_len2 = seg_dx * seg_dx + seg_dy * seg_dy;
+      double closest_ball_to_seg = dist_robot_ball;
+      if (seg_len2 > 1.0) {
+        const double t_seg = std::clamp(
+          ((ball_x - robot_x) * seg_dx + (ball_y - robot_y) * seg_dy) / seg_len2, 0.0, 1.0);
+        const double proj_x = robot_x + t_seg * seg_dx;
+        const double proj_y = robot_y + t_seg * seg_dy;
+        closest_ball_to_seg = std::hypot(ball_x - proj_x, ball_y - proj_y);
+      }
+
+      if (std::abs(diff) > kDirectSectorRad && closest_ball_to_seg < (min_stop_ball_dist - 20.0)) {
         const double bypass_radius = std::max({dist_slot_ball, min_stop_ball_dist + 100.0, 750.0});
 
         // sign indica o sentido de theta_robot até theta_slot; o waypoint fixo fica em
@@ -578,16 +595,37 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
           return std::hypot(mx - ball_x, my - ball_y);
         };
 
+        // Se o lado de contorno escolhido bate na parede lateral/fundo (ficando com pouca folga
+        // da bola ou muito perto do próprio slot final após o clamp), inverte para contornar
+        // pelo lado aberto do campo!
+        auto evaluate_bypass_side = [&](double s, double & out_x, double & out_y) -> bool {
+          const double offset_angle = (std::abs(diff) > kFarSectorRad) ? (M_PI / 2.0) : (M_PI / 4.0);
+          const double waypoint_angle = theta_slot - s * offset_angle;
+          out_x = ball_x + bypass_radius * std::cos(waypoint_angle);
+          out_y = ball_y + bypass_radius * std::sin(waypoint_angle);
+          enforce_legal_point(out_x, out_y);
+          const double clear_d = std::hypot(out_x - ball_x, out_y - ball_y);
+          const double progress_d = std::hypot(out_x - robot_x, out_y - robot_y);
+          return (clear_d >= 500.0 + std::min(margin, 80.0)) && (progress_d > 90.0);
+        };
+
         if (side_clearance(sign) < min_stop_ball_dist &&
             side_clearance(-sign) > side_clearance(sign) + 50.0) {
           sign = -sign;
         }
 
-        const double offset_angle = (std::abs(diff) > kFarSectorRad) ? (M_PI / 2.0) : (M_PI / 4.0);
-        const double waypoint_angle = theta_slot - sign * offset_angle;
-        slot_x = ball_x + bypass_radius * std::cos(waypoint_angle);
-        slot_y = ball_y + bypass_radius * std::sin(waypoint_angle);
-        enforce_legal_point(slot_x, slot_y);
+        double wp_x = slot_x;
+        double wp_y = slot_y;
+        if (!evaluate_bypass_side(sign, wp_x, wp_y)) {
+          double alt_x = slot_x;
+          double alt_y = slot_y;
+          if (evaluate_bypass_side(-sign, alt_x, alt_y)) {
+            wp_x = alt_x;
+            wp_y = alt_y;
+          }
+        }
+        slot_x = wp_x;
+        slot_y = wp_y;
       }
     }
   }

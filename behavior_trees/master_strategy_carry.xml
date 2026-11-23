@@ -7,13 +7,21 @@
            filho está RUNNING (o HoldPosition do STOP nunca termina) e o robô ficaria preso no ramo
            antigo depois de um FORCE START. -->
       <ReactiveSequence name="HaltBranch">
-        <CheckGCCommand expected="0"/>
+        <Fallback>
+          <CheckGameState phase="HALT"/>
+          <CheckGCCommand expected="0"/>
+        </Fallback>
         <SubTree ID="HaltSubTree" _autoremap="true" />
       </ReactiveSequence>
 
-      <!-- 1. STOP: Aciona a árvore de stop (que usa o KeepDistance de 550mm) -->
+      <!-- 1. STOP: Aciona a árvore de stop (inclui comando STOP=1 e comandos de Gol=14/15 via PHASE_STOP) -->
       <ReactiveSequence name="StopBranch">
-        <CheckGCCommand expected="1"/>
+        <Fallback>
+          <CheckGameState phase="STOP"/>
+          <CheckGCCommand expected="1"/>
+          <CheckGCCommand expected="14"/>
+          <CheckGCCommand expected="15"/>
+        </Fallback>
         <SubTree ID="StopSubTree" _autoremap="true" />
       </ReactiveSequence>
 

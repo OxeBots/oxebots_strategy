@@ -250,4 +250,12 @@ TEST_F(RefereeStateNodeTest, DerivedSpeedAndBallDistanceLimitsByPhase)
     EXPECT_EQ(node->getState().restart_ctx, GameState::RESTART_FORCE);
     EXPECT_FLOAT_EQ(node->getState().speed_limit_mps, 1.5f);
     EXPECT_FLOAT_EQ(node->getState().ball_min_distance_mm, 0.0f);
+
+    // Incremento de placar durante PHASE_RUN (evento de Gol no GC sem comando novo): entra em PHASE_STOP
+    auto goal_event_msg = makeRefereeMsg(10, Referee::COMMAND_FORCE_START);
+    goal_event_msg->yellow.score = 1;
+    node->refereeCallback(goal_event_msg);
+    EXPECT_EQ(node->getState().phase, GameState::PHASE_STOP);
+    EXPECT_FLOAT_EQ(node->getState().speed_limit_mps, 0.75f);
+    EXPECT_FLOAT_EQ(node->getState().ball_min_distance_mm, 500.0f);
 }

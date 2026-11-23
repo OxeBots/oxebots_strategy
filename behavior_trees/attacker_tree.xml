@@ -60,14 +60,14 @@
               <Sequence name="ChaseAndKick">
                 <GoToPoint robot_id="{robot_id}" x="{int_pk_safe_x}" y="{int_pk_safe_y}"
                            face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
-                           tolerance="120.0" ball_contact_threshold_mm="150.0" />
+                           tolerance="120.0" ball_contact_threshold_mm="135.0" />
 
                 <ReactiveFallback name="ApproachAndKick">
                   <Sequence name="Shoot">
                     <Inverter>
                       <IsBallInOurHalf ball_x="{ball_x}" />
                     </Inverter>
-                    <IsBallClose robot_id="{robot_id}" distance_threshold="118.0" angle_threshold_deg="12.0"/>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="145.0" angle_threshold_deg="16.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
                   </Sequence>
 
@@ -79,10 +79,6 @@
                              face_x="{int_carry_face_x}" face_y="{int_carry_face_y}"
                              tolerance="0.0" planner="straight_line" ball_side_check="true" />
                 </ReactiveFallback>
-
-                <Delay delay_msec="150">
-                  <AlwaysSuccess/>
-                </Delay>
               </Sequence>
             </ReactiveFallback>
           </ReactiveSequence>

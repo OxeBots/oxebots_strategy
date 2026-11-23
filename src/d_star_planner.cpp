@@ -208,6 +208,20 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     // linha reta por cima da bola em vez de dar a volta!
     if (dynamic_obstacle_map_[idx]) {
         if (idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) && strict_dynamic_obstacle_map_[idx]) {
+            // Se o próprio robô JÁ iniciou dentro da zona estrita de 500 mm da bola (ex: STOP acionado
+            // enquanto o robô disputava a bola na lateral), permite sair com custo alto (40.0) nas
+            // células adjacentes ao robô ou sob relax_obstacles_ quando encurralado na parede, sem
+            // jamais travar com custo infinito!
+            if (start_cell_.has_value()) {
+                int s_idx = start_cell_->y * grid_width_ + start_cell_->x;
+                bool started_inside_strict = (s_idx >= 0 &&
+                    s_idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) &&
+                    strict_dynamic_obstacle_map_[s_idx]);
+                if (started_inside_strict ||
+                    (std::abs(u.x - start_cell_->x) <= 2 && std::abs(u.y - start_cell_->y) <= 2)) {
+                    return 40.0;
+                }
+            }
             return std::numeric_limits<double>::infinity();
         }
         return relax_obstacles_ ? 30.0 : std::numeric_limits<double>::infinity();
@@ -851,10 +865,24 @@ void DStarPlannerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
     // para PLANNER_STRAIGHT_LINE na aproximação final (Fase 2), que não consulta esta grade.
     // Quando o GameState exige distância mínima à bola (ex.: 500 mm em STOP ou reinício adversário),
     // infla o raio do obstáculo para ball_min_distance_m_ + 0.08 m (ex.: 0.58 m para R-06).
-    const double effective_ball_radius_m = (ball_min_distance_m_ > 0.0)
-        ? std::max(ball_safety_radius_m_, ball_min_distance_m_ + 0.08)
+    // EXCEÇÕES:
+    // 1. Cobrador (kicker) em PREPARE_KICKOFF (280 mm) ou PREPARE_PENALTY (300 mm): mantém 0.15 m.
+    // 2. Quando a bola está colada na lateral ou linha de fundo e o robô precisa sair/passar pelo
+    //    corredor estreito, strict_ball_radius_m fica em max(0.35, ball_min_distance_m_ - 0.08) sob
+    //    relax_obstacles_ = true para nunca bloquear completamente a saída do robô em empty_path!
+    double effective_ball_min_m = ball_min_distance_m_;
+    if (effective_ball_min_m > 0.0 && target_goal_msg_.has_value()) {
+        const auto & gp = target_goal_msg_.value()->pose.pose.position;
+        const double goal_ball_dist_m = std::hypot(gp.x - ball_x_, gp.y - ball_y_);
+        if (goal_ball_dist_m >= ball_safety_radius_m_ &&
+            goal_ball_dist_m < effective_ball_min_m + 0.10) {
+            effective_ball_min_m = 0.0;
+        }
+    }
+    const double effective_ball_radius_m = (effective_ball_min_m > 0.0)
+        ? std::max(ball_safety_radius_m_, effective_ball_min_m + 0.08)
         : ball_safety_radius_m_;
-    const double strict_ball_radius_m = (ball_min_distance_m_ > 0.0) ? ball_min_distance_m_ : 0.0;
+    const double strict_ball_radius_m = (effective_ball_min_m > 0.0) ? effective_ball_min_m : 0.0;
     obstacles.push_back({ball_x_, ball_y_, effective_ball_radius_m, strict_ball_radius_m});
 
     if (planner_)
@@ -885,9 +913,15 @@ void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& targe
     // Raio de segurança total (robô + bola + margem). Só se aplica ANTES do trecho final: o
     // próprio alvo (int_cap_x/y) fica de propósito a ~115mm da bola (kCaptureDistanceMm), então
     // fechar essa distância no fim é o objetivo, não um risco de colisão a evitar.
-    // Se ball_min_distance_m_ > 0 (ex.: STOP / reinício adversário), respeita o raio expandido.
-    const double kClearanceM = (ball_min_distance_m_ > 0.0)
-        ? std::max(0.20, ball_min_distance_m_ + 0.08)
+    // Se ball_min_distance_m_ > 0 (ex.: STOP / reinício adversário), respeita o raio expandido,
+    // exceto quando o próprio alvo é um slot de cobrador próximo à bola (ex.: kickoff_kicker a 280 mm).
+    const double goal_ball_dist_m = std::hypot(target.x - ball_x_, target.y - ball_y_);
+    const double effective_ball_min_m =
+        (ball_min_distance_m_ > 0.0 && goal_ball_dist_m >= ball_min_distance_m_ + 0.10)
+            ? ball_min_distance_m_
+            : 0.0;
+    const double kClearanceM = (effective_ball_min_m > 0.0)
+        ? std::max(0.20, effective_ball_min_m + 0.08)
         : 0.20;
 
     if (dist > 1e-6) {
@@ -1039,13 +1073,19 @@ void DStarPlannerNode::plan_and_publish()
         if (!run_full_plan())
         {
             last_plan_ok_ = false;
-            nav_msgs::msg::Path empty_path;
-            empty_path.header.stamp = now();
-            empty_path.header.frame_id = "map";
-            path_pub_->publish(empty_path);
+            consecutive_failures_++;
+            // Só publica empty_path após 3 falhas consecutivas para evitar que um único frame
+            // transitório durante troca de célula freie o robô a 0.0 m/s por 1 ciclo.
+            if (consecutive_failures_ >= 3) {
+                nav_msgs::msg::Path empty_path;
+                empty_path.header.stamp = now();
+                empty_path.header.frame_id = "map";
+                path_pub_->publish(empty_path);
+            }
             return;
         }
         last_plan_ok_ = true;
+        consecutive_failures_ = 0;
     }
     else
     {
@@ -1060,10 +1100,17 @@ void DStarPlannerNode::plan_and_publish()
         // Se o replanejamento incremental não conseguiu reconstruir o caminho, força um plano completo
         if (run_full_plan()) {
             last_plan_ok_ = true;
+            consecutive_failures_ = 0;
             path = planner_->reconstructPath(s, origin.x, origin.y);
         } else {
             last_plan_ok_ = false;
+            consecutive_failures_++;
+            if (consecutive_failures_ < 3) {
+                return;
+            }
         }
+    } else {
+        consecutive_failures_ = 0;
     }
     path.header = last_map_data_->header;
     path_pub_->publish(path);

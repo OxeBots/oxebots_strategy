@@ -6,7 +6,7 @@
       <!-- Dados ausentes ou antigos: modo seguro -->
       <ReactiveSequence name="SafetyGuard">
         <Inverter>
-          <IsDataFresh max_gc_ms="500" max_pose_ms="150" max_ball_ms="300"/>
+          <IsDataFresh/>
         </Inverter>
         <SubTree ID="DegradedModeTree" _autoremap="true"/>
       </ReactiveSequence>

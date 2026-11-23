@@ -494,6 +494,7 @@ public:
         case 6: case 7: mapped_phase = 6; break;  // PREPARE_PENALTY
         case 8: case 9: case 10: case 11: mapped_phase = 8; break;  // FREE_KICK
         case 12: case 13: mapped_phase = 1; break;  // TIMEOUT
+        case 14: case 15: mapped_phase = 2; break;  // GOAL_YELLOW / GOAL_BLUE -> STOP
         case 16: case 17: mapped_phase = 3; break;  // BALL_PLACEMENT
         default: mapped_phase = 0; break;
       }
