@@ -231,6 +231,67 @@ inline void projectPredictedPoseMm(
   }
 }
 
+// Constrains the commanded velocity so the robot cannot approach another robot faster
+// than the remaining separation allows. Positions and velocities are in meters and m/s.
+inline bool enforceRobotSeparation(
+  double self_x_m,
+  double self_y_m,
+  double other_x_m,
+  double other_y_m,
+  double other_vx_mps,
+  double other_vy_mps,
+  double min_separation_m,
+  double response_rate,
+  double fallback_away_x,
+  double fallback_away_y,
+  double & command_vx_mps,
+  double & command_vy_mps)
+{
+  if (!std::isfinite(self_x_m) || !std::isfinite(self_y_m) ||
+      !std::isfinite(other_x_m) || !std::isfinite(other_y_m) ||
+      !std::isfinite(other_vx_mps) || !std::isfinite(other_vy_mps) ||
+      !std::isfinite(command_vx_mps) || !std::isfinite(command_vy_mps) ||
+      !std::isfinite(min_separation_m) || min_separation_m <= 0.0 ||
+      !std::isfinite(response_rate) || response_rate <= 0.0) {
+    return false;
+  }
+
+  double away_x = self_x_m - other_x_m;
+  double away_y = self_y_m - other_y_m;
+  const double distance = std::hypot(away_x, away_y);
+  if (distance > 2.0 * min_separation_m) {
+    return false;
+  }
+
+  if (distance > 1e-6) {
+    away_x /= distance;
+    away_y /= distance;
+  } else {
+    const double fallback_norm = std::hypot(fallback_away_x, fallback_away_y);
+    if (!std::isfinite(fallback_norm) || fallback_norm <= 1e-6) {
+      away_x = 1.0;
+      away_y = 0.0;
+    } else {
+      away_x = fallback_away_x / fallback_norm;
+      away_y = fallback_away_y / fallback_norm;
+    }
+  }
+
+  const double other_radial_velocity = other_vx_mps * away_x + other_vy_mps * away_y;
+  const double minimum_radial_velocity =
+    other_radial_velocity - response_rate * (distance - min_separation_m);
+  const double commanded_radial_velocity =
+    command_vx_mps * away_x + command_vy_mps * away_y;
+  if (commanded_radial_velocity >= minimum_radial_velocity) {
+    return false;
+  }
+
+  const double correction = minimum_radial_velocity - commanded_radial_velocity;
+  command_vx_mps += correction * away_x;
+  command_vy_mps += correction * away_y;
+  return true;
+}
+
 // Controle angular PD seguro com piso mínimo (min_angular_speed):
 // Evita que um pequeno termo derivativo de frenagem (sinal oposto a angle_err e módulo
 // menor que o piso mínimo) seja amplificado pelo piso em um giro reverso brusco (-min_angular),

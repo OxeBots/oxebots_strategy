@@ -147,6 +147,7 @@ Seguidor de caminho baseado em perseguição pura (*Pure Pursuit*) omnidireciona
   - `invert_sides` (bool, default: `false`)
   - `path_renews_watchdog` (bool, default: `false`): Se `true`, pacotes de rota também renovam o watchdog de comando.
   - `lookahead_distance` (double, default: `140.0` mm): Distância ao longo do caminho para extração do ponto-alvo.
+  - `robot_collision_distance` (double, default: `0.30` m): Distância mínima entre centros aplicada pelo filtro de velocidade a aliados e adversários; atua até o dobro dessa distância, inclusive em rotas retas. `0.0` desativa esse filtro. Quando ativo, prioriza afastamento e pode zerar comandos abaixo do piso mínimo configurado para preservar a separação.
   - `max_linear_speed` (double, default: `1.0` m/s): Velocidade linear máxima padrão.
   - `min_linear_speed` (double, default: `0.0` m/s): Piso mínimo de velocidade linear para comandos não-nulos (`0.0` desativa; nunca excede o teto máximo vigente nem sobrescreve HALT/chegada/watchdog).
   - `p_gain_linear` (double, default: `2.0`): Ganho proporcional para translação.

@@ -2,6 +2,7 @@
 #include "oxebots_strategy/velocity_limits.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 double normalizeAngle(double angle) {
@@ -54,6 +55,7 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("angle_tolerance", 0.04);
     this->declare_parameter("use_kalman_filter", true);
     this->declare_parameter("latency_comp_s", 0.045);
+    this->declare_parameter("robot_collision_distance", 0.30);
     // --- Distância de Lookahead (Pure Pursuit) ---
     // Padrão calibrado: 140.0 mm (~2.8 células do grid do D* de 50 mm).
     // Filtra o efeito escada da grade e evita correções agressivas de rota/zigue-zague sem cortar curvas.
@@ -800,8 +802,121 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
     cmd.kick_speed = std::clamp(cmd.kick_speed, 0.0f, 3.0f);
 }
 
+void PathFollowerNode::applyRobotCollisionAvoidance(
+    oxebots_interfaces::msg::RobotCmdData& cmd)
+{
+    double safe_distance = this->get_parameter("robot_collision_distance").as_double();
+    if (std::isfinite(safe_distance) && safe_distance == 0.0) {
+        return;
+    }
+    if (!std::isfinite(safe_distance) || safe_distance < 0.20) {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 5000,
+            "robot_collision_distance must be 0 (disabled) or at least 0.20 m; using 0.30 m.");
+        safe_distance = 0.30;
+    }
+
+    if (!last_game_data_) {
+        return;
+    }
+
+    const oxebots_interfaces::msg::RobotGameData* self = nullptr;
+    for (const auto& ally : last_game_data_->robots.allies) {
+        if (static_cast<int>(ally.id) == robot_id_) {
+            self = &ally;
+            break;
+        }
+    }
+    if (!self || !std::isfinite(self->x) || !std::isfinite(self->y)) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const double prediction_age_s = has_robot_prediction_
+        ? std::chrono::duration<double>(now - last_prediction_time_).count()
+        : std::numeric_limits<double>::infinity();
+    const bool prediction_is_fresh =
+        last_robot_prediction_ && prediction_age_s >= 0.0 && prediction_age_s < 0.25;
+    double command_vx = cmd.x_velocity;
+    double command_vy = cmd.y_velocity;
+
+    auto apply_to_robot = [&](const oxebots_interfaces::msg::RobotGameData& other, bool enemy) {
+        if (!std::isfinite(other.x) || !std::isfinite(other.y)) {
+            return;
+        }
+
+        double other_x_m = other.x / 1000.0;
+        double other_y_m = other.y / 1000.0;
+        double other_vx_mps = 0.0;
+        double other_vy_mps = 0.0;
+
+        if (prediction_is_fresh) {
+            const auto& predictions = enemy
+                ? last_robot_prediction_->enemies
+                : last_robot_prediction_->allies;
+            for (const auto& prediction : predictions) {
+                if (prediction.id == other.id &&
+                    std::isfinite(prediction.x) && std::isfinite(prediction.y) &&
+                    std::isfinite(prediction.vx) && std::isfinite(prediction.vy)) {
+                    other_x_m = prediction.x / 1000.0;
+                    other_y_m = prediction.y / 1000.0;
+                    other_vx_mps = prediction.vx / 1000.0;
+                    other_vy_mps = prediction.vy / 1000.0;
+                    break;
+                }
+            }
+        }
+
+        const double overlap_direction =
+            other.id == static_cast<uint32_t>(robot_id_)
+                ? (is_yellow_team_ ? -1.0 : 1.0)
+                : (static_cast<uint32_t>(robot_id_) < other.id ? 1.0 : -1.0);
+        movement::enforceRobotSeparation(
+            self->x / 1000.0, self->y / 1000.0,
+            other_x_m, other_y_m, other_vx_mps, other_vy_mps,
+            safe_distance, 2.0, overlap_direction, 0.0,
+            command_vx, command_vy);
+    };
+
+    for (int pass = 0; pass < 3; ++pass) {
+        for (const auto& ally : last_game_data_->robots.allies) {
+            if (static_cast<int>(ally.id) != robot_id_) {
+                apply_to_robot(ally, false);
+            }
+        }
+        for (const auto& enemy : last_game_data_->robots.enemies) {
+            apply_to_robot(enemy, true);
+        }
+    }
+
+    double speed_cap = this->get_parameter("max_linear_speed").as_double();
+    if (last_game_state_ && last_game_state_->speed_limit_mps > 0.0f) {
+        speed_cap = std::min(speed_cap, static_cast<double>(last_game_state_->speed_limit_mps));
+    }
+    if (motion_limit_mps_ > 0.0f) {
+        speed_cap = std::min(speed_cap, static_cast<double>(motion_limit_mps_));
+    }
+    if (target_max_speed_ > 0.0f) {
+        speed_cap = std::min(speed_cap, static_cast<double>(target_max_speed_));
+    }
+    cmd.x_velocity = static_cast<float>(command_vx);
+    cmd.y_velocity = static_cast<float>(command_vy);
+    const double min_speed = movement::effectiveMinSpeed(
+        this->get_parameter("min_linear_speed").as_double(), speed_cap);
+    const double adjusted_speed = std::hypot(command_vx, command_vy);
+    if (adjusted_speed > 1e-4 && adjusted_speed < min_speed) {
+        cmd.x_velocity = 0.0f;
+        cmd.y_velocity = 0.0f;
+        return;
+    }
+    movement::applyMinMaxLinearVector(cmd.x_velocity, cmd.y_velocity, 0.0, speed_cap);
+}
+
 void PathFollowerNode::publishCommand(oxebots_interfaces::msg::RobotCmdData cmd_data, uint8_t active_mode, bool aligned) {
     applySafetyGate(cmd_data, active_mode);
+    if (active_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
+        applyRobotCollisionAvoidance(cmd_data);
+    }
 
     // Sanitiza contra valores não finitos (NaN/Inf)
     auto sanitize = [](float& val) {

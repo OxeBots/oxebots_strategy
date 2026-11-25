@@ -165,6 +165,36 @@ TEST(VelocityLimits, ProjectPredictedPoseAppliesLatencyWrapAndClamp)
   EXPECT_NEAR(x2, 200.0, 1e-6);
 }
 
+TEST(VelocityLimits, RobotSeparationLimitsClosingSpeedAndPreservesSafeMotion)
+{
+  double vx = 1.0;
+  double vy = 0.2;
+  EXPECT_TRUE(movement::enforceRobotSeparation(
+    0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.3, 2.0, -1.0, 0.0, vx, vy));
+  EXPECT_NEAR(vx, 0.2, 1e-9);
+  EXPECT_NEAR(vy, 0.2, 1e-9);
+
+  vx = 0.0;
+  vy = 0.0;
+  EXPECT_TRUE(movement::enforceRobotSeparation(
+    0.0, 0.0, 0.4, 0.0, -1.0, 0.0, 0.3, 2.0, -1.0, 0.0, vx, vy));
+  EXPECT_NEAR(vx, -0.8, 1e-9);
+
+  vx = -0.5;
+  vy = 0.0;
+  EXPECT_FALSE(movement::enforceRobotSeparation(
+    0.0, 0.0, 0.7, 0.0, 0.0, 0.0, 0.3, 2.0, -1.0, 0.0, vx, vy));
+  EXPECT_DOUBLE_EQ(vx, -0.5);
+  EXPECT_DOUBLE_EQ(vy, 0.0);
+
+  vx = 0.5;
+  vy = -0.25;
+  EXPECT_FALSE(movement::enforceRobotSeparation(
+    0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 2.0, -1.0, 0.0, vx, vy));
+  EXPECT_DOUBLE_EQ(vx, 0.5);
+  EXPECT_DOUBLE_EQ(vy, -0.25);
+}
+
 TEST(VelocityLimits, PdAngularWithFloorPreventsReverseChatter)
 {
   // angle_err=+0.18 rad, p=2.2, omega=+1.4 rad/s, d=0.45 -> pd = 0.396 - 0.63 = -0.234

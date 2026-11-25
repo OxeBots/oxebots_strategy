@@ -50,6 +50,7 @@ private:
     // SafetyGate (Capítulo 17.5): 4 verificações independentes sobre o comando final
     // Centraliza o envio para /robot_commands garantindo HALT, teto de velocidade, watchdog e limite de chute.
     void applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cmd, uint8_t& active_mode);
+    void applyRobotCollisionAvoidance(oxebots_interfaces::msg::RobotCmdData& cmd);
     void publishCommand(oxebots_interfaces::msg::RobotCmdData cmd_data, uint8_t active_mode, bool aligned);
 
     // Único dono de /robot_commands para este robô (ver comentário grande em calculate_and_move()
