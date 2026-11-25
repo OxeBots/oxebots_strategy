@@ -557,6 +557,8 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     robot_id_ = safe_param("robot_id", 0).as_int();
     is_yellow_ = safe_param("is_yellow_team", false).as_bool();
     invert_sides_ = safe_param("invert_sides", false).as_bool();
+    (void)safe_param("min_linear_speed", 0.0);
+    (void)safe_param("min_angular_speed", 0.0);
     planning_rate_hz_ = safe_param("planning_rate_hz", 10.0).as_double();
     // Taxa usada só quando a bola está a close_ball_distance_m_ ou menos do robô: a defasagem
     // entre "detectar contato" (na árvore, via GoToPointNode::ball_contact_threshold_mm) e o

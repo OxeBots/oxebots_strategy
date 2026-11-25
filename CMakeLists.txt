@@ -343,6 +343,12 @@ if(BUILD_TESTING)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
 
+  # Limites mínimo/máximo de velocidade (linear/angular) e modelo cinemático, só biblioteca padrão e gtest.
+  ament_add_gtest(test_velocity_limits test/test_velocity_limits.cpp)
+  target_include_directories(test_velocity_limits PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+
   # T02: validador estático das BTs (scripts/validate_bt.py). Roda o dump_bt_model compilado e só
   # achados novos (fora de scripts/validate_bt_baseline.txt) reprovam.
   find_package(ament_cmake_pytest REQUIRED)

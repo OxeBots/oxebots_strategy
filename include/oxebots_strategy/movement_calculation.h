@@ -4,6 +4,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
+#include "oxebots_interfaces/msg/robot_prediction.hpp"
 #include "oxebots_interfaces/msg/robot_cmd.hpp"
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/robot_motion_status.hpp"
@@ -36,6 +37,7 @@ public:
 
 private:
     void game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg);
+    void robot_prediction_callback(const oxebots_interfaces::msg::RobotPrediction::SharedPtr msg);
     void goal_callback(const oxebots_interfaces::msg::RobotGoal::SharedPtr msg);
     void path_callback(const nav_msgs::msg::Path::SharedPtr msg);
     void override_callback(const oxebots_interfaces::msg::RobotMotionOverride::SharedPtr msg);
@@ -63,6 +65,7 @@ private:
     rclcpp::Publisher<oxebots_interfaces::msg::RobotCmd>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionStatus>::SharedPtr status_pub_;
     rclcpp::Subscription<oxebots_interfaces::msg::GameData>::SharedPtr game_data_sub_;
+    rclcpp::Subscription<oxebots_interfaces::msg::RobotPrediction>::SharedPtr robot_prediction_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotGoal>::SharedPtr goal_sub_;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_sub_;
@@ -87,7 +90,13 @@ private:
     // Histerese da repulsão de contato: entra a kContactEnterMm, só desarma a kContactExitMm.
     bool contact_repulsion_active_ = false;
 
-    // Estado para termo derivativo (amortecimento D) do controle angular (evita overshoot/oscilação de yaw)
+    // Estado filtrado vindo do oxebots_prediction (/robot_predicted) + predição de latência
+    oxebots_interfaces::msg::RobotPrediction::SharedPtr last_robot_prediction_;
+    std::chrono::steady_clock::time_point last_prediction_time_;
+    bool has_robot_prediction_ = false;
+    double est_vx_mps_ = 0.0;
+    double est_vy_mps_ = 0.0;
+    // Fallback EMA quando /robot_predicted está indisponível ou use_kalman_filter=false
     bool has_prev_orientation_ = false;
     double prev_orientation_ = 0.0;
     double filtered_omega_ = 0.0;

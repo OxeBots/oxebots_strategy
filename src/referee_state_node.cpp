@@ -45,6 +45,8 @@ public:
         this->declare_parameter<double>("kick_timeout_s", 10.0);
         this->declare_parameter<double>("stop_speed_mps", 0.75);
         this->declare_parameter<double>("play_speed_mps", 1.5);
+        this->declare_parameter<double>("min_linear_speed", 0.0);
+        this->declare_parameter<double>("min_angular_speed", 0.0);
         this->declare_parameter<bool>("require_gc", true);
 
         is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();

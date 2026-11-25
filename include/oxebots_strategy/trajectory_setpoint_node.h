@@ -34,6 +34,8 @@ private:
   double radio_publish_rate_hz_ = 15.0;
   double lookahead_safety_factor_ = 1.5;
   double max_lookahead_mm_ = 1000.0;
+  double min_linear_speed_ = 0.0;
+  double min_angular_speed_ = 0.0;
 
   // Última pose/velocidade do Kalman para este robô — base da projeção e também o que vira
   // "vision" no setpoint publicado. Sem isso ainda, não há base pra projetar, então não publica.

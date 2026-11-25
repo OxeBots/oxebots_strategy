@@ -10,6 +10,8 @@ TrajectorySetpointNode::TrajectorySetpointNode()
   radio_publish_rate_hz_ = this->declare_parameter("radio_publish_rate_hz", radio_publish_rate_hz_);
   lookahead_safety_factor_ = this->declare_parameter("lookahead_safety_factor", lookahead_safety_factor_);
   max_lookahead_mm_ = this->declare_parameter("max_lookahead_mm", max_lookahead_mm_);
+  min_linear_speed_ = this->declare_parameter("min_linear_speed", min_linear_speed_);
+  min_angular_speed_ = this->declare_parameter("min_angular_speed", min_angular_speed_);
 
   robot_prediction_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotPrediction>(
     "robot_predicted", rclcpp::SensorDataQoS(),

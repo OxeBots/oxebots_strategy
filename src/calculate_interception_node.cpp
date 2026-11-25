@@ -1,5 +1,6 @@
 #include "oxebots_strategy/calculate_interception_node.h"
 #include "oxebots_strategy/kick_readiness.hpp"
+#include "oxebots_strategy/velocity_limits.hpp"
 #include <cmath>
 
 namespace oxebots_strategy
@@ -125,12 +126,22 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
 
   // Limitações físicas do robô
   double max_speed = 1500.0; // mm/s
+  double min_speed = 0.0;    // mm/s
   double max_accel = 2000.0; // mm/s^2
 
-  // Tenta ler dos parâmetros do nó se disponíveis (padrão em metros/s e m/s^2)
+  // Tenta ler dos parâmetros do nó se disponíveis (padrão em metros/s)
   double param_speed = 1.5;
-  if (node_->get_parameter("max_linear_speed", param_speed)) {
-    max_speed = param_speed * 1000.0;
+  if (node_->has_parameter("max_linear_speed") &&
+      node_->get_parameter("max_linear_speed", param_speed)) {
+    const double sanitized = movement::sanitizeSpeedLimit(param_speed);
+    if (sanitized > 0.0) {
+      max_speed = sanitized * 1000.0;
+    }
+  }
+  double param_min_speed = 0.0;
+  if (node_->has_parameter("min_linear_speed") &&
+      node_->get_parameter("min_linear_speed", param_min_speed)) {
+    min_speed = movement::effectiveMinSpeed(param_min_speed, max_speed / 1000.0) * 1000.0;
   }
 
   // Algoritmo de busca iterativa
@@ -175,37 +186,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     // Projetar velocidade do robô na direção do alvo
     double v0 = r_vx * ux + r_vy * uy;
 
-    double t_travel = 0.0;
-    if (v0 < 0.0) {
-      // O robô está indo na direção contrária, precisa frear antes de acelerar
-      double t_brake = -v0 / max_accel;
-      double d_brake = (v0 * v0) / (2.0 * max_accel);
-      double d_remaining = dist + d_brake;
-
-      double d_acc = (max_speed * max_speed) / (2.0 * max_accel);
-
-      if (d_remaining < 2.0 * d_acc) {
-        t_travel = t_brake + 2.0 * std::sqrt(d_remaining / max_accel);
-      } else {
-        t_travel = t_brake + (max_speed / max_accel) + (d_remaining / max_speed);
-      }
-    } else {
-      // O robô está se movendo na direção certa ou parado
-      double d_acc = (max_speed * max_speed - v0 * v0) / (2.0 * max_accel);
-      if (d_acc < 0.0) d_acc = 0.0;
-      double d_dec = (max_speed * max_speed) / (2.0 * max_accel);
-
-      if (dist < (d_acc + d_dec)) {
-        double v_peak = std::sqrt((2.0 * max_accel * dist + v0 * v0) / 2.0);
-        if (v_peak > max_speed) v_peak = max_speed;
-        t_travel = (2.0 * v_peak - v0) / max_accel;
-      } else {
-        double t_acc = (max_speed - v0) / max_accel;
-        double t_dec = max_speed / max_accel;
-        double t_cruise = (dist - (d_acc + d_dec)) / max_speed;
-        t_travel = t_acc + t_dec + t_cruise;
-      }
-    }
+    double t_travel = movement::estimateTravelTimeS(dist, v0, min_speed, max_speed, max_accel);
 
     if (t_travel <= t) {
       intercept_x = x_t;

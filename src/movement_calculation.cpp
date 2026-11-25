@@ -1,6 +1,7 @@
-#include "oxebots_strategy/movement_calculation.h" 
-#include <algorithm> 
-#include <cmath>    
+#include "oxebots_strategy/movement_calculation.h"
+#include "oxebots_strategy/velocity_limits.hpp"
+#include <algorithm>
+#include <cmath>
 
 namespace {
 double normalizeAngle(double angle) {
@@ -42,11 +43,17 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
     
     this->declare_parameter("max_linear_speed", 1.0);
+    this->declare_parameter("min_linear_speed", 0.0);
     this->declare_parameter("p_gain_linear", 2.0);
+    this->declare_parameter("d_gain_linear", 0.0);
+    this->declare_parameter("max_linear_accel", 0.0);
     this->declare_parameter("max_angular_speed", 3.0);
+    this->declare_parameter("min_angular_speed", 0.0);
     this->declare_parameter("p_gain_angular", 2.2);
     this->declare_parameter("d_gain_angular", 0.25);
     this->declare_parameter("angle_tolerance", 0.04);
+    this->declare_parameter("use_kalman_filter", true);
+    this->declare_parameter("latency_comp_s", 0.045);
     // --- Distância de Lookahead (Pure Pursuit) ---
     // Padrão calibrado: 140.0 mm (~2.8 células do grid do D* de 50 mm).
     // Filtra o efeito escada da grade e evita correções agressivas de rota/zigue-zague sem cortar curvas.
@@ -59,6 +66,10 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
 
     game_data_sub_ = this->create_subscription<oxebots_interfaces::msg::GameData>(
         "/game_data", 10, std::bind(&PathFollowerNode::game_data_callback, this, std::placeholders::_1));
+
+    robot_prediction_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotPrediction>(
+        "/robot_predicted", 10,
+        std::bind(&PathFollowerNode::robot_prediction_callback, this, std::placeholders::_1));
 
     goal_sub_ = this->create_subscription<oxebots_interfaces::msg::RobotGoal>(
         "/robot_goal", rclcpp::QoS(1).transient_local().reliable(),
@@ -156,6 +167,11 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
         }
     }
 
+    const double max_lin = this->get_parameter("max_linear_speed").as_double();
+    const double min_lin = this->get_parameter("min_linear_speed").as_double();
+    const float area_push_speed = static_cast<float>(
+        std::max(0.3, movement::effectiveMinSpeed(min_lin, max_lin)));
+
     // 1. Bloqueia área positiva (X > pos_area_x_limit, |Y| < pos_area_y_limit)
     // Distingue entre a linha frontal (pen_x <= pen_y) e as linhas laterais (pen_y < pen_x)
     // para que um robô contornando pela lateral da área NUNCA tenha seu vx bloqueado/invertido!
@@ -166,15 +182,15 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
             // Na lateral da área positiva: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {
                 if (vy < 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = 0.3f;
+                if (pen_y > 25.0f) vy = area_push_speed;
             } else {
                 if (vy > 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = -0.3f;
+                if (pen_y > 25.0f) vy = -area_push_speed;
             }
         } else {
             // Na frente da área positiva: bloqueia/empurra apenas em X, deixando vy livre
             if (vx > 0.0f) vx = 0.0f;
-            if (pen_x > 30.0f) vx = -0.3f;
+            if (pen_x > 30.0f) vx = -area_push_speed;
         }
     }
 
@@ -186,15 +202,15 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
             // Na lateral da área negativa: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {
                 if (vy < 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = 0.3f;
+                if (pen_y > 25.0f) vy = area_push_speed;
             } else {
                 if (vy > 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = -0.3f;
+                if (pen_y > 25.0f) vy = -area_push_speed;
             }
         } else {
             // Na frente da área negativa: bloqueia/empurra apenas em X, deixando vy livre
             if (vx < 0.0f) vx = 0.0f;
-            if (pen_x > 30.0f) vx = 0.3f;
+            if (pen_x > 30.0f) vx = area_push_speed;
         }
     }
 }
@@ -250,6 +266,14 @@ void PathFollowerNode::game_data_callback(const oxebots_interfaces::msg::GameDat
     game_data_received_ = true;
 }
 
+void PathFollowerNode::robot_prediction_callback(
+    const oxebots_interfaces::msg::RobotPrediction::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    last_robot_prediction_ = msg;
+    last_prediction_time_ = std::chrono::steady_clock::now();
+    has_robot_prediction_ = (msg != nullptr);
+}
+
 void PathFollowerNode::calculate_and_move() {
     std::lock_guard<std::mutex> lock(data_mutex_);
     
@@ -268,19 +292,57 @@ void PathFollowerNode::calculate_and_move() {
     }
     if (!found_me) return;
 
-    // Estima velocidade angular filtrada (rad/s) para amortecimento derivativo (Kd) do controle de orientação
     auto now_ctrl = std::chrono::steady_clock::now();
-    if (has_prev_orientation_) {
-        double dt = std::chrono::duration<double>(now_ctrl - prev_control_time_).count();
-        if (dt > 1e-3 && dt < 0.5) {
-            double raw_omega = normalizeAngle(current_pos.orientation - prev_orientation_) / dt;
-            filtered_omega_ = 0.6 * filtered_omega_ + 0.4 * raw_omega;
+    const bool use_kf = this->get_parameter("use_kalman_filter").as_bool();
+    const double latency_comp_s = this->get_parameter("latency_comp_s").as_double();
+
+    // Usa o estado filtrado pelo Kalman 6D do oxebots_prediction (/robot_predicted) quando recente,
+    // projetando a pose para (agora + latency_comp_s). Se indisponível, cai no fallback via /game_data.
+    bool used_prediction = false;
+    if (use_kf && has_robot_prediction_ && last_robot_prediction_) {
+        const double pred_age_s = std::chrono::duration<double>(now_ctrl - last_prediction_time_).count();
+        if (pred_age_s >= 0.0 && pred_age_s < 0.25) {
+            for (const auto& ally : last_robot_prediction_->allies) {
+                if (static_cast<int>(ally.id) == robot_id_ &&
+                    std::isfinite(ally.x) && std::isfinite(ally.y) && std::isfinite(ally.orientation) &&
+                    std::isfinite(ally.vx) && std::isfinite(ally.vy) && std::isfinite(ally.vorientation)) {
+                    double px_mm = ally.x;
+                    double py_mm = ally.y;
+                    double pth_rad = ally.orientation;
+                    const double vx_mps = ally.vx / 1000.0;
+                    const double vy_mps = ally.vy / 1000.0;
+                    const double omega = ally.vorientation;
+                    movement::projectPredictedPoseMm(
+                        px_mm, py_mm, pth_rad, vx_mps, vy_mps, omega, pred_age_s, latency_comp_s);
+                    current_pos.x = static_cast<float>(px_mm);
+                    current_pos.y = static_cast<float>(py_mm);
+                    current_pos.orientation = static_cast<float>(pth_rad);
+                    est_vx_mps_ = vx_mps;
+                    est_vy_mps_ = vy_mps;
+                    filtered_omega_ = omega;
+                    used_prediction = true;
+                    break;
+                }
+            }
         }
-    } else {
-        has_prev_orientation_ = true;
     }
-    prev_orientation_ = current_pos.orientation;
-    prev_control_time_ = now_ctrl;
+
+    if (!used_prediction) {
+        // Fallback EMA quando /robot_predicted está indisponível ou use_kalman_filter=false
+        est_vx_mps_ = 0.0;
+        est_vy_mps_ = 0.0;
+        if (has_prev_orientation_) {
+            double dt = std::chrono::duration<double>(now_ctrl - prev_control_time_).count();
+            if (dt > 1e-3 && dt < 0.5) {
+                double raw_omega = normalizeAngle(current_pos.orientation - prev_orientation_) / dt;
+                filtered_omega_ = 0.6 * filtered_omega_ + 0.4 * raw_omega;
+            }
+        } else {
+            has_prev_orientation_ = true;
+        }
+        prev_orientation_ = current_pos.orientation;
+        prev_control_time_ = now_ctrl;
+    }
 
     // --- Canal de override (Align/Kick/Halt) ---
     // Único dono de /robot_commands para este robô: AlignToBallNode, KickBallNode e a ação Halt
@@ -332,10 +394,11 @@ void PathFollowerNode::calculate_and_move() {
     // --- Comportamento padrão: seguir caminho (D*/linha reta) + apontar para o gol ---
     movement::Coordinate target_pt;
     bool target_found = false;
+    bool picked_lookahead_waypoint = false;
+    double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
 
     // --- Seguir Rota do D* ---
     if (last_path_ && !last_path_->poses.empty()) {
-            double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
             for (const auto& pose_stamped : last_path_->poses) {
                 float px = pose_stamped.pose.position.x * 1000.0f;
                 float py = pose_stamped.pose.position.y * 1000.0f;
@@ -346,6 +409,7 @@ void PathFollowerNode::calculate_and_move() {
                     float qw = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
                     target_pt = {px, py, qw};
                     target_found = true;
+                    picked_lookahead_waypoint = true;
                     break;
                 }
             }
@@ -395,10 +459,16 @@ void PathFollowerNode::calculate_and_move() {
     // Abaixo desta distância o alvo é considerado "alcançado": zera velocidade e libera o
     // controle angular (ver disable_arrival_latch_ abaixo). Precisa ficar abaixo de qualquer
     // tolerância usada nas árvores de comportamento.
+    constexpr double kControlDtS = 0.02;
     constexpr double kArrivedDistanceMm = 10.0;
+    const double max_lin = this->get_parameter("max_linear_speed").as_double();
+    const double min_lin = this->get_parameter("min_linear_speed").as_double();
+    const double eff_min_lin = movement::effectiveMinSpeed(min_lin, max_lin);
+    const double arrived_dist_mm = movement::effectiveArrivalDistanceMm(
+        kArrivedDistanceMm, min_lin, max_lin, kControlDtS);
     // Alvos publicados com tolerance<=0 (GoToPoint "nunca chega formalmente", ex: pontos de carga
     // deliberadamente além da bola) nunca travam aqui mesmo cruzando os 10mm — ver RobotGoal.msg.
-    bool arrived = !disable_arrival_latch_ && (check_dist < kArrivedDistanceMm || dist_to_target < 0.001);
+    bool arrived = !disable_arrival_latch_ && (check_dist < arrived_dist_mm || dist_to_target < 0.001);
 
     // --- Controle Angular (PD com amortecimento derivativo) ---
     // Só solta a autoridade angular em `arrived` quando o alinhamento angular também já convergiu,
@@ -407,7 +477,11 @@ void PathFollowerNode::calculate_and_move() {
     bool has_target_w = target_w_.has_value();
     double desired_w = 0.0;
     bool should_control_w = false;
-    double angle_tol = this->get_parameter("angle_tolerance").as_double();
+    const double max_ang = this->get_parameter("max_angular_speed").as_double();
+    const double min_ang = this->get_parameter("min_angular_speed").as_double();
+    const double base_angle_tol = this->get_parameter("angle_tolerance").as_double();
+    const double angle_tol = movement::effectiveAngleToleranceRad(
+        base_angle_tol, min_ang, max_ang, kControlDtS);
 
     bool angle_arrived = !has_target_w || (std::abs(normalizeAngle(*target_w_ - current_pos.orientation)) < angle_tol);
 
@@ -430,13 +504,18 @@ void PathFollowerNode::calculate_and_move() {
         } else {
             double p_ang = this->get_parameter("p_gain_angular").as_double();
             double d_ang = this->get_parameter("d_gain_angular").as_double();
-            double max_ang = this->get_parameter("max_angular_speed").as_double();
-            double pd_cmd = (angle_err * p_ang) - (filtered_omega_ * d_ang);
-            cmd_data.angular_velocity = std::clamp(pd_cmd, -max_ang, max_ang);
+            cmd_data.angular_velocity = static_cast<float>(
+                movement::applyPdAngularSpeedWithFloor(
+                    angle_err, filtered_omega_, p_ang, d_ang, min_ang, max_ang));
         }
     }
 
-    if (arrived) {
+    // Quando disable_arrival_latch_ está ativo (ex.: HoldPosition, Goalkeeper hold, PenaltyKeeperLine),
+    // evita que o piso mínimo amplifique ruído de visão (< arrived_dist_mm) em oscilação no lugar.
+    const bool within_min_speed_deadband =
+        disable_arrival_latch_ && (eff_min_lin > 0.0) && (check_dist < arrived_dist_mm);
+
+    if (arrived || within_min_speed_deadband) {
         cmd_data.x_velocity = 0.0;
         cmd_data.y_velocity = 0.0;
     } else if (dist_to_target < 1e-3) {
@@ -444,12 +523,28 @@ void PathFollowerNode::calculate_and_move() {
         cmd_data.y_velocity = 0.0;
     } else {
         double p_lin = this->get_parameter("p_gain_linear").as_double();
-        double max_lin = this->get_parameter("max_linear_speed").as_double();
+        double d_lin = std::max(0.0, this->get_parameter("d_gain_linear").as_double());
+        double max_accel = std::max(0.0, this->get_parameter("max_linear_accel").as_double());
 
-        double vx = (target_pt.x - current_pos.x) / dist_to_target;
-        double vy = (target_pt.y - current_pos.y) / dist_to_target;
+        double ex_m = (target_pt.x - current_pos.x) / 1000.0;
+        double ey_m = (target_pt.y - current_pos.y) / 1000.0;
+        const bool damp_along_error =
+            !picked_lookahead_waypoint || (target_goal_.has_value() && check_dist <= lookahead_dist);
+        double v_cmd_x = 0.0;
+        double v_cmd_y = 0.0;
+        movement::computePdLinearVectorWithFloor(
+            ex_m, ey_m, est_vx_mps_, est_vy_mps_, p_lin, d_lin, min_lin, max_lin,
+            damp_along_error, v_cmd_x, v_cmd_y);
 
-        double speed = std::min(max_lin, (dist_to_target / 1000.0) * p_lin);
+        double v_mag = std::hypot(v_cmd_x, v_cmd_y);
+        double v_brake_cap = (max_accel > 0.0)
+            ? std::min(max_lin, std::sqrt(2.0 * max_accel * (dist_to_target / 1000.0)))
+            : max_lin;
+        if (v_mag > v_brake_cap && v_mag > 1e-9) {
+            double scale = v_brake_cap / v_mag;
+            v_cmd_x *= scale;
+            v_cmd_y *= scale;
+        }
 
         // Prioriza alinhar antes de avançar, mas só perto do alvo final: erro angular alto reduz
         // a velocidade linear (gira mais no lugar), alinhado mantém velocidade cheia. Evita que o
@@ -458,11 +553,16 @@ void PathFollowerNode::calculate_and_move() {
         constexpr double kAlignmentPriorityRangeMm = 100.0;
         if (has_target_w && check_dist < kAlignmentPriorityRangeMm) {
             double alignment_factor = std::max(0.0, std::cos(angle_err));
-            speed *= alignment_factor;
+            v_cmd_x *= alignment_factor;
+            v_cmd_y *= alignment_factor;
         }
 
-        cmd_data.x_velocity = vx * speed;
-        cmd_data.y_velocity = vy * speed;
+        float vx_out = static_cast<float>(v_cmd_x);
+        float vy_out = static_cast<float>(v_cmd_y);
+        movement::applyMinMaxLinearVector(vx_out, vy_out, min_lin, max_lin);
+
+        cmd_data.x_velocity = vx_out;
+        cmd_data.y_velocity = vy_out;
     }
 
     // Repulsão de contato — só na Fase 1 (D*), onde qualquer contato com a bola é acidental (na
@@ -484,10 +584,10 @@ void PathFollowerNode::calculate_and_move() {
         }
 
         if (contact_repulsion_active_ && ball_dist > 1e-3) {
-            double max_lin = this->get_parameter("max_linear_speed").as_double();
             double repel_speed = max_lin * std::clamp(1.0 - ball_dist / kContactExitMm, 0.0, 1.0);
-            cmd_data.x_velocity = (bdx / ball_dist) * repel_speed;
-            cmd_data.y_velocity = (bdy / ball_dist) * repel_speed;
+            repel_speed = movement::applyMinMaxLinearSpeed(repel_speed, min_lin, max_lin);
+            cmd_data.x_velocity = static_cast<float>((bdx / ball_dist) * repel_speed);
+            cmd_data.y_velocity = static_cast<float>((bdy / ball_dist) * repel_speed);
             cmd_data.angular_velocity = 0.0;
         }
     }
@@ -550,11 +650,11 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
     } else {
         double offset_rad = offset_deg * M_PI / 180.0;
         double d_ang = this->get_parameter("d_gain_angular").as_double();
-        double pd_cmd = (offset_rad * last_override_msg_->p_gain) - (filtered_omega_ * d_ang);
-        cmd_data.angular_velocity = std::clamp(
-            pd_cmd,
-            -static_cast<double>(last_override_msg_->max_angular_speed),
-            static_cast<double>(last_override_msg_->max_angular_speed));
+        double min_ang = this->get_parameter("min_angular_speed").as_double();
+        double max_ang = static_cast<double>(last_override_msg_->max_angular_speed);
+        cmd_data.angular_velocity = static_cast<float>(
+            movement::applyPdAngularSpeedWithFloor(
+                offset_rad, filtered_omega_, last_override_msg_->p_gain, d_ang, min_ang, max_ang));
     }
     if (sanitizeCmd(cmd_data)) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
@@ -606,8 +706,11 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
             constexpr double kKickAdvanceSpeed = 0.5;
-            cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
-            cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
+            const double max_lin = this->get_parameter("max_linear_speed").as_double();
+            const double min_lin = this->get_parameter("min_linear_speed").as_double();
+            const double kick_advance = movement::applyMinMaxLinearSpeed(kKickAdvanceSpeed, min_lin, max_lin);
+            cmd_data.x_velocity = static_cast<float>(kick_advance * std::cos(current_pos.orientation));
+            cmd_data.y_velocity = static_cast<float>(kick_advance * std::sin(current_pos.orientation));
             cmd_data.angular_velocity = 0.0f;
             clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
             if (sanitizeCmd(cmd_data)) {
@@ -661,9 +764,12 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
         }
     }
 
-    // 3. Regra 2 (Teto de velocidade por fase e por objetivo - Capítulo 17.5, M03, SC-03 e R-27):
+    // 3. Regra 2 (Teto de velocidade por fase e por objetivo - Capítulo 17.5, M03, SC-03 e R-27)
+    //    + piso configurável (min_linear_speed / min_angular_speed):
     // O módulo do vetor (vx, vy) é limitado a speed_limit_mps do GameState (0,75 m/s em parada, 1,5 m/s em jogo)
     // e também ao max_speed opcional pedido pelo GoToPoint no último RobotGoal.
+    // O teto máximo (e suas exceções: HALT, TIMEOUT, watchdog, STOP, SetMotionLimit, max_speed)
+    // sempre prevalece sobre o piso mínimo, e comandos zerados permanecem zerados.
     float speed_cap = static_cast<float>(this->get_parameter("max_linear_speed").as_double());
     if (last_game_state_ && last_game_state_->speed_limit_mps > 0.0f) {
         speed_cap = std::min(speed_cap, last_game_state_->speed_limit_mps);
@@ -674,11 +780,19 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
     if (target_max_speed_ > 0.0f) {
         speed_cap = std::min(speed_cap, target_max_speed_);
     }
-    float speed = std::hypot(cmd.x_velocity, cmd.y_velocity);
-    if (speed > speed_cap && speed > 1e-4f) {
-        float scale = speed_cap / speed;
-        cmd.x_velocity *= scale;
-        cmd.y_velocity *= scale;
+    if (active_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
+        const double min_lin = this->get_parameter("min_linear_speed").as_double();
+        movement::applyMinMaxLinearVector(cmd.x_velocity, cmd.y_velocity, min_lin, speed_cap);
+
+        double ang_cap = this->get_parameter("max_angular_speed").as_double();
+        if ((active_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_BALL ||
+             active_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_ANGLE) &&
+            last_override_msg_ && last_override_msg_->max_angular_speed > 0.0) {
+            ang_cap = static_cast<double>(last_override_msg_->max_angular_speed);
+        }
+        const double min_ang = this->get_parameter("min_angular_speed").as_double();
+        cmd.angular_velocity = static_cast<float>(
+            movement::applyMinMaxAngularSpeed(cmd.angular_velocity, min_ang, ang_cap));
     }
 
     // 4. Regra 4 (Limite do chute - Capítulo 17.5 e SC-24):

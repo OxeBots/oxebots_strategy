@@ -1,5 +1,6 @@
 #include "oxebots_strategy/lateral_clear_node.h"
 #include "oxebots_strategy/goalkeeper_geometry.hpp"
+#include "oxebots_strategy/velocity_limits.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -162,6 +163,20 @@ LateralClearNode::KickPlan LateralClearNode::planKick(
     }
     gk::DestinationParams dest;
     dest.friction_mps2 = kBallFrictionAccel;
+    double max_lin_mps = dest.ally_speed_mps;
+    if (node_->has_parameter("max_linear_speed")) {
+        const double p = movement::sanitizeSpeedLimit(
+            node_->get_parameter("max_linear_speed").as_double());
+        if (p > 0.0) {
+            max_lin_mps = p;
+        }
+    }
+    double min_lin_mps = 0.0;
+    if (node_->has_parameter("min_linear_speed")) {
+        min_lin_mps = movement::effectiveMinSpeed(
+            node_->get_parameter("min_linear_speed").as_double(), max_lin_mps);
+    }
+    dest.ally_speed_mps = std::max(std::max(max_lin_mps, min_lin_mps), 0.1);
     // Afastar: a direção do leque é escolhida também por quem chega primeiro ao ponto onde a bola para (nossos
     // robôs ou os adversários). Com a posse, a velocidade faz a bola parar dentro do campo; sem ela, é com força.
     auto clear_plan = [&]() {

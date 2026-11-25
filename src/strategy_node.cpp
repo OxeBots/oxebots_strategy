@@ -19,6 +19,7 @@
 #include "behaviortree_cpp/blackboard.h"
 #include "oxebots_strategy/defender_nodes.hpp"
 #include "oxebots_strategy/node_registry.hpp"
+#include "oxebots_strategy/velocity_limits.hpp"
 #include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
@@ -58,6 +59,10 @@ public:
     this->declare_parameter<double>("max_gc_ms", 500.0);
     this->declare_parameter<double>("max_pose_ms", 150.0);
     this->declare_parameter<double>("max_ball_ms", 300.0);
+    this->declare_parameter<double>("max_linear_speed", 1.0);
+    this->declare_parameter<double>("min_linear_speed", 0.0);
+    this->declare_parameter<double>("max_angular_speed", 3.0);
+    this->declare_parameter<double>("min_angular_speed", 0.0);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
@@ -67,6 +72,14 @@ public:
     max_gc_ms_ = this->get_parameter("max_gc_ms").as_double();
     max_pose_ms_ = this->get_parameter("max_pose_ms").as_double();
     max_ball_ms_ = this->get_parameter("max_ball_ms").as_double();
+    max_linear_speed_ = movement::sanitizeSpeedLimit(
+      this->get_parameter("max_linear_speed").as_double());
+    min_linear_speed_ = movement::effectiveMinSpeed(
+      this->get_parameter("min_linear_speed").as_double(), max_linear_speed_);
+    max_angular_speed_ = movement::sanitizeSpeedLimit(
+      this->get_parameter("max_angular_speed").as_double());
+    min_angular_speed_ = movement::effectiveMinSpeed(
+      this->get_parameter("min_angular_speed").as_double(), max_angular_speed_);
 
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
@@ -309,6 +322,10 @@ private:
     blackboard_->set("max_gc_ms", max_gc_ms_);
     blackboard_->set("max_pose_ms", max_pose_ms_);
     blackboard_->set("max_ball_ms", max_ball_ms_);
+    blackboard_->set("max_linear_speed", max_linear_speed_);
+    blackboard_->set("min_linear_speed", min_linear_speed_);
+    blackboard_->set("max_angular_speed", max_angular_speed_);
+    blackboard_->set("min_angular_speed", min_angular_speed_);
 
     // Chaves de GameState e GC
     const int initial_phase = require_gc_ ? 0 : 9;  // 9 = PHASE_RUN no modo sem GC
@@ -402,6 +419,20 @@ public:
 
     // 1. Cor real: D03 determina que is_yellow volta a significar apenas a cor real do time
     blackboard_->set("is_yellow", is_yellow_);
+
+    // Mantém limites de velocidade sincronizados com os parâmetros do nó (suporta ajuste dinâmico)
+    max_linear_speed_ = movement::sanitizeSpeedLimit(
+      this->get_parameter("max_linear_speed").as_double());
+    min_linear_speed_ = movement::effectiveMinSpeed(
+      this->get_parameter("min_linear_speed").as_double(), max_linear_speed_);
+    max_angular_speed_ = movement::sanitizeSpeedLimit(
+      this->get_parameter("max_angular_speed").as_double());
+    min_angular_speed_ = movement::effectiveMinSpeed(
+      this->get_parameter("min_angular_speed").as_double(), max_angular_speed_);
+    blackboard_->set("max_linear_speed", max_linear_speed_);
+    blackboard_->set("min_linear_speed", min_linear_speed_);
+    blackboard_->set("max_angular_speed", max_angular_speed_);
+    blackboard_->set("min_angular_speed", min_angular_speed_);
 
     // 2. Geometria e Lado do Campo (Capítulo 20 §O lado do campo)
     if (geom) {
@@ -868,6 +899,10 @@ public:
   double max_gc_ms_{500.0};
   double max_pose_ms_{150.0};
   double max_ball_ms_{300.0};
+  double max_linear_speed_{1.0};
+  double min_linear_speed_{0.0};
+  double max_angular_speed_{3.0};
+  double min_angular_speed_{0.0};
 
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};

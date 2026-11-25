@@ -27,6 +27,8 @@ public:
     // Distância (mm) do candidato à bola abaixo da qual ele já recepcionou a bola: o congelamento
     // acaba e a troca de papel sai na hora, sem esperar a bola desacelerar.
     this->declare_parameter<double>("receive_distance_mm", 300.0);
+    this->declare_parameter<double>("min_linear_speed", 0.0);
+    this->declare_parameter<double>("min_angular_speed", 0.0);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     w1_ = this->get_parameter("w1").as_double();

@@ -68,6 +68,10 @@ Executa o motor de árvore de comportamento (**BehaviorTree.CPP v4**) para um ro
   - `max_ball_ms` (double, default: `300.0` ms): Idade máxima tolerada para os dados da bola.
   - `slot_margin_mm` (double, default: `150.0` mm): Margem extra de segurança usada pela folha `ComputeLegalSlot`.
   - `absolute_max_mps` (double, default: `1.5` m/s): Teto absoluto de velocidade aplicado pela folha `SetMotionLimit`.
+  - `max_linear_speed` (double, default: `1.0` m/s): Velocidade linear máxima usada pelos cálculos táticos (ex.: `CalculateInterception`, `LateralClear`, `IsBallClosest`).
+  - `min_linear_speed` (double, default: `0.0` m/s): Piso mínimo de velocidade linear (`0.0` desativa; sempre limitado pelo teto máximo).
+  - `max_angular_speed` (double, default: `3.0` rad/s): Velocidade angular máxima configurada no nó.
+  - `min_angular_speed` (double, default: `0.0` rad/s): Piso mínimo de velocidade angular (`0.0` desativa; sempre limitado pelo teto máximo).
 
 ### 2.2 `referee_state_node`
 Interpreta os pacotes do Game Controller oficial, resolve o contexto de reinício (`NORMAL_START` de kick-off vs. pênalti), detecta entrada da bola em jogo (`PHASE_RUN`), calcula o lado defensivo (`our_goal_positive_x`) e monitora expiração (`stale`).
@@ -144,8 +148,10 @@ Seguidor de caminho baseado em perseguição pura (*Pure Pursuit*) omnidireciona
   - `path_renews_watchdog` (bool, default: `false`): Se `true`, pacotes de rota também renovam o watchdog de comando.
   - `lookahead_distance` (double, default: `140.0` mm): Distância ao longo do caminho para extração do ponto-alvo.
   - `max_linear_speed` (double, default: `1.0` m/s): Velocidade linear máxima padrão.
+  - `min_linear_speed` (double, default: `0.0` m/s): Piso mínimo de velocidade linear para comandos não-nulos (`0.0` desativa; nunca excede o teto máximo vigente nem sobrescreve HALT/chegada/watchdog).
   - `p_gain_linear` (double, default: `2.0`): Ganho proporcional para translação.
   - `max_angular_speed` (double, default: `3.0` rad/s): Velocidade angular máxima permitida.
+  - `min_angular_speed` (double, default: `0.0` rad/s): Piso mínimo de velocidade angular para comandos não-nulos (`0.0` desativa; nunca excede o teto angular vigente).
   - `p_gain_angular` (double, default: `2.2`): Ganho proporcional de orientação.
   - `d_gain_angular` (double, default: `0.25`): Ganho derivativo de orientação.
   - `angle_tolerance` (double, default: `0.04` rad): Zona morta angular.

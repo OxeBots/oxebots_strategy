@@ -259,7 +259,14 @@ inline Landing landingPoint(
 inline double reachTimeS(
   const Vec2 & robot, const Vec2 & point, double speed_mps, double radius_mm)
 {
-  return std::max(0.0, distance(robot, point) - radius_mm) / 1000.0 / speed_mps;
+  const double dist_mm = std::max(0.0, distance(robot, point) - radius_mm);
+  if (dist_mm <= 0.0) {
+    return 0.0;
+  }
+  if (!std::isfinite(speed_mps) || speed_mps <= 1e-6) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return dist_mm / 1000.0 / speed_mps;
 }
 
 // Vantagem de posse no ponto, em [-1, 1]: positiva quando algum dos nossos chega antes de qualquer adversário.

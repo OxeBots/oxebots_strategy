@@ -903,3 +903,28 @@ TEST_F(StrategyNodeBlackboardTest, MasterTreeScenarioMatchesRefreshKeysAndTypes)
     EXPECT_TRUE(is_kicker);
     EXPECT_EQ(phase, static_cast<int>(GameState::PHASE_STOP));
 }
+
+TEST_F(StrategyNodeBlackboardTest, VelocityLimitParametersPopulateAndClampOnBlackboard)
+{
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override("is_yellow_team", false);
+    opts.append_parameter_override("robot_id", 1);
+    opts.append_parameter_override("max_linear_speed", 0.8);
+    opts.append_parameter_override("min_linear_speed", 0.35);
+    opts.append_parameter_override("max_angular_speed", 2.0);
+    opts.append_parameter_override("min_angular_speed", 3.5);  // excede máxima -> clampado a 2.0
+
+    auto node = std::make_shared<StrategyNode>(opts);
+    auto bb = node->getBlackboard();
+
+    double max_lin = 0.0, min_lin = 0.0, max_ang = 0.0, min_ang = 0.0;
+    ASSERT_TRUE(bb->get("max_linear_speed", max_lin));
+    ASSERT_TRUE(bb->get("min_linear_speed", min_lin));
+    ASSERT_TRUE(bb->get("max_angular_speed", max_ang));
+    ASSERT_TRUE(bb->get("min_angular_speed", min_ang));
+
+    EXPECT_DOUBLE_EQ(max_lin, 0.8);
+    EXPECT_DOUBLE_EQ(min_lin, 0.35);
+    EXPECT_DOUBLE_EQ(max_ang, 2.0);
+    EXPECT_DOUBLE_EQ(min_ang, 2.0);
+}

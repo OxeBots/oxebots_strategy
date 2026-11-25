@@ -1,6 +1,7 @@
 #include "oxebots_strategy/is_ball_closest_condition.h"
 #include "oxebots_strategy/goalkeeper_blackboard.hpp"
 #include "oxebots_strategy/goalkeeper_geometry.hpp"
+#include "oxebots_strategy/velocity_limits.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -232,7 +233,26 @@ BT::NodeStatus IsBallClosestCondition::tick()
   if (!engaged_) {
     engaged_ = true;
     engaged_since_ = now;
-    commit_budget_s_ = std::max(kCommitMinS, my_dist / kApproachSpeedMmS + kCommitExtraS);
+    double approach_speed_mm_s = kApproachSpeedMmS;
+    double max_lin_mps = 0.0;
+    double min_lin_mps = 0.0;
+    if (node_->has_parameter("max_linear_speed")) {
+      max_lin_mps = movement::sanitizeSpeedLimit(
+        node_->get_parameter("max_linear_speed").as_double());
+    }
+    if (node_->has_parameter("min_linear_speed")) {
+      min_lin_mps = movement::sanitizeSpeedLimit(
+        node_->get_parameter("min_linear_speed").as_double());
+    }
+    if (max_lin_mps > 0.0) {
+      const double max_mm_s = max_lin_mps * 1000.0;
+      const double min_mm_s = movement::effectiveMinSpeed(min_lin_mps, max_lin_mps) * 1000.0;
+      approach_speed_mm_s = std::clamp(approach_speed_mm_s, min_mm_s, max_mm_s);
+    } else if (min_lin_mps > 0.0) {
+      approach_speed_mm_s = std::max(approach_speed_mm_s, min_lin_mps * 1000.0);
+    }
+    approach_speed_mm_s = std::max(approach_speed_mm_s, 1.0);
+    commit_budget_s_ = std::max(kCommitMinS, my_dist / approach_speed_mm_s + kCommitExtraS);
     RCLCPP_INFO(node_->get_logger(),
                 "Goleiro assume a bola: dist=%.0fmm (aliado=%.0fmm, inimigo=%.0fmm), profundidade=%.0fmm de %.0fmm, orcamento=%.1fs",
                 my_dist, ally_dist, enemy_dist, depth, leash, commit_budget_s_);
