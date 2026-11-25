@@ -5,6 +5,21 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+import yaml
+
+
+def sanitize_empty_kickers_override(config_paths):
+    """Return [{'operational_kickers': [-1]}] if any YAML sets operational_kickers to [] or None."""
+    needs_override = False
+    for path in config_paths:
+        with open(path) as config:
+            data = yaml.safe_load(config) or {}
+        params = (data.get("/**") or {}).get("ros__parameters") or {}
+        if "operational_kickers" in params:
+            val = params["operational_kickers"]
+            needs_override = val is None or (isinstance(val, list) and len(val) == 0)
+    return [{"operational_kickers": [-1]}] if needs_override else []
+
 
 def launch_setup(context, *args, **kwargs):
     strategy_pkg_share = get_package_share_directory("oxebots_strategy")
@@ -15,9 +30,10 @@ def launch_setup(context, *args, **kwargs):
     if not config_file:
         config_file = base_config
 
-    config_params = [base_config]
+    yaml_files = [base_config]
     if os.path.abspath(config_file) != os.path.abspath(base_config):
-        config_params.append(config_file)
+        yaml_files.append(config_file)
+    config_params = [*yaml_files, *sanitize_empty_kickers_override(yaml_files)]
 
     bt_xml = LaunchConfiguration("bt_xml").perform(context)
     invert_sides = LaunchConfiguration("invert_sides").perform(context)

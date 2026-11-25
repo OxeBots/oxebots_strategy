@@ -16,15 +16,15 @@
   <!-- 1. Preparação para o nosso pênalti (SC-09, R-15) -->
   <BehaviorTree ID="PreparePenaltyOurTree">
     <ReactiveFallback name="PreparePenaltyOurRoles">
-      <ReactiveSequence name="GoalkeeperRole">
-        <HasRole role="goalkeeper"/>
-        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-      </ReactiveSequence>
-
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
         <ComputeLegalSlot slot="penalty_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{opp_goal_x}" face_y="{opp_goal_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="AttackerBehindRole">
@@ -86,14 +86,14 @@
   <!-- 3. Execução do nosso pênalti após NORMAL_START (SC-09, R-15) -->
   <BehaviorTree ID="PenaltyExecuteOurTree">
     <ReactiveFallback name="PenaltyExecuteOurRoles">
-      <ReactiveSequence name="GoalkeeperRole">
-        <HasRole role="goalkeeper"/>
-        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-      </ReactiveSequence>
-
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
         <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="HoldOtherRobotsRole">

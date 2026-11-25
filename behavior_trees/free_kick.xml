@@ -10,11 +10,6 @@
   <!-- Free kick nosso: cobrança e apoio legal (SC-07) com jogadas ensaiadas de escanteio e lateral -->
   <BehaviorTree ID="FreeKickOurTree">
     <ReactiveFallback name="FreeKickOurRoles">
-      <ReactiveSequence name="GoalkeeperRole">
-        <HasRole role="goalkeeper"/>
-        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-      </ReactiveSequence>
-
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
         <ReactiveFallback name="KickerSetPieceChoice">
@@ -35,6 +30,11 @@
           <!-- 3. Falta direta / tiro de meta: cobrança mirando no gol adversário -->
           <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
         </ReactiveFallback>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="IdleRole">

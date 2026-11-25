@@ -308,12 +308,32 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     }
 
     // Recua sempre para a linha entre a bola e o nosso gol (na frente do nosso gol e atrás da bola).
-    // Se o robô estiver do lado oposto (na frente da bola), o passo de contorno angular abaixo o guia
-    // por fora da zona de exclusão até alinhar nessa barreira.
+    // Se index > 0 (ou se o robô for defensor/idle), aplica deslocamento lateral perpendicular para que
+    // dois robôs recuando ao mesmo tempo (ou recuando sobre o slot do atacante) NUNCA apontem para o
+    // mesmo ponto exato e não se batam!
     const double dir_angle = std::atan2(0.0 - ball_y, own_goal_x - ball_x);
+    const double ux = std::cos(dir_angle);
+    const double uy = std::sin(dir_angle);
+    const double px = -uy;
+    const double py = ux;
 
-    slot_x = ball_x + min_stop_ball_dist * std::cos(dir_angle);
-    slot_y = ball_y + min_stop_ball_dist * std::sin(dir_angle);
+    std::string role_str;
+    getFromBlackboards(local_bb, root_bb, "role", role_str);
+
+    double lat = 0.0;
+    double retreat_dist = min_stop_ball_dist;
+    if (index > 0u) {
+      lat = ((index % 2u == 1u) ? 280.0 : -280.0) * static_cast<double>((index + 1u) / 2u);
+    } else if (role_str == "defender") {
+      lat = 280.0;
+      retreat_dist = min_stop_ball_dist + 60.0;
+    } else if (role_str == "idle") {
+      lat = -280.0;
+      retreat_dist = min_stop_ball_dist + 60.0;
+    }
+
+    slot_x = ball_x + ux * retreat_dist + px * lat;
+    slot_y = ball_y + uy * retreat_dist + py * lat;
     enforce_ball_clearance = true;
   } else if (slot == "stop_shadow") {
     // Atacante no STOP: posiciona-se entre a bola e o nosso gol (na frente do gol e atrás da bola)
@@ -330,7 +350,9 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     slot_w = std::atan2(0.0 - slot_y, opp_goal_x - slot_x);
     enforce_ball_clearance = true;
   } else if (slot == "stop_def") {
-    // Defensor no STOP: acompanha a bola fechando a linha bola -> nosso gol a >= 800 mm
+    // Defensor no STOP: acompanha a bola fechando a linha bola -> nosso gol a >= 800 mm.
+    // Quando index > 0, usa espaçamento lateral de 300 mm (>= diâmetro de 2 robôs + folga) para
+    // não raspar nem bater no atacante em stop_shadow!
     const double dx = own_goal_x - ball_x;
     const double dy = 0.0 - ball_y;
     const double dist = std::hypot(dx, dy);
@@ -342,7 +364,7 @@ BT::NodeStatus ComputeLegalSlotNode::tick()
     const double def_dist = std::max(800.0, min_stop_ball_dist + 150.0);
     const double lat = (index == 0u)
                            ? 0.0
-                           : ((index % 2u == 1u) ? 220.0 : -220.0) *
+                           : ((index % 2u == 1u) ? 300.0 : -300.0) *
                                  static_cast<double>((index + 1u) / 2u);
 
     slot_x = ball_x + ux * def_dist + px * lat;

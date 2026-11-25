@@ -25,6 +25,9 @@
 
       <ReactiveSequence name="CoverGoalWhenAlone">
         <Inverter>
+          <IsValueTrue value="{is_goalkeeper}"/>
+        </Inverter>
+        <Inverter>
           <IsValueTrue value="{has_defender}"/>
         </Inverter>
         <IsBallInOurHalf ball_x="{ball_x}"/>

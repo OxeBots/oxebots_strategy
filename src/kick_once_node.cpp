@@ -64,6 +64,12 @@ BT::NodeStatus KickOnceNode::onStart()
                 robot_id_, kick_speed, kMaxKickSpeed);
     kick_speed = kMaxKickSpeed;
   }
+
+  auto * root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
+  bool kicker_op = true;
+  if (root_bb && root_bb->get("kicker_operational", kicker_op) && !kicker_op) {
+    kick_speed = 0.0;
+  }
   kick_speed_ = kick_speed;
 
   timeout_s_ = 10.0;

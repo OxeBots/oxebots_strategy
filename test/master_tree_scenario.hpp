@@ -55,9 +55,12 @@ struct Scenario
   // --- Papel (RoleAssignment) ---
   uint32_t robot_id{1};
   std::string role{"idle"};  // goalkeeper | attacker | defender | idle
+  bool is_goalkeeper{false};
   bool is_kicker{false};
   uint32_t kicker_id{999};  // NO_ROBOT
+  bool kicker_operational{true};
   bool has_defender{true};  // P03: falso com só goleiro + atacante em campo
+  bool has_attacker{true};  // falso com só goleiro em campo (goleiro-atacante solo)
 
   // --- Cor e lado ---
   bool is_yellow{false};
@@ -93,9 +96,12 @@ struct Scenario
 
     bb.set("robot_id", robot_id);
     bb.set("role", role);
+    bb.set("is_goalkeeper", is_goalkeeper || role == "goalkeeper");
     bb.set("is_kicker", is_kicker);
     bb.set("kicker_id", kicker_id);
+    bb.set("kicker_operational", kicker_operational);
     bb.set("has_defender", has_defender);
+    bb.set("has_attacker", has_attacker);
 
     bb.set("is_yellow", is_yellow);
     bb.set("side_sign", side_sign);
@@ -133,9 +139,12 @@ inline const std::map<std::string, std::type_index> & expectedKeyTypes()
     {"max_ball_ms", typeid(double)},
     {"robot_id", typeid(uint32_t)},
     {"role", typeid(std::string)},
+    {"is_goalkeeper", typeid(bool)},
     {"is_kicker", typeid(bool)},
     {"kicker_id", typeid(uint32_t)},
+    {"kicker_operational", typeid(bool)},
     {"has_defender", typeid(bool)},
+    {"has_attacker", typeid(bool)},
     {"is_yellow", typeid(bool)},
     {"side_sign", typeid(int)},
     {"field_length", typeid(double)},

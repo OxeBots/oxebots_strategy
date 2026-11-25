@@ -362,8 +362,8 @@ INSTANTIATE_TEST_SUITE_P(
     StopCase{"AttackerFar", "attacker", false, "stop_shadow", "GoToPoint"},
     StopCase{"DefenderFar", "defender", false, "stop_def", "GoToPoint"},
     StopCase{"IdleFar", "idle", false, "", "HoldPosition"},
-    // Bola a < 650 mm: QUALQUER papel (inclusive goleiro) recua para o ponto legal.
-    StopCase{"GoalkeeperClose", "goalkeeper", true, "retreat", "GoToPoint"},
+    // Bola a < 650 mm: robôs de linha recuam para o ponto legal; goleiro mantém GoalLineDefend na meta.
+    StopCase{"GoalkeeperClose", "goalkeeper", true, "", "GoalLineDefend"},
     StopCase{"AttackerClose", "attacker", true, "retreat", "GoToPoint"},
     StopCase{"DefenderClose", "defender", true, "retreat", "GoToPoint"},
     StopCase{"IdleClose", "idle", true, "retreat", "GoToPoint"}),
@@ -1115,6 +1115,48 @@ TEST_F(LoneAttackerTest, DefenderReturningHandsTheGoalBackAndTheAttackResumes)
   EXPECT_NE(h->branch(), "CoverGoalWhenAlone");
   EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_TRUE(h->ran("UpdateBallPosition"));
+}
+
+// ============================================================================
+// Goleiro-Atacante Solo (apenas 1 robô em campo: has_attacker = false)
+// ============================================================================
+
+TEST_F(MasterTreeTest, SoloGoalkeeperLeavesAreaToAttackInRunAndTakesOurSetPieces)
+{
+  // 1. Em RUN, com has_attacker = false e bola fora da área: o goleiro sai da área e disputa a bola (AttackerTree)
+  goTo(kRun, false, "goalkeeper");
+  s().has_attacker = false;
+  s().has_defender = false;
+  s().is_goalkeeper = true;
+  h->setStatus("IsBallInArea", NodeStatus::FAILURE);
+  h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
+  EXPECT_EQ(tickBranch(), kRunBranch);
+  EXPECT_TRUE(h->ran("CalculateInterception"));
+  EXPECT_TRUE(h->ran("GoToPoint"));
+  EXPECT_FALSE(h->ran("GoalLineDefend"));
+  EXPECT_FALSE(h->ran("ShadowBall"));
+
+  // 2. Se a bola entrar na nossa área, ele limpa como goleiro (State3_BallInArea)
+  h->setStatus("IsBallInArea", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_TRUE(h->ran("LateralClear"));
+  EXPECT_FALSE(h->ran("CalculateInterception"));
+
+  // 3. Em bola parada do adversário (ex: FREE_KICK deles), o goleiro solo defende a meta normalmente
+  h->setStatus("IsBallInArea", NodeStatus::FAILURE);
+  goTo(kFreeKick, false, "goalkeeper");
+  s().has_attacker = false;
+  h->tick();
+  EXPECT_EQ(h->branch(), "FreeKickBranch");
+  EXPECT_TRUE(h->ran("GoalLineDefend"));
+
+  // 4. Em nossa bola parada (ex: PREPARE_KICKOFF nosso), com is_kicker = true, o goleiro solo vai cobrar
+  goTo(kPrepareKickoff, true, "goalkeeper");
+  s().is_kicker = true;
+  s().kicker_id = s().robot_id;
+  h->tick();
+  EXPECT_EQ(h->branch(), "PrepareKickoffBranch");
+  EXPECT_EQ(h->rawPort("ComputeLegalSlot", "slot"), "kickoff_kicker");
 }
 
 }  // namespace

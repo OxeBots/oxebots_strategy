@@ -79,6 +79,16 @@ BT::NodeStatus KickBallNode::onStart()
       kick_speed = 3.0;
   }
 
+  // Se o robô está sem kicker operacional (kicker_operational == false na blackboard),
+  // executa exatamente a mesma arrancada de chute do controlador (MODE_KICK), mas com
+  // kick_speed = 0.0 para não acionar o solenoide (empurra a bola com impacto de corpo e para!).
+  if (auto * bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr) {
+    bool kicker_op = true;
+    if (bb->get("kicker_operational", kicker_op) && !kicker_op) {
+      kick_speed = 0.0;
+    }
+  }
+
   robot_id_ = robot_id;
   kick_speed_ = kick_speed;
   baseline_kick_count_ = (last_status_ && last_status_->robot_id == robot_id_) ? last_status_->kick_fire_count : 0;

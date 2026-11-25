@@ -272,6 +272,45 @@ TEST_F(StrategyNodeBlackboardTest, P02_RoleAssignmentUpdatesEpochKickerAndActive
     EXPECT_TRUE(is_kick);
 }
 
+TEST_F(StrategyNodeBlackboardTest, RefreshSetsKickerOperationalFromParameter)
+{
+    // Robô 1 listado em operational_kickers -> kicker_operational = true
+    {
+        rclcpp::NodeOptions opts;
+        opts.append_parameter_override("robot_id", 1);
+        opts.append_parameter_override("operational_kickers", std::vector<int64_t>{0, 1, 2});
+        auto node = std::make_shared<StrategyNode>(opts);
+        node->refresh();
+        bool op = false;
+        ASSERT_TRUE(node->getBlackboard()->get("kicker_operational", op));
+        EXPECT_TRUE(op);
+    }
+
+    // Robô 1 NÃO listado em operational_kickers -> kicker_operational = false
+    {
+        rclcpp::NodeOptions opts;
+        opts.append_parameter_override("robot_id", 1);
+        opts.append_parameter_override("operational_kickers", std::vector<int64_t>{0, 2});
+        auto node = std::make_shared<StrategyNode>(opts);
+        node->refresh();
+        bool op = true;
+        ASSERT_TRUE(node->getBlackboard()->get("kicker_operational", op));
+        EXPECT_FALSE(op);
+    }
+
+    // Lista vazia [] no YAML (que o parser rcl_yaml_param_parser converte para BYTE_ARRAY vazio)
+    {
+        rclcpp::NodeOptions opts;
+        opts.append_parameter_override("robot_id", 0);
+        opts.append_parameter_override("operational_kickers", std::vector<uint8_t>{});
+        auto node = std::make_shared<StrategyNode>(opts);
+        node->refresh();
+        bool op = true;
+        ASSERT_TRUE(node->getBlackboard()->get("kicker_operational", op));
+        EXPECT_FALSE(op);
+    }
+}
+
 // P03: has_defender diz às árvores se há defensor atribuído (falso com só goleiro + atacante).
 TEST_F(StrategyNodeBlackboardTest, P03_HasDefenderFollowsTheRoleAssignment)
 {

@@ -472,3 +472,54 @@ TEST_F(RoleAssignerNodeTest, ThrowInAndCornerKickHandoverToNonKickerImmediatelyA
   EXPECT_EQ(roles_run.attacker_id, 2u);
   EXPECT_EQ(roles_run.defender_id, 1u);
 }
+
+// ============================================================================
+// 12. Priorização de robô com kicker operacional como cobrador de bola parada
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, OperationalKickersPrioritizesLineRobot)
+{
+  rclcpp::NodeOptions opts;
+  opts.append_parameter_override("operational_kickers", std::vector<int64_t>{0, 2});
+  auto node = std::make_shared<RoleAssignerNode>(opts);
+
+  // Bola parada (PREPARE_KICKOFF).
+  // Robô 1 está mais perto da bola (-300 mm), mas kicker quebrado (não listado).
+  // Robô 2 está mais longe (-1500 mm), mas kicker operacional.
+  // Goleiro (0) está listado, mas NUNCA deve ser cobrador.
+  node->processGameState(makeGameState(GameState::PHASE_PREPARE_KICKOFF, 0));
+
+  auto gd = std::make_shared<GameData>();
+  gd->ball.x = 0.0f;
+  gd->ball.y = 0.0f;
+  gd->robots.allies = {
+    makeRobot(0, -2000.0f, 0.0f),
+    makeRobot(1, -300.0f, 0.0f),
+    makeRobot(2, -1500.0f, 0.0f)
+  };
+  node->processGameData(gd);
+
+  auto roles = node->getLastPublishedRoles();
+  EXPECT_EQ(roles.kicker_id, 2u);
+  EXPECT_EQ(roles.attacker_id, 2u);
+  EXPECT_EQ(roles.defender_id, 1u);
+  EXPECT_EQ(roles.goalkeeper_id, 0u);
+}
+
+// ============================================================================
+// 13. Goleiro solo cobra bola parada quando não há robô de linha em campo
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, SoloGoalkeeperBecomesKickerOnOurSetPieces)
+{
+  auto node = std::make_shared<RoleAssignerNode>();
+  // Apenas 1 robô permitido (ou apenas o goleiro 0 visível em campo) durante nosso kickoff
+  node->processGameState(makeGameState(GameState::PHASE_PREPARE_KICKOFF, 0, true, false, /*max_bots=*/1));
+  node->processGameData(makeThreeRobots());
+
+  auto roles = node->getLastPublishedRoles();
+  EXPECT_EQ(roles.goalkeeper_id, 0u);
+  EXPECT_EQ(roles.kicker_id, 0u);
+  EXPECT_EQ(roles.attacker_id, RoleAssignment::NO_ROBOT);
+  EXPECT_EQ(roles.defender_id, RoleAssignment::NO_ROBOT);
+  ASSERT_EQ(roles.active_ids.size(), 1u);
+  EXPECT_EQ(roles.active_ids[0], 0u);
+}

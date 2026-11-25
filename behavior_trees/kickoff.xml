@@ -12,15 +12,15 @@
   <!-- 1. Preparação para o nosso kick-off (SC-05, R-11) -->
   <BehaviorTree ID="PrepareKickoffOurTree">
     <ReactiveFallback name="PrepareKickoffOurRoles">
-      <ReactiveSequence name="GoalkeeperRole">
-        <HasRole role="goalkeeper"/>
-        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-      </ReactiveSequence>
-
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
         <ComputeLegalSlot slot="kickoff_kicker" index="0" slot_x="{slot_x}" slot_y="{slot_y}"/>
         <GoToPoint robot_id="{robot_id}" x="{slot_x}" y="{slot_y}" face_x="{ball_x}" face_y="{ball_y}" tolerance="50.0"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="IdleRole">
@@ -64,14 +64,14 @@
   <!-- 3. Execução do nosso kick-off após NORMAL_START (SC-05, R-12) -->
   <BehaviorTree ID="KickoffExecuteOurTree">
     <ReactiveFallback name="KickoffExecuteOurRoles">
-      <ReactiveSequence name="GoalkeeperRole">
-        <HasRole role="goalkeeper"/>
-        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
-      </ReactiveSequence>
-
       <ReactiveSequence name="KickerRole">
         <HasRole role="kicker"/>
         <SubTree ID="RestartKickerTree" _autoremap="true" target_x="{opp_goal_x}" target_y="{opp_goal_y}"/>
+      </ReactiveSequence>
+
+      <ReactiveSequence name="GoalkeeperRole">
+        <HasRole role="goalkeeper"/>
+        <SubTree ID="GoalkeeperTree" _autoremap="true"/>
       </ReactiveSequence>
 
       <ReactiveSequence name="HoldOtherRobotsRole">

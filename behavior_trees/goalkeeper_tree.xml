@@ -31,6 +31,15 @@
                            <Goalkeeper robot_id="{robot_id}" mode="urgent_clear" kick_speed="3.0"/>
                        </ReactiveSequence>
 
+                       <!-- 1c. Goleiro-Atacante Solo (sem atacante em campo, fase RUN e bola fora da nossa área): sai da área, disputa a bola e ataca -->
+                       <ReactiveSequence name="StateSolo_GoalkeeperAsAttacker">
+                           <CheckGameState phase="RUN"/>
+                           <Inverter>
+                               <IsValueTrue value="{has_attacker}"/>
+                           </Inverter>
+                           <SubTree ID="AttackerTree" _autoremap="true"/>
+                       </ReactiveSequence>
+
                        <!-- 2. Bola fora da área, mais perto do goleiro que de qualquer outro robô: sair, buscar e chutar -->
                        <ReactiveSequence name="State2_BallClosestToGoalkeeper">
                            <IsBallClosest robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" />

@@ -58,6 +58,12 @@ public:
     this->declare_parameter<double>("max_gc_ms", 500.0);
     this->declare_parameter<double>("max_pose_ms", 150.0);
     this->declare_parameter<double>("max_ball_ms", 300.0);
+    rcl_interfaces::msg::ParameterDescriptor op_kickers_desc;
+    op_kickers_desc.dynamic_typing = true;
+    this->declare_parameter(
+      "operational_kickers",
+      rclcpp::ParameterValue(std::vector<int64_t>{0, 1, 2}),
+      op_kickers_desc);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
@@ -282,9 +288,11 @@ private:
     blackboard_->set("is_attacker", false);
     blackboard_->set("is_defender", false);
     blackboard_->set("is_kicker", false);
+    blackboard_->set("kicker_operational", true);
     // P03: verdadeiro enquanto há um defensor atribuído. Começa verdadeiro (antes do primeiro
     // RoleAssignment não se assume time reduzido); fica falso com só goleiro + atacante.
     blackboard_->set("has_defender", true);
+    blackboard_->set("has_attacker", true);
     blackboard_->set("role", std::string("idle"));
     blackboard_->set("role_epoch", 0u);
     blackboard_->set("active_ids", std::vector<uint32_t>{});
@@ -544,9 +552,25 @@ public:
       blackboard_->set("is_kicker", (my_id == roles->kicker_id));
       blackboard_->set(
         "has_defender", roles->defender_id != oxebots_interfaces::msg::RoleAssignment::NO_ROBOT);
+      blackboard_->set(
+        "has_attacker", roles->attacker_id != oxebots_interfaces::msg::RoleAssignment::NO_ROBOT);
     } else {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
         "Robô %d sem /role_assignment recebido: assumindo papel 'idle'.", robot_id_);
+    }
+
+    // 4b. Status operacional do kicker deste robô (suporta lista vazia ou [-1] sem exceção de tipo no ROS 2)
+    rclcpp::Parameter op_param;
+    if (this->get_parameter("operational_kickers", op_param)) {
+      bool has_kicker = false;
+      if (op_param.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY) {
+        const auto & op_kickers = op_param.as_integer_array();
+        has_kicker =
+          std::find(op_kickers.begin(), op_kickers.end(), static_cast<int64_t>(robot_id_)) != op_kickers.end();
+      }
+      blackboard_->set("kicker_operational", has_kicker);
+    } else {
+      blackboard_->set("kicker_operational", true);
     }
 
     // 5. GameData (robôs, bola, velocidades e idades)

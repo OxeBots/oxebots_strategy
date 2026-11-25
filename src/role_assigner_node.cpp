@@ -33,6 +33,14 @@ public:
     // Janela (s) após cobrança de falta/lateral/escanteio em que quem não bateu permanece como
     // atacante para receber o passe e evitar recuos bruscos ou duplo toque do cobrador.
     this->declare_parameter<double>("post_free_kick_lock_s", 1.5);
+    // dynamic_typing=true permite operational_kickers: [] (que o parser YAML do ROS 2 lê como
+    // PARAMETER_BYTE_ARRAY vazio) ou [0, 1, 2] (PARAMETER_INTEGER_ARRAY) sem lançar exceção!
+    rcl_interfaces::msg::ParameterDescriptor op_kickers_desc;
+    op_kickers_desc.dynamic_typing = true;
+    this->declare_parameter(
+      "operational_kickers",
+      rclcpp::ParameterValue(std::vector<int64_t>{0, 1, 2}),
+      op_kickers_desc);
 
     goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     w1_ = this->get_parameter("w1").as_double();
@@ -272,11 +280,43 @@ private:
         (std::find(eligible_ids.begin(), eligible_ids.end(), locked_kicker_id_) != eligible_ids.end());
 
       if (!locked_still_eligible) {
-        locked_kicker_id_ = eligible_ids.empty() ? kNoRobot : eligible_ids[0];
+        std::set<uint32_t> operational_kickers;
+        rclcpp::Parameter op_param;
+        if (this->get_parameter("operational_kickers", op_param)) {
+          if (op_param.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY) {
+            for (int64_t id : op_param.as_integer_array()) {
+              if (id >= 0) {
+                operational_kickers.insert(static_cast<uint32_t>(id));
+              }
+            }
+          }
+        } else {
+          operational_kickers = {0u, 1u, 2u};
+        }
+
+        // Prioriza o robô de linha elegível (NÃO goleiro) que tenha kicker operacional
+        uint32_t chosen_kicker = kNoRobot;
+        for (uint32_t id : eligible_ids) {
+          if (static_cast<int>(id) != desired_gk_id && operational_kickers.count(id) > 0) {
+            chosen_kicker = id;
+            break;
+          }
+        }
+        // Fallback: se nenhum robô de linha tiver chute operacional, usa o mais próximo
+        if (chosen_kicker == kNoRobot && !eligible_ids.empty()) {
+          chosen_kicker = eligible_ids[0];
+        }
+        // Fallback solo: se não há robô de linha em campo (só o goleiro), o goleiro cobra a bola parada
+        if (chosen_kicker == kNoRobot && active_goalkeeper_id != kNoRobot) {
+          chosen_kicker = active_goalkeeper_id;
+        }
+        locked_kicker_id_ = chosen_kicker;
       }
 
       kicker_id = locked_kicker_id_;
-      attacker_id = locked_kicker_id_;
+      if (locked_kicker_id_ != active_goalkeeper_id) {
+        attacker_id = locked_kicker_id_;
+      }
 
       // Defensor é o próximo robô elegível diferente do cobrador
       for (uint32_t cand : eligible_ids) {

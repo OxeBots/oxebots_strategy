@@ -68,6 +68,7 @@ Executa o motor de árvore de comportamento (**BehaviorTree.CPP v4**) para um ro
   - `max_ball_ms` (double, default: `300.0` ms): Idade máxima tolerada para os dados da bola.
   - `slot_margin_mm` (double, default: `150.0` mm): Margem extra de segurança usada pela folha `ComputeLegalSlot`.
   - `absolute_max_mps` (double, default: `1.5` m/s): Teto absoluto de velocidade aplicado pela folha `SetMotionLimit`.
+  - `operational_kickers` (int[], default: `[0, 1, 2]`): IDs dos robôs com kicker funcional. Alimenta a chave `{kicker_operational}` da blackboard (`true` se o `robot_id` estiver na lista). Use `[-1]` para "nenhum"; nunca `[]` (o parser YAML do ROS 2 não aceita). A blackboard também publica `{has_attacker}` (`false` quando só o goleiro está em campo).
 
 ### 2.2 `referee_state_node`
 Interpreta os pacotes do Game Controller oficial, resolve o contexto de reinício (`NORMAL_START` de kick-off vs. pênalti), detecta entrada da bola em jogo (`PHASE_RUN`), calcula o lado defensivo (`our_goal_positive_x`) e monitora expiração (`stale`).
@@ -100,6 +101,7 @@ Distribui dinamicamente os papéis entre os robôs de linha com base no estado d
   - `is_yellow_team` (bool, default: `false`).
   - `ball_flight_speed_mps` (double, default: `1.0` m/s): Velocidade da bola acima da qual ela é considerada em voo (congela troca de papéis; `0.0` desativa).
   - `receive_distance_mm` (double, default: `300.0` mm): Distância do candidato à bola abaixo da qual o congelamento de voo é encerrado imediatamente.
+  - `operational_kickers` (int[], default: `[0, 1, 2]`): em reinícios a nosso favor, o cobrador (`kicker_id`) é o robô de linha elegível mais próximo **com kicker funcional e que não seja o goleiro**. Sem nenhum com kicker, usa o mais próximo. Se não houver robô de linha em campo, o goleiro vira o cobrador.
 
 ### 2.4 `d_star_planner_node`
 Planejador de caminhos online baseado no algoritmo D* Lite (com suporte também ao modo `straight_line`). Encontra caminhos livres de obstáculos considerando o mapa de custos, áreas de defesa, zonas de bola parada e obstáculos dinâmicos (outros robôs e bola).
@@ -163,6 +165,19 @@ Nó intermediário que projeta a última velocidade decidida pelo `movement_calc
   - `radio_publish_rate_hz` (double, default: `15.0` Hz)
   - `lookahead_safety_factor` (double, default: `1.5`)
   - `max_lookahead_mm` (double, default: `1000.0` mm)
+
+### 2.7 Robô sem kicker e goleiro solo
+
+**Kicker quebrado (`operational_kickers`):** configure a lista no YAML do `oxebots_bringup` (veja o README dele, seção 2.7). Comportamento:
+- `KickBall` e `KickOnce` lêem `{kicker_operational}`; se `false`, pedem o chute com `kick_speed = 0.0`. O `movement_calculation_node` (`runKick`) então dá uma arrancada de corpo (1,5 m/s por 350 ms, sem acionar o solenoide) e freia a zero para a bola continuar rolando.
+- A navegação (aproximação, contorno, alinhamento com `IsBallClose`) é idêntica à do robô com chute.
+- `attacker_tree.xml`: o ramo `Shoot` só roda com `{kicker_operational}` verdadeiro; sem kicker cai direto no `Carry`.
+
+**Goleiro solo (`{has_attacker} == false`):**
+- `role_assigner_node` dá `kicker_id` ao goleiro nas nossas bolas paradas quando não há robô de linha; `kickoff.xml`, `free_kick.xml` e `penalty.xml` avaliam `KickerRole` antes de `GoalkeeperRole` nas árvores "Our".
+- `goalkeeper_tree.xml` (`StateSolo_GoalkeeperAsAttacker`): em `RUN`, com a bola fora da área, executa a `AttackerTree` (sem o recuo `CoverGoalWhenAlone`, pois `is_goalkeeper` é verdadeiro). O `GoToPoint` não prende mais o goleiro dentro da área e o `CalculateInterception` não restringe a nossa área para quem é goleiro.
+
+**STOP:** o goleiro passa a ser avaliado antes do recuo `RetreatIfClose` (não abandona o gol) e o slot `retreat` recebe deslocamento lateral por papel (defensor/idle) para dois robôs não irem ao mesmo ponto.
 
 ---
 

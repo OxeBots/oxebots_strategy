@@ -624,24 +624,18 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
 
     if (kick_phase_ == KickPhase::FIRING) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - kick_start_time_);
-        if (elapsed < kKickFireWindow) {
+        // Quando kick_speed == 0.0 (kicker desativado / chute por impacto físico de corpo),
+        // estende a janela de arrancada para 350 ms a 1.5 m/s e depois freia a zero no cooldown,
+        // transferindo momento linear máximo para a bola continuar rolando sozinha!
+        const bool is_body_bump = (last_override_msg_->kick_speed <= 0.01f);
+        const auto fire_window = is_body_bump ? std::chrono::milliseconds(350) : kKickFireWindow;
+        if (elapsed < fire_window) {
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
-            cmd_data.kick_speed = last_override_msg_->kick_speed;
-            // Avançar enquanto chuta, para garantir contato — na direção que o robô está
-            // REALMENTE olhando (current_pos.orientation), não em +X global fixo. RobotCmdData
-            // usa velocidades em referencial global (mesma convenção do resto deste arquivo, ver
-            // vx/vy do seguimento de caminho acima), então +X fixo só empurra "para frente" por
-            // coincidência quando o robô já está de frente pro +X — ou seja, só funciona pro time
-            // que ataca em direção a +X. Para o time que ataca em -X (opponent_goal_x negativo),
-            // empurrava para TRÁS do chute, cancelando o próprio avanço — o chute "completava"
-            // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
-            // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
-            // toda tentativa, exclusivo do time amarelo).
-            // Velocidade nominal de avanço durante a janela de disparo, alinhada ao teto de R-24 (1,0 m/s).
-            constexpr double kKickAdvanceSpeed = 1.0;
-            cmd_data.x_velocity = kKickAdvanceSpeed * std::cos(current_pos.orientation);
-            cmd_data.y_velocity = kKickAdvanceSpeed * std::sin(current_pos.orientation);
+            cmd_data.kick_speed = is_body_bump ? 0.0f : last_override_msg_->kick_speed;
+            const double advance_speed = is_body_bump ? 1.5 : 1.0;
+            cmd_data.x_velocity = advance_speed * std::cos(current_pos.orientation);
+            cmd_data.y_velocity = advance_speed * std::sin(current_pos.orientation);
             cmd_data.angular_velocity = 0.0f;
             clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
             if (sanitizeCmd(cmd_data)) {

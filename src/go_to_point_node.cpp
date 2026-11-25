@@ -38,21 +38,6 @@ void clampFromPenaltyArea(double& tx, double& ty, double goal_x, double depth, d
         }
     }
 }
-
-void clampInsidePenaltyArea(double& tx, double& ty, double goal_x, double depth, double width, double margin) {
-    double half_width = width / 2.0;
-    if (goal_x > 0) {
-        double min_x = goal_x - depth - margin;
-        double max_x = goal_x;
-        tx = std::clamp(tx, min_x, max_x);
-    } else {
-        double min_x = goal_x;
-        double max_x = goal_x + depth + margin;
-        tx = std::clamp(tx, min_x, max_x);
-    }
-    double max_y = half_width + margin;
-    ty = std::clamp(ty, -max_y, max_y);
-}
 }
 
 namespace oxebots_strategy {
@@ -319,17 +304,15 @@ BT::NodeStatus GoToPointNode::onStart() {
     bool ignore_area = false;
     getInput<bool>("ignore_area", ignore_area);
 
-    if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
-        // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro) com margem de 8 cm
-        clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, kEnemyAreaMarginMm);
+        if (!ignore_area && p_depth > 0.0 && p_width > 0.0) {
+            // 1. Bloquear área adversária para TODOS os robôs (incluindo o goleiro) com margem de 8 cm
+            clampFromPenaltyArea(target_pos_.x, target_pos_.y, opponent_goal_x, p_depth, p_width, kEnemyAreaMarginMm);
 
-        // 2. Bloquear a própria área apenas se NÃO for o goleiro (sem margem extra)
-        if (!is_gk) {
-            clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, kAllyAreaMarginMm);
-        } else {
-            clampInsidePenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, 0.0);
+            // 2. Bloquear a própria área apenas se NÃO for o goleiro (sem margem extra)
+            if (!is_gk) {
+                clampFromPenaltyArea(target_pos_.x, target_pos_.y, my_goal_x, p_depth, p_width, kAllyAreaMarginMm);
+            }
         }
-    }
 
     publishGoal();
     return BT::NodeStatus::RUNNING;
@@ -373,11 +356,9 @@ BT::NodeStatus GoToPointNode::onRunning() {
             // 1. Bloquear área adversária para TODOS os robôs com margem de 8 cm
             clampFromPenaltyArea(clamped_x, clamped_y, opponent_goal_x, p_depth, p_width, kEnemyAreaMarginMm);
 
-            // 2. Bloquear a própria área (sem margem extra)
+            // 2. Bloquear a própria área apenas para quem NÃO é goleiro (sem prender o goleiro dentro da área!)
             if (!is_gk) {
                 clampFromPenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, kAllyAreaMarginMm);
-            } else {
-                clampInsidePenaltyArea(clamped_x, clamped_y, my_goal_x, p_depth, p_width, 0.0);
             }
         }
 

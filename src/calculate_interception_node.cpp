@@ -241,6 +241,7 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   double p_width = 0.0;
   double field_length = 0.0;
   double field_width = 0.0;
+  bool is_goalkeeper = false;
   auto root_bb = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
   if (root_bb) {
     (void)root_bb->get("my_goal_x", my_goal_x);
@@ -248,12 +249,14 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     (void)root_bb->get("penalty_area_width", p_width);
     (void)root_bb->get("field_length", field_length);
     (void)root_bb->get("field_width", field_width);
+    (void)root_bb->get("is_goalkeeper", is_goalkeeper);
   }
 
   // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
+  // Goleiro (is_goalkeeper ou robot_id == 0 no legado) não tem restrição na própria área.
   constexpr double kAllyAreaMarginMm = 0.0;
   constexpr double kEnemyAreaMarginMm = 80.0;
-  const bool restrict_our_area = (robot_id != 0 && p_depth > 0.0 && p_width > 0.0 && std::abs(my_goal_x) > 1.0);
+  const bool restrict_our_area = (!is_goalkeeper && robot_id != 0 && p_depth > 0.0 && p_width > 0.0 && std::abs(my_goal_x) > 1.0);
   const bool restrict_opp_area = (p_depth > 0.0 && p_width > 0.0 && std::abs(goal_x) > 1.0);
   const double area_front_x = (my_goal_x < 0.0)
       ? (my_goal_x + p_depth + kAllyAreaMarginMm)
@@ -364,14 +367,20 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
           : std::min(area_front_x, intercept_x + avail_dx);
       pk_y = intercept_y - clear_sign * rem_y;
 
-      // Direção efetiva de chute/carga colinear com o vetor real (pk -> bola), garantindo que a reta
-      // de avanço (pk -> carry) passe exatamente pelo centro da bola sem errar pela frente!
-      double adj_dx = std::copysign(std::max(avail_dx, 15.0), my_goal_x);
-      double adj_dy = -clear_sign * rem_y;
-      double adj_norm = std::hypot(adj_dx, adj_dy);
-      if (adj_norm > 1e-3) {
-        dx_g = (adj_dx / adj_norm) * dist_ball_goal;
-        dy_g = (adj_dy / adj_norm) * dist_ball_goal;
+      // Só inclina a direção (dx_g, dy_g) pelo vetor (pk -> bola) se o robô JÁ estiver posicionado
+      // perto de pk (atrás da bola na coordenada ajustada). Enquanto o robô ainda está na frente da
+      // bola (do lado do campo, longe da parede de fundo), mantém dx_g apontando na direção do nosso
+      // gol (my_goal_x) para que dot_side detecte que a bola está atrás dele (dot_side < 0) e arme
+      // o contorno lateral (swing_active_ = true)!
+      const double raw_back_dot = (rx - intercept_x) * std::copysign(1.0, my_goal_x);
+      if (raw_back_dot >= -50.0) {
+        double adj_dx = std::copysign(std::max(avail_dx, 15.0), my_goal_x);
+        double adj_dy = -clear_sign * rem_y;
+        double adj_norm = std::hypot(adj_dx, adj_dy);
+        if (adj_norm > 1e-3) {
+          dx_g = (adj_dx / adj_norm) * dist_ball_goal;
+          dy_g = (adj_dy / adj_norm) * dist_ball_goal;
+        }
       }
     }
   }
@@ -391,10 +400,15 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
   double dot_side = ux_g * (rx - intercept_x) + uy_g * (ry - intercept_y);
   double perp_proj_robot = (-uy_g) * (rx - intercept_x) + ux_g * (ry - intercept_y);
   {
-    // Projeção normalizada (em mm) do vetor (robô - bola) na direção "atrás da bola" (dx_g, dy_g):
-    // dot_side < 0 significa que o robô está na frente da bola; > 80mm significa que já passou para trás.
-    constexpr double kSafelyBehindMarginMm = 80.0; // histerese em mm reais: só desarma com folga real
-    if (dot_side < 0.0) {
+    // Projeção normalizada (em mm) do vetor (robô - bola) na direção "atrás da bola" (dx_g, dy_g).
+    // O contorno (swing_active_) DEVE armar não só quando dot_side < 0 (robô na frente da bola), mas
+    // também quando o robô está colado lateralmente à bola ou apenas levemente atrás (dot_side < 110 mm
+    // com erro lateral |perp_proj_robot| > 75 mm): sem isso, quando a bola está perto e quase atrás/ao
+    // lado do robô (0 <= dot_side < 110 mm), ele tentava ir direto para pk cortando por cima da bola!
+    constexpr double kSafelyBehindMarginMm = 120.0;
+    const bool wrong_or_tight_side =
+      (dot_side < 35.0) || (dot_side < 120.0 && std::abs(perp_proj_robot) > 75.0);
+    if (wrong_or_tight_side) {
       swing_active_ = true;
     } else if (dot_side > kSafelyBehindMarginMm) {
       swing_active_ = false;
@@ -416,11 +430,12 @@ BT::NodeStatus CalculateInterceptionNode::onRunning()
     clamp_out_opp_area(pk_safe_x, pk_safe_y, intercept_x, intercept_y);
   } else if (swing_active_ && dist_ball_goal > 10.0) {
     if (ball_on_lateral) {
-      // Na lateral da área: mantém o mesmo pk_x e apenas garante uma folga lateral suave por fora da bola
-      // (em direção à lateral do campo), evitando saltos bruscos de coordenada ao desarmar swing_active_.
+      // Na lateral da área: desloca pk_safe_x para trás da bola (rumo à linha de fundo aliada) e
+      // pk_safe_y por fora da bola (em direção à lateral do campo), forçando o robô a contornar por
+      // fora e chegar por trás da bola em vez de bater nela pela frente!
       double sy = (intercept_y >= 0.0) ? 1.0 : -1.0;
-      pk_safe_x = pk_x;
-      pk_safe_y = sy * std::max(std::abs(intercept_y) + 180.0, area_side_y);
+      pk_safe_x = intercept_x + std::copysign(380.0, my_goal_x);
+      pk_safe_y = sy * std::max(std::abs(intercept_y) + 260.0, area_side_y + 120.0);
     } else {
       double back_x = dx_g / dist_ball_goal;
       double back_y = dy_g / dist_ball_goal;
