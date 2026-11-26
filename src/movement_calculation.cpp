@@ -42,6 +42,7 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
     this->declare_parameter("path_renews_watchdog", false);
     path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
+    this->declare_parameter("enable_safety_gate", true);
     
     this->declare_parameter("max_linear_speed", 1.0);
     this->declare_parameter("p_gain_linear", 2.0);
@@ -122,6 +123,7 @@ void PathFollowerNode::motion_limit_callback(const std_msgs::msg::Float32::Share
 }
 
 void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy) {
+    if (!this->get_parameter("enable_safety_gate").as_bool()) return;
     if (!last_geometry_) return;
 
     float field_length = static_cast<float>(last_geometry_->field.field_length);
@@ -662,6 +664,10 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
 }
 
 void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cmd, uint8_t& active_mode) {
+    if (!this->get_parameter("enable_safety_gate").as_bool()) {
+        return;
+    }
+
     auto now = std::chrono::steady_clock::now();
 
     // 1. Regra 3 (Watchdog 500 ms - Capítulo 17.5 e SC-26):
@@ -689,6 +695,46 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
             cmd.angular_velocity = 0.0f;
             cmd.kick_speed = 0.0f;
             active_mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT;
+        }
+    }
+
+    // 2b. Clamp radial de distância mínima da bola (500 mm em STOP ou reinício adversário - Regra §5.1.2):
+    // Impede avanço na direção da bola quando dist(robô, bola) < ball_min_distance_mm.
+    if (last_game_state_ && last_game_data_) {
+        const uint8_t ph = last_game_state_->phase;
+        const bool is_opp_restart = !last_game_state_->we_favored && (
+            ph == oxebots_interfaces::msg::GameState::PHASE_PREPARE_KICKOFF ||
+            ph == oxebots_interfaces::msg::GameState::PHASE_KICKOFF ||
+            ph == oxebots_interfaces::msg::GameState::PHASE_PREPARE_PENALTY ||
+            ph == oxebots_interfaces::msg::GameState::PHASE_FREE_KICK ||
+            ph == oxebots_interfaces::msg::GameState::PHASE_BALL_PLACEMENT);
+        const bool enforce_ball_radius =
+            (ph == oxebots_interfaces::msg::GameState::PHASE_STOP) ||
+            is_opp_restart ||
+            (last_game_state_->ball_min_distance_mm > 0.0f);
+
+        if (enforce_ball_radius) {
+            const float min_dist_mm = (last_game_state_->ball_min_distance_mm > 0.0f)
+                ? last_game_state_->ball_min_distance_mm
+                : 500.0f;
+
+            for (const auto& ally : last_game_data_->robots.allies) {
+                if (static_cast<int>(ally.id) == robot_id_) {
+                    const float dx = last_game_data_->ball.x - ally.x;
+                    const float dy = last_game_data_->ball.y - ally.y;
+                    const float ball_dist = std::hypot(dx, dy);
+                    if (ball_dist > 1e-3f && ball_dist < min_dist_mm) {
+                        const float ux = dx / ball_dist;
+                        const float uy = dy / ball_dist;
+                        const float v_towards = cmd.x_velocity * ux + cmd.y_velocity * uy;
+                        if (v_towards > 0.0f) {
+                            cmd.x_velocity -= v_towards * ux;
+                            cmd.y_velocity -= v_towards * uy;
+                        }
+                    }
+                    break;
+                }
+            }
         }
     }
 

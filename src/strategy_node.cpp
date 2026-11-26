@@ -25,6 +25,7 @@
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "ssl_league_msgs/msg/referee.hpp"
+#include "std_msgs/msg/int64.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include <algorithm>
@@ -32,6 +33,7 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <sstream>
 #include <thread>
 #include <fstream>
 #include <filesystem>
@@ -58,6 +60,8 @@ public:
     this->declare_parameter<double>("max_gc_ms", 500.0);
     this->declare_parameter<double>("max_pose_ms", 150.0);
     this->declare_parameter<double>("max_ball_ms", 300.0);
+    this->declare_parameter<bool>("use_reactive_preemption", true);
+    this->declare_parameter<bool>("publish_tick_metrics", false);
     rcl_interfaces::msg::ParameterDescriptor op_kickers_desc;
     op_kickers_desc.dynamic_typing = true;
     this->declare_parameter(
@@ -73,6 +77,8 @@ public:
     max_gc_ms_ = this->get_parameter("max_gc_ms").as_double();
     max_pose_ms_ = this->get_parameter("max_pose_ms").as_double();
     max_ball_ms_ = this->get_parameter("max_ball_ms").as_double();
+    use_reactive_preemption_ = this->get_parameter("use_reactive_preemption").as_bool();
+    publish_tick_metrics_ = this->get_parameter("publish_tick_metrics").as_bool();
 
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
@@ -100,6 +106,7 @@ public:
     override_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>("/robot_motion_override", 10);
     active_branch_pub_ = this->create_publisher<std_msgs::msg::String>(
       "/strategy/active_branch", rclcpp::QoS(10).transient_local().reliable());
+    tick_duration_pub_ = this->create_publisher<std_msgs::msg::Int64>("/strategy/tick_duration_us", 10);
   }
 
   BT::Blackboard::Ptr getBlackboard() const { return blackboard_; }
@@ -146,7 +153,29 @@ public:
       oxebots_strategy::registerStrategyNodes(
         factory_, shared_from_this(), blackboard_, override_pub_, robot_id_);
 
-      // Registrar todas as árvores no diretório para permitir subárvores
+      use_reactive_preemption_ = this->get_parameter("use_reactive_preemption").as_bool();
+      auto load_xml_text = [this](const std::string & path) -> std::string {
+        std::ifstream ifs(path);
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        std::string xml = buffer.str();
+        if (!use_reactive_preemption_) {
+          auto replace_all = [](std::string & str, const std::string & from, const std::string & to) {
+            size_t pos = 0;
+            while ((pos = str.find(from, pos)) != std::string::npos) {
+              str.replace(pos, from.length(), to);
+              pos += to.length();
+            }
+          };
+          replace_all(xml, "<ReactiveFallback", "<Fallback");
+          replace_all(xml, "</ReactiveFallback>", "</Fallback>");
+          replace_all(xml, "<ReactiveSequence", "<Sequence");
+          replace_all(xml, "</ReactiveSequence>", "</Sequence>");
+        }
+        return xml;
+      };
+
+      // Registrar todas as árvores no diretório para permitir subárvores (sempre intactas/reativas)
       std::string bt_dir = package_share_directory + "/behavior_trees";
       if (fs::exists(bt_dir) && fs::is_directory(bt_dir)) {
           for (const auto & entry : fs::directory_iterator(bt_dir)) {
@@ -164,7 +193,11 @@ public:
           }
       }
 
-      tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
+      if (use_reactive_preemption_) {
+        tree_ = factory_.createTreeFromFile(tree_path, blackboard_);
+      } else {
+        tree_ = factory_.createTreeFromText(load_xml_text(tree_path), blackboard_);
+      }
       attachBranchObserver();
 
       try {
@@ -185,8 +218,16 @@ public:
 
   BT::NodeStatus tickOnce()
   {
+    const auto tick_start = std::chrono::steady_clock::now();
     tick_selected_branch_.clear();
     const BT::NodeStatus status = tree_.tickOnce();
+    const auto tick_end = std::chrono::steady_clock::now();
+
+    if (this->get_parameter("publish_tick_metrics").as_bool() && tick_duration_pub_) {
+      std_msgs::msg::Int64 dur_msg;
+      dur_msg.data = std::chrono::duration_cast<std::chrono::microseconds>(tick_end - tick_start).count();
+      tick_duration_pub_->publish(dur_msg);
+    }
 
     std::string selected_branch;
     for (BT::TreeNode * branch : root_branches_) {
@@ -917,6 +958,8 @@ public:
   double max_gc_ms_{500.0};
   double max_pose_ms_{150.0};
   double max_ball_ms_{300.0};
+  bool use_reactive_preemption_{true};
+  bool publish_tick_metrics_{false};
 
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};
@@ -937,6 +980,7 @@ public:
   rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
   rclcpp::Publisher<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr active_branch_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr tick_duration_pub_;
   std::vector<BT::TreeNode::StatusChangeSubscriber> branch_subscriptions_;
   std::vector<BT::TreeNode *> root_branches_;
   std::string active_branch_;

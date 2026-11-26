@@ -523,3 +523,30 @@ TEST_F(RoleAssignerNodeTest, SoloGoalkeeperBecomesKickerOnOurSetPieces)
   ASSERT_EQ(roles.active_ids.size(), 1u);
   EXPECT_EQ(roles.active_ids[0], 0u);
 }
+
+// ============================================================================
+// 14. Modo estático de alocação (ablação): mantém IDs fixos mesmo se robô sumir
+// ============================================================================
+TEST_F(RoleAssignerNodeTest, StaticRoleAllocationModeKeepsFixedIdsOnRobotLoss)
+{
+  rclcpp::NodeOptions opts;
+  opts.append_parameter_override("role_allocation_mode", "static");
+  auto node = std::make_shared<RoleAssignerNode>(opts);
+
+  node->processGameState(makeGameState(GameState::PHASE_RUN, 0));
+
+  // Mesmo com robô 2 colado na bola e robô 1 ausente da visão, modo estático mantém 0=GK, 1=ATT, 2=DEF
+  auto gd = std::make_shared<GameData>();
+  gd->ball.x = 0.0f;
+  gd->ball.y = 0.0f;
+  gd->robots.allies = {
+    makeRobot(0, -2000.0f, 0.0f),
+    makeRobot(2, -50.0f, 0.0f)
+  };
+  node->processGameData(gd);
+
+  auto roles = node->getLastPublishedRoles();
+  EXPECT_EQ(roles.goalkeeper_id, 0u);
+  EXPECT_EQ(roles.attacker_id, 1u);
+  EXPECT_EQ(roles.defender_id, 2u);
+}

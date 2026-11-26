@@ -491,4 +491,80 @@ TEST(SafetyGateUnitTest, EnforcesStopSpeedCapKickClampStaleGcAndWatchdog)
     EXPECT_FLOAT_EQ(last_cmd->robots[0].kick_speed, 0.0f);
 }
 
+TEST(SafetyGateUnitTest, EnforcesBallRadialVelocityClampDuringStopAndOpponentRestart)
+{
+    if (!rclcpp::ok()) {
+        rclcpp::init(0, nullptr);
+    }
+    auto controller = std::make_shared<PathFollowerNode>();
+    auto helper = std::make_shared<rclcpp::Node>("test_safety_gate_ball_clamp_helper");
+
+    std::optional<oxebots_interfaces::msg::RobotCmd> last_cmd;
+    auto cmd_sub = helper->create_subscription<oxebots_interfaces::msg::RobotCmd>(
+        "/robot_commands", rclcpp::SensorDataQoS(),
+        [&](const oxebots_interfaces::msg::RobotCmd::SharedPtr msg) {
+            last_cmd = *msg;
+        });
+
+    auto gd_pub = helper->create_publisher<oxebots_interfaces::msg::GameData>("/game_data", 10);
+    auto gs_pub = helper->create_publisher<oxebots_interfaces::msg::GameState>(
+        "/game_state", rclcpp::QoS(1).transient_local().reliable());
+    auto ov_pub = helper->create_publisher<oxebots_interfaces::msg::RobotMotionOverride>(
+        "/robot_motion_override", 10);
+
+    rclcpp::executors::SingleThreadedExecutor exec;
+    exec.add_node(controller);
+    exec.add_node(helper);
+
+    auto spin_for = [&](std::chrono::milliseconds dur) {
+        const auto end = std::chrono::steady_clock::now() + dur;
+        while (std::chrono::steady_clock::now() < end) {
+            exec.spin_some();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    };
+
+    // Robô 0 em (0, 0) apontando para +X (orientation = 0), bola em (300, 0) -> dist = 300 mm (< 500 mm)
+    oxebots_interfaces::msg::GameData gd;
+    gd.ball.x = 300.0f;
+    gd.ball.y = 0.0f;
+    oxebots_interfaces::msg::RobotGameData r0;
+    r0.id = 0;
+    r0.x = 0.0f;
+    r0.y = 0.0f;
+    r0.orientation = 0.0f;
+    gd.robots.allies.push_back(r0);
+    gd_pub->publish(gd);
+
+    // 1. Em PHASE_STOP com dist = 300 mm < 500 mm: tentativa de avançar em +X (em direção à bola) é bloqueada
+    oxebots_interfaces::msg::GameState gs;
+    gs.phase = oxebots_interfaces::msg::GameState::PHASE_STOP;
+    gs.speed_limit_mps = 0.75f;
+    gs.ball_min_distance_mm = 500.0f;
+    gs.we_favored = false;
+    gs.stale = false;
+    gs_pub->publish(gs);
+
+    oxebots_interfaces::msg::RobotMotionOverride ov;
+    ov.robot_id = 0;
+    ov.mode = oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK;
+    ov.kick_speed = 0.0f;  // body bump avança na direção de orientation (+X, contra a bola)
+    ov_pub->publish(ov);
+
+    spin_for(std::chrono::milliseconds(40));
+    ASSERT_TRUE(last_cmd.has_value());
+    ASSERT_FALSE(last_cmd->robots.empty());
+    // Componente radial em direção à bola (+X) deve ter sido zerada pelo clamp
+    EXPECT_LE(last_cmd->robots[0].x_velocity, 1e-4f);
+
+    // 2. Com enable_safety_gate = false (ablação), o avanço não é bloqueado e passa de 0.75 m/s
+    controller->set_parameter(rclcpp::Parameter("enable_safety_gate", false));
+    ov_pub->publish(ov);
+    last_cmd.reset();
+    spin_for(std::chrono::milliseconds(40));
+    ASSERT_TRUE(last_cmd.has_value());
+    ASSERT_FALSE(last_cmd->robots.empty());
+    EXPECT_GT(last_cmd->robots[0].x_velocity, 0.75f);
+}
+
 

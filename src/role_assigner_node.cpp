@@ -33,6 +33,7 @@ public:
     // Janela (s) após cobrança de falta/lateral/escanteio em que quem não bateu permanece como
     // atacante para receber o passe e evitar recuos bruscos ou duplo toque do cobrador.
     this->declare_parameter<double>("post_free_kick_lock_s", 1.5);
+    this->declare_parameter<std::string>("role_allocation_mode", "dynamic");
     // dynamic_typing=true permite operational_kickers: [] (que o parser YAML do ROS 2 lê como
     // PARAMETER_BYTE_ARRAY vazio) ou [0, 1, 2] (PARAMETER_INTEGER_ARRAY) sem lançar exceção!
     rcl_interfaces::msg::ParameterDescriptor op_kickers_desc;
@@ -51,6 +52,7 @@ public:
     receive_distance_mm_ = this->get_parameter("receive_distance_mm").as_double();
     ball_touch_distance_mm_ = this->get_parameter("ball_touch_distance_mm").as_double();
     post_free_kick_lock_s_ = this->get_parameter("post_free_kick_lock_s").as_double();
+    role_allocation_mode_ = this->get_parameter("role_allocation_mode").as_string();
     
     last_role_change_time_ = this->now();
     post_free_kick_handover_time_ = last_role_change_time_;
@@ -461,6 +463,20 @@ private:
 
     last_attacker_id_ = attacker_id;
 
+    // Modo estático para ablação: mantém IDs fixos (ex.: 0=GK, 1=Attacker, 2=Defender)
+    // sem realocar nem marcar NO_ROBOT quando um robô desaparece da visão.
+    role_allocation_mode_ = this->get_parameter("role_allocation_mode").as_string();
+    if (role_allocation_mode_ == "static") {
+      uint32_t static_gk = static_cast<uint32_t>(desired_gk_id >= 0 ? desired_gk_id : 0);
+      uint32_t static_att = (static_gk == 0u) ? 1u : 0u;
+      uint32_t static_def = (static_gk <= 1u) ? 2u : 1u;
+      active_goalkeeper_id = static_gk;
+      attacker_id = static_att;
+      defender_id = static_def;
+      kicker_id = is_restart_phase ? static_att : kNoRobot;
+      last_attacker_id_ = attacker_id;
+    }
+
     // Ordenação defensiva de active_ids para evitar saltos espúrios de epoch quando a ordem em allies variar
     std::sort(active_ids.begin(), active_ids.end());
 
@@ -552,6 +568,7 @@ private:
   double receive_distance_mm_ = 300.0;
   double ball_touch_distance_mm_ = 160.0;
   double post_free_kick_lock_s_ = 1.5;
+  std::string role_allocation_mode_ = "dynamic";
   static constexpr double kReceiveMaxSpeedFrac = 0.8;  // da velocidade de voo
   double ball_speed_mps_ = 0.0;
   bool ball_in_flight_ = false;

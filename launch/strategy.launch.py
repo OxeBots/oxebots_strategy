@@ -26,13 +26,20 @@ def launch_setup(context, *args, **kwargs):
     bringup_pkg_share = get_package_share_directory("oxebots_bringup")
 
     base_config = os.path.join(bringup_pkg_share, "config", "match_config.yaml")
-    config_file = LaunchConfiguration("config_file").perform(context)
+    config_file = LaunchConfiguration("config_file").perform(context).strip()
+    override_config_file = LaunchConfiguration("override_config_file").perform(context).strip()
     if not config_file:
         config_file = base_config
+    else:
+        config_file = os.path.abspath(config_file)
 
     yaml_files = [base_config]
     if os.path.abspath(config_file) != os.path.abspath(base_config):
         yaml_files.append(config_file)
+    if override_config_file:
+        abs_override = os.path.abspath(override_config_file)
+        if abs_override not in [os.path.abspath(p) for p in yaml_files]:
+            yaml_files.append(abs_override)
     config_params = [*yaml_files, *sanitize_empty_kickers_override(yaml_files)]
 
     bt_xml = LaunchConfiguration("bt_xml").perform(context)
@@ -124,6 +131,12 @@ def generate_launch_description():
         description="YAML configuration file path",
     )
 
+    declare_override_config_file_arg = DeclareLaunchArgument(
+        "override_config_file",
+        default_value="",
+        description="Optional YAML override configuration file path",
+    )
+
     declare_require_gc_arg = DeclareLaunchArgument(
         "require_gc",
         default_value="",
@@ -134,6 +147,7 @@ def generate_launch_description():
         declare_invert_sides_arg, 
         declare_bt_xml_arg,
         declare_config_file_arg,
+        declare_override_config_file_arg,
         declare_require_gc_arg,
         OpaqueFunction(function=launch_setup)
     ])
