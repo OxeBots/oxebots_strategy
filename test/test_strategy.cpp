@@ -326,6 +326,51 @@ TEST(DStarPlannerUnitTest, PlansAroundInflatedBallAndRespectsStrictRadiusUnderRe
     (void)inside_strict;
 }
 
+TEST(DStarPlannerUnitTest, EscapesFromInsideStrictBallRadiusDuringStop)
+{
+    planning::PlannerConfig cfg;
+    cfg.robot_safety_radius = 0.20;
+    cfg.occupancy_threshold = 80;
+    cfg.max_expansions = 100000;
+
+    planning::DStarPlanner planner(0.05, cfg, rclcpp::get_logger("test_dstar_escape"));
+
+    auto grid = std::make_shared<nav_msgs::msg::OccupancyGrid>();
+    grid->info.resolution = 0.05f;
+    grid->info.width = 60;   // 3.0 m
+    grid->info.height = 60;  // 3.0 m
+    grid->info.origin.position.x = -1.5;
+    grid->info.origin.position.y = -1.5;
+    grid->data.assign(60 * 60, 0);
+    planner.setOccupancyGrid(grid);
+
+    // Bola em (0, 0) com raio inflado de STOP (0.58 m) e raio estrito (0.50 m)
+    planner.setDynamicObstacles({{0.0f, 0.0f, 0.58, 0.50}});
+
+    // Robô inicia em (-0.30, 0.0) -> a 300 mm da bola (dentro do raio estrito de 500 mm),
+    // precisando recuar até (-0.85, 0.0) (fora dos 580 mm).
+    auto start = planner.worldToGrid(-0.30, 0.0, -1.5, -1.5);
+    auto goal = planner.worldToGrid(-0.85, 0.0, -1.5, -1.5);
+
+    planner.setRelaxObstacles(false);
+    planner.initialize(start, goal);
+    ASSERT_EQ(planner.plan(), planning::PlannerStatus::SUCCESS);
+
+    auto path1 = planner.reconstructPath(start, -1.5, -1.5);
+    ASSERT_FALSE(path1.poses.empty());
+    EXPECT_NEAR(path1.poses.back().pose.position.x, -0.85, 0.06);
+
+    // Simula o robô recuando até (-0.42, 0.0) (~420 mm da bola, na borda interna do anel 500..580 mm)
+    // e executando replanejamento incremental updateMapAndReplan: não pode ficar preso em ~418 mm!
+    auto mid_start = planner.worldToGrid(-0.42, 0.0, -1.5, -1.5);
+    planner.updateMapAndReplan(mid_start);
+    auto path2 = planner.reconstructPath(mid_start, -1.5, -1.5);
+    ASSERT_FALSE(path2.poses.empty());
+    const double end_dist_from_ball = std::hypot(
+        path2.poses.back().pose.position.x, path2.poses.back().pose.position.y);
+    EXPECT_GT(end_dist_from_ball, 0.58);
+}
+
 // ============================================================================
 // 6. Testes Unitários de GoToPointNode: onHalted e Timeout (M03 / SC-14 / §5.5)
 // ============================================================================

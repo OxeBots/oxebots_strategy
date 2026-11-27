@@ -207,24 +207,30 @@ double DStarPlanner::getSiteCost(const GridCell & u) const
     // obstáculo da bola (já que o ponto de pré-chute fica a 400mm da bola), fazendo o D* planejar
     // linha reta por cima da bola em vez de dar a volta!
     if (dynamic_obstacle_map_[idx]) {
+        bool started_inside_dynamic = false;
+        bool near_start = false;
+        if (start_cell_.has_value()) {
+            int s_idx = start_cell_->y * grid_width_ + start_cell_->x;
+            started_inside_dynamic = (s_idx >= 0 &&
+                s_idx < static_cast<int>(dynamic_obstacle_map_.size()) &&
+                (dynamic_obstacle_map_[s_idx] ||
+                 (s_idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) &&
+                  strict_dynamic_obstacle_map_[s_idx])));
+            near_start = (std::abs(u.x - start_cell_->x) <= 2 && std::abs(u.y - start_cell_->y) <= 2);
+        }
         if (idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) && strict_dynamic_obstacle_map_[idx]) {
-            // Se o próprio robô JÁ iniciou dentro da zona estrita de 500 mm da bola (ex: STOP acionado
-            // enquanto o robô disputava a bola na lateral), permite sair com custo alto (40.0) nas
-            // células adjacentes ao robô ou sob relax_obstacles_ quando encurralado na parede, sem
-            // jamais travar com custo infinito!
-            if (start_cell_.has_value()) {
-                int s_idx = start_cell_->y * grid_width_ + start_cell_->x;
-                bool started_inside_strict = (s_idx >= 0 &&
-                    s_idx < static_cast<int>(strict_dynamic_obstacle_map_.size()) &&
-                    strict_dynamic_obstacle_map_[s_idx]);
-                if (started_inside_strict ||
-                    (std::abs(u.x - start_cell_->x) <= 2 && std::abs(u.y - start_cell_->y) <= 2)) {
-                    return 40.0;
-                }
+            // Se o próprio robô JÁ iniciou dentro da zona da bola (ex: STOP acionado enquanto o robô
+            // disputava a bola), aplica gradiente de escape (40.0 no núcleo <=500mm, 30.0 no anel 500..580mm)
+            // para que o D* consiga atravessar o anel externo e sair além dos 580 mm sem ficar preso!
+            if (started_inside_dynamic || near_start) {
+                return 40.0;
             }
             return std::numeric_limits<double>::infinity();
         }
-        return relax_obstacles_ ? 30.0 : std::numeric_limits<double>::infinity();
+        if (started_inside_dynamic || near_start || relax_obstacles_) {
+            return 30.0;
+        }
+        return std::numeric_limits<double>::infinity();
     }
 
     // Ignorar a inflação do próprio robô no mapa estático (/map marca o próprio robô com 3 células)
@@ -561,16 +567,33 @@ nav_msgs::msg::Path DStarPlanner::reconstructPath(const GridCell & start, double
     if (!current || std::isinf(current->h))
         return path;
 
-    // Trace back parent pointers from Start -> Goal
+    // Trace back parent pointers from Start -> Goal (detectando ciclos ou caminhos incompletos)
     int steps = 0;
+    bool reached_goal = false;
+    std::vector<bool> visited(
+        static_cast<size_t>(std::max(0, grid_width_ * grid_height_)), false);
     while (current && steps++ < 1000)
     {
+        if (grid_width_ > 0 && grid_height_ > 0) {
+            int c_idx = current->cell.y * grid_width_ + current->cell.x;
+            if (c_idx >= 0 && c_idx < static_cast<int>(visited.size())) {
+                if (visited[c_idx]) {
+                    break;
+                }
+                visited[c_idx] = true;
+            }
+        }
         path.poses.push_back(gridToWorld(current->cell, ox, oy));
 
-        if (goal_cell_ && current->cell == *goal_cell_)
+        if (goal_cell_ && current->cell == *goal_cell_) {
+            reached_goal = true;
             break;
+        }
 
         current = current->parent;
+    }
+    if (goal_cell_ && !reached_goal) {
+        path.poses.clear();
     }
     metrics_.path_length = path.poses.size();
 

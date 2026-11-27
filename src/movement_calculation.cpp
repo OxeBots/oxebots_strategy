@@ -139,9 +139,10 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
         effective_is_yellow = last_game_state_->our_goal_positive_x;
     }
 
-    // Área aliada sem margem extra (0mm); área inimiga com margem de 8cm (80mm), aplicável aos dois lados.
-    constexpr float kAllyMarginMm = 0.0f;
-    constexpr float kEnemyMarginMm = 80.0f;
+    // Margem preventiva para impedir que o raio físico do robô (~90mm) + distância de frenagem
+    // invadam a área de pênalti (aliada para robôs de linha: 120mm; adversária para todos: 180mm).
+    constexpr float kAllyMarginMm = 120.0f;
+    constexpr float kEnemyMarginMm = 180.0f;
     float pos_margin = effective_is_yellow ? kAllyMarginMm : kEnemyMarginMm;
     float neg_margin = effective_is_yellow ? kEnemyMarginMm : kAllyMarginMm;
 
@@ -180,15 +181,15 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
             // Na lateral da área positiva: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {
                 if (vy < 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = 0.3f;
+                if (pen_y > 5.0f) vy = std::max(vy, 0.35f);
             } else {
                 if (vy > 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = -0.3f;
+                if (pen_y > 5.0f) vy = std::min(vy, -0.35f);
             }
         } else {
             // Na frente da área positiva: bloqueia/empurra apenas em X, deixando vy livre
             if (vx > 0.0f) vx = 0.0f;
-            if (pen_x > 30.0f) vx = -0.3f;
+            if (pen_x > 5.0f) vx = std::min(vx, -0.35f);
         }
     }
 
@@ -200,15 +201,15 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
             // Na lateral da área negativa: bloqueia/empurra apenas em Y, deixando vx livre
             if (ry >= 0.0f) {
                 if (vy < 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = 0.3f;
+                if (pen_y > 5.0f) vy = std::max(vy, 0.35f);
             } else {
                 if (vy > 0.0f) vy = 0.0f;
-                if (pen_y > 25.0f) vy = -0.3f;
+                if (pen_y > 5.0f) vy = std::min(vy, -0.35f);
             }
         } else {
             // Na frente da área negativa: bloqueia/empurra apenas em X, deixando vy livre
             if (vx < 0.0f) vx = 0.0f;
-            if (pen_x > 30.0f) vx = 0.3f;
+            if (pen_x > 5.0f) vx = std::max(vx, 0.35f);
         }
     }
 }
@@ -591,6 +592,7 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
             -static_cast<double>(last_override_msg_->max_angular_speed),
             static_cast<double>(last_override_msg_->max_angular_speed));
     }
+    clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
     if (sanitizeCmd(cmd_data)) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
             "Robô %d: comando continha NaN/Inf em runAlign e foi zerado.", robot_id_);
@@ -653,13 +655,14 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
         kick_fire_count_++;
     }
 
-    // Fora da janela de disparo (aguardando pedido ou em cooldown): mantém o robô parado.
+    // Fora da janela de disparo (aguardando pedido ou em cooldown): mantém o robô parado (mas expulsa da área se penetrou).
     oxebots_interfaces::msg::RobotCmdData cmd_data;
     cmd_data.id = robot_id_;
     cmd_data.x_velocity = 0.0f;
     cmd_data.y_velocity = 0.0f;
     cmd_data.angular_velocity = 0.0f;
     cmd_data.kick_speed = 0.0f;
+    clampVelocities(current_pos, cmd_data.x_velocity, cmd_data.y_velocity);
     publishCommand(cmd_data, oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK, false);
 }
 
