@@ -31,6 +31,7 @@
 #include "oxebots_interfaces/msg/game_data.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
 #include "oxebots_interfaces/msg/robot_goal.hpp"
+#include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -343,8 +344,14 @@ class DStarPlannerNode : public rclcpp::Node
 
     /// Lado do campo vindo do GameState (troca de lados). Sem ele vale is_yellow_/invert_sides_.
     void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg);
+    void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg);
+    bool isGoalkeeperLocked() const;
     rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
+    rclcpp::Subscription<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_sub_;
     std::optional<bool> own_goal_positive_x_;
+    int default_goalkeeper_id_ = 0;
+    std::optional<uint32_t> active_goalkeeper_id_;
+    std::optional<uint32_t> gs_goalkeeper_id_;
 
     /**
      * @brief Timer callback to trigger planning iteration.

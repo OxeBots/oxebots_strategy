@@ -555,6 +555,7 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     };
 
     robot_id_ = safe_param("robot_id", 0).as_int();
+    default_goalkeeper_id_ = safe_param("goalkeeper_id", 0).as_int();
     is_yellow_ = safe_param("is_yellow_team", false).as_bool();
     invert_sides_ = safe_param("invert_sides", false).as_bool();
     (void)safe_param("min_linear_speed", 0.0);
@@ -611,13 +612,27 @@ DStarPlannerNode::DStarPlannerNode() : Node("d_star_planner_node")
     game_state_sub_ = create_subscription<oxebots_interfaces::msg::GameState>(
       "/game_state", qos, std::bind(&DStarPlannerNode::game_state_callback, this, std::placeholders::_1));
 
+    role_sub_ = create_subscription<oxebots_interfaces::msg::RoleAssignment>(
+      "/role_assignment", qos, std::bind(&DStarPlannerNode::role_callback, this, std::placeholders::_1));
+
     planning_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(1000.0 / planning_rate_hz_)),
                                         std::bind(&DStarPlannerNode::plan_and_publish, this));
 }
 
+bool DStarPlannerNode::isGoalkeeperLocked() const
+{
+    if (active_goalkeeper_id_.has_value()) {
+        return static_cast<uint32_t>(robot_id_) == *active_goalkeeper_id_;
+    }
+    if (gs_goalkeeper_id_.has_value()) {
+        return static_cast<uint32_t>(robot_id_) == *gs_goalkeeper_id_;
+    }
+    return robot_id_ == default_goalkeeper_id_;
+}
+
 void DStarPlannerNode::updatePlanningRate(double ball_dist_m)
 {
-    bool should_be_fast = ball_dist_m < close_ball_distance_m_;
+    bool should_be_fast = isGoalkeeperLocked() || (ball_dist_m < close_ball_distance_m_);
     if (should_be_fast == fast_replan_active_)
         return;  // já está na taxa certa, evita recriar o timer todo tick
 
@@ -651,7 +666,7 @@ DStarPlannerNode::PenaltyAreaBounds DStarPlannerNode::computePenaltyAreaBounds()
     }
 
     PenaltyAreaBounds bounds;
-    if (robot_id_ == 0) {
+    if (isGoalkeeperLocked()) {
         // O goleiro pode entrar na própria área, mas não na adversária
         if (effective_is_yellow) {
             bounds.block_positive = false;
@@ -746,13 +761,41 @@ void DStarPlannerNode::game_state_callback(const oxebots_interfaces::msg::GameSt
 {
     if (!msg) return;
     std::lock_guard<std::mutex> lock(node_mutex_);
+    const bool was_gk = isGoalkeeperLocked();
     const bool changed = !own_goal_positive_x_.has_value() || *own_goal_positive_x_ != msg->our_goal_positive_x;
     own_goal_positive_x_ = msg->our_goal_positive_x;
-    // Troca de lados: as paredes de área já desenhadas no grid ficam no lado errado; redesenha.
-    if (changed && raw_map_data_ && last_geometry_) {
-        RCLCPP_INFO(get_logger(), "D* [Robô %d]: lado do campo mudou (nosso gol em x %s); redesenhando as áreas.",
-                    robot_id_, msg->our_goal_positive_x ? "positivo" : "negativo");
+    if (!msg->stale) {
+        gs_goalkeeper_id_ = msg->our_goalkeeper_id;
+    } else {
+        gs_goalkeeper_id_.reset();
+    }
+    const bool now_gk = isGoalkeeperLocked();
+    // Troca de lados ou mudança dinâmica de goleiro: redesenha as áreas no grid.
+    if ((changed || was_gk != now_gk) && raw_map_data_ && last_geometry_) {
+        RCLCPP_INFO(get_logger(), "D* [Robô %d]: redesenhando áreas (nosso gol em x %s, goleiro=%s).",
+                    robot_id_, msg->our_goal_positive_x ? "positivo" : "negativo",
+                    now_gk ? "sim" : "nao");
         applyMapWithPenaltyBounds(raw_map_data_);
+    }
+    if (was_gk != now_gk) {
+        updatePlanningRate(std::hypot(current_x_ - ball_x_, current_y_ - ball_y_));
+    }
+}
+
+void DStarPlannerNode::role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg)
+{
+    if (!msg) return;
+    std::lock_guard<std::mutex> lock(node_mutex_);
+    const bool was_gk = isGoalkeeperLocked();
+    active_goalkeeper_id_ = msg->goalkeeper_id;
+    const bool now_gk = isGoalkeeperLocked();
+    if (was_gk != now_gk) {
+        RCLCPP_INFO(get_logger(), "D* [Robô %d]: papel de goleiro alterado (%s, gk_id=%u).",
+                    robot_id_, now_gk ? "sim" : "nao", msg->goalkeeper_id);
+        if (raw_map_data_ && last_geometry_) {
+            applyMapWithPenaltyBounds(raw_map_data_);
+        }
+        updatePlanningRate(std::hypot(current_x_ - ball_x_, current_y_ - ball_y_));
     }
 }
 
@@ -844,8 +887,8 @@ void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& targe
     constexpr double kClearanceM = 0.20;
 
     // O desvio local de bola na linha reta protege atacantes/defensores na aproximação final,
-    // mas o goleiro (robot_id_ == 0) quer INTERCEPTAR/BLOQUEAR a bola — nunca desviar dela.
-    if (dist > 1e-6 && robot_id_ != 0) {
+    // mas o goleiro dinâmico quer INTERCEPTAR/BLOQUEAR a bola — nunca desviar dela.
+    if (dist > 1e-6 && !isGoalkeeperLocked()) {
         double ux = dx / dist;
         double uy = dy / dist;
         double perp_x = -uy;

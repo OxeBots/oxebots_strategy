@@ -35,6 +35,8 @@ bool sanitizeCmd(oxebots_interfaces::msg::RobotCmdData& cmd) {
 PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("robot_id", 0);
     this->get_parameter("robot_id", robot_id_);
+    this->declare_parameter("goalkeeper_id", 0);
+    default_goalkeeper_id_ = this->get_parameter("goalkeeper_id").as_int();
     this->declare_parameter("is_yellow_team", false);
     this->declare_parameter("invert_sides", false);
     is_yellow_team_ = this->get_parameter("is_yellow_team").as_bool();
@@ -42,16 +44,29 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("path_renews_watchdog", false);
     path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
 
-    this->declare_parameter("max_linear_speed", 6.5);
+    this->declare_parameter("max_linear_speed", 2.0);
     this->declare_parameter("min_linear_speed", 0.0);
     this->declare_parameter("p_gain_linear", 5.0);
     this->declare_parameter("d_gain_linear", 0.0);
     this->declare_parameter("max_linear_accel", 0.0);
-    this->declare_parameter("max_angular_speed", 3.0);
+    this->declare_parameter("max_angular_speed", 1.0);
     this->declare_parameter("min_angular_speed", 0.0);
     this->declare_parameter("p_gain_angular", 2.2);
     this->declare_parameter("d_gain_angular", 0.25);
     this->declare_parameter("angle_tolerance", 0.04);
+
+    // Ganhos e limites dedicados ao goleiro dinâmico (negativo = usa parâmetro base)
+    this->declare_parameter("gk_max_linear_speed", -1.0);
+    this->declare_parameter("gk_min_linear_speed", -1.0);
+    this->declare_parameter("gk_p_gain_linear", -1.0);
+    this->declare_parameter("gk_d_gain_linear", -1.0);
+    this->declare_parameter("gk_max_angular_speed", -1.0);
+    this->declare_parameter("gk_min_angular_speed", -1.0);
+    this->declare_parameter("gk_p_gain_angular", -1.0);
+    this->declare_parameter("gk_d_gain_angular", -1.0);
+    this->declare_parameter("gk_angle_tolerance", -1.0);
+    this->declare_parameter("gk_arrived_deadband_mm", -1.0);
+
     this->declare_parameter("use_kalman_filter", true);
     this->declare_parameter("latency_comp_s", 0.045);
     this->declare_parameter("kick_advance_delay_ms", kDefaultKickAdvanceDelayMs);
@@ -93,6 +108,11 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
         "/game_state", rclcpp::QoS(1).transient_local().reliable(),
         std::bind(&PathFollowerNode::game_state_callback, this, std::placeholders::_1));
 
+    // Assina atribuição dinâmica de papéis para identificar o goleiro sem ID fixo
+    role_sub_ = this->create_subscription<oxebots_interfaces::msg::RoleAssignment>(
+        "/role_assignment", rclcpp::QoS(1).transient_local().reliable(),
+        std::bind(&PathFollowerNode::role_callback, this, std::placeholders::_1));
+
     // Assina o limite explícito de velocidade publicado pela folha SetMotionLimit (SafetyGate)
     motion_limit_sub_ = this->create_subscription<std_msgs::msg::Float32>(
         "/robot_motion_limit", rclcpp::QoS(1).transient_local().reliable(),
@@ -118,6 +138,42 @@ void PathFollowerNode::game_state_callback(const oxebots_interfaces::msg::GameSt
         motion_limit_mps_ = 0.0f; // Restaura teto nominal do jogo ao entrar em PHASE_RUN
     }
     last_game_state_ = msg;
+}
+
+void PathFollowerNode::role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg) {
+    if (!msg) return;
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    active_goalkeeper_id_ = msg->goalkeeper_id;
+}
+
+bool PathFollowerNode::isGoalkeeperLocked() const {
+    if (active_goalkeeper_id_.has_value()) {
+        return static_cast<uint32_t>(robot_id_) == *active_goalkeeper_id_;
+    }
+    if (last_game_state_ && !last_game_state_->stale) {
+        return static_cast<uint32_t>(robot_id_) == last_game_state_->our_goalkeeper_id;
+    }
+    return robot_id_ == default_goalkeeper_id_;
+}
+
+double PathFollowerNode::getEffectiveLinearParam(const char * base_name, const char * gk_name, bool is_gk) const {
+    if (is_gk) {
+        const double gk_val = this->get_parameter(gk_name).as_double();
+        if (std::isfinite(gk_val) && gk_val >= 0.0) {
+            return gk_val;
+        }
+    }
+    return this->get_parameter(base_name).as_double();
+}
+
+double PathFollowerNode::getEffectiveAngularParam(const char * base_name, const char * gk_name, bool is_gk) const {
+    if (is_gk) {
+        const double gk_val = this->get_parameter(gk_name).as_double();
+        if (std::isfinite(gk_val) && gk_val >= 0.0) {
+            return gk_val;
+        }
+    }
+    return this->get_parameter(base_name).as_double();
 }
 
 void PathFollowerNode::motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg) {
@@ -160,7 +216,8 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
     bool block_positive = true;
     bool block_negative = true;
 
-    if (robot_id_ == 0) {
+    const bool is_gk = isGoalkeeperLocked();
+    if (is_gk) {
         // O goleiro pode entrar na própria área, mas não na adversária
         if (effective_is_yellow) {
             block_positive = false;
@@ -169,8 +226,8 @@ void PathFollowerNode::clampVelocities(const movement::Coordinate& current_pos, 
         }
     }
 
-    const double max_lin = this->get_parameter("max_linear_speed").as_double();
-    const double min_lin = this->get_parameter("min_linear_speed").as_double();
+    const double max_lin = getEffectiveLinearParam("max_linear_speed", "gk_max_linear_speed", is_gk);
+    const double min_lin = getEffectiveLinearParam("min_linear_speed", "gk_min_linear_speed", is_gk);
     const float area_push_speed = static_cast<float>(
         std::max(0.3, movement::effectiveMinSpeed(min_lin, max_lin)));
 
@@ -401,13 +458,21 @@ void PathFollowerNode::calculate_and_move() {
     }
 
     // --- Comportamento padrão: seguir caminho (D*/linha reta) + apontar para o gol ---
+    const bool is_gk = isGoalkeeperLocked();
     movement::Coordinate target_pt;
     bool target_found = false;
     bool picked_lookahead_waypoint = false;
     double lookahead_dist = this->get_parameter("lookahead_distance").as_double();
 
-    // --- Seguir Rota do D* ---
-    if (last_path_ && !last_path_->poses.empty()) {
+    // Bypass de baixa latência para o goleiro em linha reta: segue diretamente o /robot_goal
+    // sem esperar o roundtrip do DStarPlannerNode nem sofrer atraso de lookahead.
+    if (is_gk &&
+        target_planner_type_ == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE &&
+        target_goal_.has_value()) {
+        target_pt = *target_goal_;
+        target_found = true;
+        picked_lookahead_waypoint = false;
+    } else if (last_path_ && !last_path_->poses.empty()) {
             for (const auto& pose_stamped : last_path_->poses) {
                 float px = pose_stamped.pose.position.x * 1000.0f;
                 float py = pose_stamped.pose.position.y * 1000.0f;
@@ -470,8 +535,8 @@ void PathFollowerNode::calculate_and_move() {
     // tolerância usada nas árvores de comportamento.
     constexpr double kControlDtS = 0.02;
     constexpr double kArrivedDistanceMm = 10.0;
-    const double max_lin = this->get_parameter("max_linear_speed").as_double();
-    const double min_lin = this->get_parameter("min_linear_speed").as_double();
+    const double max_lin = getEffectiveLinearParam("max_linear_speed", "gk_max_linear_speed", is_gk);
+    const double min_lin = getEffectiveLinearParam("min_linear_speed", "gk_min_linear_speed", is_gk);
     const double eff_min_lin = movement::effectiveMinSpeed(min_lin, max_lin);
     const double arrived_dist_mm = movement::effectiveArrivalDistanceMm(
         kArrivedDistanceMm, min_lin, max_lin, kControlDtS);
@@ -486,9 +551,9 @@ void PathFollowerNode::calculate_and_move() {
     bool has_target_w = target_w_.has_value();
     double desired_w = 0.0;
     bool should_control_w = false;
-    const double max_ang = this->get_parameter("max_angular_speed").as_double();
-    const double min_ang = this->get_parameter("min_angular_speed").as_double();
-    const double base_angle_tol = this->get_parameter("angle_tolerance").as_double();
+    const double max_ang = getEffectiveAngularParam("max_angular_speed", "gk_max_angular_speed", is_gk);
+    const double min_ang = getEffectiveAngularParam("min_angular_speed", "gk_min_angular_speed", is_gk);
+    const double base_angle_tol = getEffectiveAngularParam("angle_tolerance", "gk_angle_tolerance", is_gk);
     const double angle_tol = movement::effectiveAngleToleranceRad(
         base_angle_tol, min_ang, max_ang, kControlDtS);
 
@@ -511,8 +576,8 @@ void PathFollowerNode::calculate_and_move() {
         if (std::abs(angle_err) < angle_tol) {
             cmd_data.angular_velocity = 0.0;
         } else {
-            double p_ang = this->get_parameter("p_gain_angular").as_double();
-            double d_ang = this->get_parameter("d_gain_angular").as_double();
+            double p_ang = getEffectiveAngularParam("p_gain_angular", "gk_p_gain_angular", is_gk);
+            double d_ang = getEffectiveAngularParam("d_gain_angular", "gk_d_gain_angular", is_gk);
             cmd_data.angular_velocity = static_cast<float>(
                 movement::applyPdAngularSpeedWithFloor(
                     angle_err, filtered_omega_, p_ang, d_ang, min_ang, max_ang));
@@ -520,9 +585,15 @@ void PathFollowerNode::calculate_and_move() {
     }
 
     // Quando disable_arrival_latch_ está ativo (ex.: HoldPosition, Goalkeeper hold, PenaltyKeeperLine),
-    // evita que o piso mínimo amplifique ruído de visão (< arrived_dist_mm) em oscilação no lugar.
+    // evita que o piso mínimo ou ruído de visão cause oscilação no lugar.
+    const double gk_deadband = this->get_parameter("gk_arrived_deadband_mm").as_double();
+    const double deadband_mm = (is_gk && disable_arrival_latch_ && gk_deadband > 0.0)
+        ? std::max(arrived_dist_mm, gk_deadband)
+        : arrived_dist_mm;
     const bool within_min_speed_deadband =
-        disable_arrival_latch_ && (eff_min_lin > 0.0) && (check_dist < arrived_dist_mm);
+        disable_arrival_latch_ &&
+        ((eff_min_lin > 0.0 && check_dist < deadband_mm) ||
+         (is_gk && gk_deadband > 0.0 && check_dist < gk_deadband));
 
     if (arrived || within_min_speed_deadband) {
         cmd_data.x_velocity = 0.0;
@@ -531,8 +602,8 @@ void PathFollowerNode::calculate_and_move() {
         cmd_data.x_velocity = 0.0;
         cmd_data.y_velocity = 0.0;
     } else {
-        double p_lin = this->get_parameter("p_gain_linear").as_double();
-        double d_lin = std::max(0.0, this->get_parameter("d_gain_linear").as_double());
+        double p_lin = getEffectiveLinearParam("p_gain_linear", "gk_p_gain_linear", is_gk);
+        double d_lin = std::max(0.0, getEffectiveLinearParam("d_gain_linear", "gk_d_gain_linear", is_gk));
         double max_accel = std::max(0.0, this->get_parameter("max_linear_accel").as_double());
 
         // Pure Pursuit: direção vem do waypoint de lookahead, mas a magnitude de velocidade usa a
@@ -567,12 +638,10 @@ void PathFollowerNode::calculate_and_move() {
             v_cmd_y *= scale;
         }
 
-        // Prioriza alinhar antes de avançar, mas só perto do alvo final: erro angular alto reduz
-        // a velocidade linear (gira mais no lugar), alinhado mantém velocidade cheia. Evita que o
-        // robô empurre/bata na bola fora de posição enquanto ainda gira para encará-la. Longe do
-        // alvo, corre em velocidade plena sem esse freio.
+        // Prioriza alinhar antes de avançar perto do alvo para robôs de linha; em defesas do goleiro
+        // (disable_arrival_latch_ = true), erro angular NUNCA pode frear o deslocamento lateral/interceptação.
         constexpr double kAlignmentPriorityRangeMm = 100.0;
-        if (has_target_w && check_dist < kAlignmentPriorityRangeMm) {
+        if (has_target_w && check_dist < kAlignmentPriorityRangeMm && !(is_gk && disable_arrival_latch_)) {
             double alignment_factor = std::max(0.0, std::cos(angle_err));
             v_cmd_x *= alignment_factor;
             v_cmd_y *= alignment_factor;
@@ -749,7 +818,7 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
-            constexpr double kKickAdvanceSpeed = 3.0;
+            constexpr double kKickAdvanceSpeed = 6.0;
             const double max_lin = this->get_parameter("max_linear_speed").as_double();
             const double min_lin = this->get_parameter("min_linear_speed").as_double();
             const double kick_advance = movement::applyMinMaxLinearSpeed(kKickAdvanceSpeed, min_lin, max_lin);
@@ -814,7 +883,13 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
     // e também ao max_speed opcional pedido pelo GoToPoint no último RobotGoal.
     // O teto máximo (e suas exceções: HALT, TIMEOUT, watchdog, STOP, SetMotionLimit, max_speed)
     // sempre prevalece sobre o piso mínimo, e comandos zerados permanecem zerados.
-    float speed_cap = static_cast<float>(this->get_parameter("max_linear_speed").as_double());
+    const bool is_gk = isGoalkeeperLocked();
+    const double eff_max_lin = getEffectiveLinearParam("max_linear_speed", "gk_max_linear_speed", is_gk);
+    const double eff_min_lin = getEffectiveLinearParam("min_linear_speed", "gk_min_linear_speed", is_gk);
+    const double eff_max_ang = getEffectiveAngularParam("max_angular_speed", "gk_max_angular_speed", is_gk);
+    const double eff_min_ang = getEffectiveAngularParam("min_angular_speed", "gk_min_angular_speed", is_gk);
+
+    float speed_cap = static_cast<float>(eff_max_lin);
     if (last_game_state_ && last_game_state_->speed_limit_mps > 0.0f) {
         speed_cap = std::min(speed_cap, last_game_state_->speed_limit_mps);
     }
@@ -825,18 +900,16 @@ void PathFollowerNode::applySafetyGate(oxebots_interfaces::msg::RobotCmdData& cm
         speed_cap = std::min(speed_cap, target_max_speed_);
     }
     if (active_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
-        const double min_lin = this->get_parameter("min_linear_speed").as_double();
-        movement::applyMinMaxLinearVector(cmd.x_velocity, cmd.y_velocity, min_lin, speed_cap);
+        movement::applyMinMaxLinearVector(cmd.x_velocity, cmd.y_velocity, eff_min_lin, speed_cap);
 
-        double ang_cap = this->get_parameter("max_angular_speed").as_double();
+        double ang_cap = eff_max_ang;
         if ((active_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_BALL ||
              active_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_ALIGN_TO_ANGLE) &&
             last_override_msg_ && last_override_msg_->max_angular_speed > 0.0) {
             ang_cap = static_cast<double>(last_override_msg_->max_angular_speed);
         }
-        const double min_ang = this->get_parameter("min_angular_speed").as_double();
         cmd.angular_velocity = static_cast<float>(
-            movement::applyMinMaxAngularSpeed(cmd.angular_velocity, min_ang, ang_cap));
+            movement::applyMinMaxAngularSpeed(cmd.angular_velocity, eff_min_ang, ang_cap));
     }
 
     // 4. Regra 4 (Limite do chute - Capítulo 17.5 e SC-24):

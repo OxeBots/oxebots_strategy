@@ -401,8 +401,9 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     double dy = ball_y - ry;
     double dist_to_ball = std::hypot(dx, dy);
 
-    // No modo urgente (bola retida >= max_hold_s_), se o goleiro está entre o gol e a bola,
-    // avança direto na direção robô->bola para limpar imediatamente antes dos 10 s regulamentares
+    // Modo direto para controle grosseiro dentro da área:
+    // Se já está atrás (ou em urgência atrás da bola), avança em linha reta e chuta com tolerância
+    // angular generosa; se está adiantado ou longe, contorna para trás da bola antes de chutar.
     const double forward_sign = (my_goal_x_ < 0.0) ? 1.0 : -1.0;
     const bool behind_ball_for_urgent =
       urgent_clear && (dist_to_ball > 1.0) && (forward_sign * dx > 0.0);
@@ -415,7 +416,7 @@ BT::NodeStatus GoalkeeperNode::onRunning()
     double dot = (dx * ux + dy * uy);
     double angle_err = normalizeAngle(clear_angle - ryaw);
 
-    if (behind_ball_for_urgent || (dot > 0.0 && dist_to_ball < 250.0)) {
+    if (behind_ball_for_urgent || (dot > -20.0 && forward_sign * dx > -20.0 && dist_to_ball < 350.0)) {
       // Já posicionado atrás da bola (ou em limpeza urgente atrás da bola): avança em linha reta para contato
       double target_x = ball_x + ux * 60.0;
       double target_y = ball_y + uy * 60.0;
@@ -425,8 +426,8 @@ BT::NodeStatus GoalkeeperNode::onRunning()
         target_x, target_y, clear_angle,
         oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE);
 
-      const double max_kick_dist = urgent_clear ? 220.0 : 180.0;
-      const double max_angle_err = urgent_clear ? 0.85 : 0.45;
+      const double max_kick_dist = urgent_clear ? 220.0 : 190.0;
+      const double max_angle_err = urgent_clear ? 0.85 : 0.55;
       if (dist_to_ball < max_kick_dist && std::abs(angle_err) < max_angle_err) {
         if (urgent_clear) {
           RCLCPP_WARN_THROTTLE(
@@ -450,9 +451,11 @@ BT::NodeStatus GoalkeeperNode::onRunning()
       }
       clampInsidePenaltyArea(target_x, target_y, kGkMarginMm);
 
+      const uint8_t detour_planner = (dist_to_ball < 450.0)
+        ? oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE
+        : oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR;
       publishGoal(
-        target_x, target_y, clear_angle,
-        oxebots_interfaces::msg::RobotGoal::PLANNER_DSTAR);
+        target_x, target_y, clear_angle, detour_planner);
     }
   } else {
     // --- ESTADO 2: Bola fora da área -> Defende na linha do gol acompanhando Y ---

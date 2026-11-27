@@ -45,8 +45,14 @@ private:
 
   // Histerese da interceptação de chute
   bool intercepting_ = false;
+  double last_intercept_x_ = 0.0;
   double last_intercept_y_ = 0.0;
   rclcpp::Time intercept_hold_until_{0, 0, RCL_ROS_TIME};
+
+  // Suavização da posição da bola contra ruído da visão em posicionamento base
+  bool has_filtered_ball_ = false;
+  double filt_ball_x_ = 0.0;
+  double filt_ball_y_ = 0.0;
 };
 
 } // namespace oxebots_strategy

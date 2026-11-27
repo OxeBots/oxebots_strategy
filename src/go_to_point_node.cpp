@@ -189,11 +189,12 @@ void GoToPointNode::publishMarkers() {
     float r = 0.5, g = 0.5, b = 0.5; // Cor Padrão (Cinza)
     std::string role_name = "NONE";
     
-    bool is_gk;
-    uint32_t attacker_id, defender_id;
+    bool is_gk = false;
+    uint32_t gk_id = 999u, attacker_id = 999u, defender_id = 999u;
     auto blackboard = config().blackboard ? config().blackboard->rootBlackboard() : nullptr;
 
-    if (blackboard && blackboard->get("is_goalkeeper", is_gk) && is_gk && robot_id_ == 0) {
+    if (blackboard && ((blackboard->get("is_goalkeeper", is_gk) && is_gk) ||
+                       (blackboard->get("goalkeeper_id", gk_id) && robot_id_ == gk_id))) {
         r = 0.1; g = 0.1; b = 0.1; role_name = "GK"; // Preto
     } else if (blackboard && blackboard->get("attacker_id", attacker_id) && robot_id_ == attacker_id) {
         r = 1.0; g = 0.5; b = 0.0; role_name = "ATT"; // Laranja
@@ -297,9 +298,11 @@ BT::NodeStatus GoToPointNode::onStart() {
         (void)blackboard->get("penalty_area_depth", p_depth);
         (void)blackboard->get("penalty_area_width", p_width);
         (void)blackboard->get("is_goalkeeper", is_gk);
+        uint32_t gk_id = 999u;
+        if (!is_gk && blackboard->get("goalkeeper_id", gk_id)) {
+            is_gk = (robot_id_ == gk_id);
+        }
     }
-
-    if (robot_id_ == 0) is_gk = true;
 
     bool ignore_area = false;
     getInput<bool>("ignore_area", ignore_area);
@@ -340,12 +343,14 @@ BT::NodeStatus GoToPointNode::onRunning() {
             (void)blackboard->get("penalty_area_depth", p_depth);
             (void)blackboard->get("penalty_area_width", p_width);
             (void)blackboard->get("is_goalkeeper", is_gk);
+            uint32_t gk_id = 999u;
+            if (!is_gk && blackboard->get("goalkeeper_id", gk_id)) {
+                is_gk = (robot_id_ == gk_id);
+            }
         }
 
         double clamped_x = tx;
         double clamped_y = ty;
-
-        if (robot_id_ == 0) is_gk = true;
 
         bool ignore_area = false;
         getInput<bool>("ignore_area", ignore_area);

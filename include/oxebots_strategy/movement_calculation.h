@@ -9,6 +9,7 @@
 #include "oxebots_interfaces/msg/robot_motion_override.hpp"
 #include "oxebots_interfaces/msg/robot_motion_status.hpp"
 #include "oxebots_interfaces/msg/game_state.hpp"
+#include "oxebots_interfaces/msg/role_assignment.hpp"
 #include "oxebots_interfaces/msg/ssl_geometry_data.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/float32.hpp"
@@ -43,7 +44,11 @@ private:
     void override_callback(const oxebots_interfaces::msg::RobotMotionOverride::SharedPtr msg);
     void geometry_callback(const oxebots_interfaces::msg::SSLGeometryData::SharedPtr msg);
     void game_state_callback(const oxebots_interfaces::msg::GameState::SharedPtr msg);
+    void role_callback(const oxebots_interfaces::msg::RoleAssignment::SharedPtr msg);
     void motion_limit_callback(const std_msgs::msg::Float32::SharedPtr msg);
+    bool isGoalkeeperLocked() const;
+    double getEffectiveLinearParam(const char * base_name, const char * gk_name, bool is_gk) const;
+    double getEffectiveAngularParam(const char * base_name, const char * gk_name, bool is_gk) const;
     void clampVelocities(const movement::Coordinate& current_pos, float& vx, float& vy);
     void calculate_and_move();
 
@@ -71,6 +76,7 @@ private:
     rclcpp::Subscription<oxebots_interfaces::msg::RobotMotionOverride>::SharedPtr override_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::SSLGeometryData>::SharedPtr geometry_sub_;
     rclcpp::Subscription<oxebots_interfaces::msg::GameState>::SharedPtr game_state_sub_;
+    rclcpp::Subscription<oxebots_interfaces::msg::RoleAssignment>::SharedPtr role_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr motion_limit_sub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
@@ -106,6 +112,8 @@ private:
     oxebots_interfaces::msg::SSLGeometryData::SharedPtr last_geometry_;
     oxebots_interfaces::msg::GameState::SharedPtr last_game_state_;
     int robot_id_ = 0;
+    int default_goalkeeper_id_ = 0;
+    std::optional<uint32_t> active_goalkeeper_id_;
     bool game_data_received_ = false;
 
     bool is_yellow_team_ = false;
