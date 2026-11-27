@@ -42,9 +42,9 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("path_renews_watchdog", false);
     path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
     
-    this->declare_parameter("max_linear_speed", 1.0);
+    this->declare_parameter("max_linear_speed", 10.0);
     this->declare_parameter("min_linear_speed", 0.0);
-    this->declare_parameter("p_gain_linear", 2.0);
+    this->declare_parameter("p_gain_linear", 5.0);
     this->declare_parameter("d_gain_linear", 0.0);
     this->declare_parameter("max_linear_accel", 0.0);
     this->declare_parameter("max_angular_speed", 3.0);
@@ -705,7 +705,7 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
-            constexpr double kKickAdvanceSpeed = 0.5;
+            constexpr double kKickAdvanceSpeed = 6.0;
             const double max_lin = this->get_parameter("max_linear_speed").as_double();
             const double min_lin = this->get_parameter("min_linear_speed").as_double();
             const double kick_advance = movement::applyMinMaxLinearSpeed(kKickAdvanceSpeed, min_lin, max_lin);
