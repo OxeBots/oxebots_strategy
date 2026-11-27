@@ -33,13 +33,13 @@
 
       <ReactiveFallback name="ApproachAndKick">
         <Sequence name="Shoot">
-          <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+          <IsBallClose robot_id="{robot_id}" distance_threshold="120.0" angle_threshold_deg="10.0"/>
           <KickOnce robot_id="{robot_id}" target_x="{target_x}" target_y="{target_y}"
                     kick_speed="{kick_speed}" timeout_s="10.0" ball_moved_mm="50.0"/>
         </Sequence>
         <GoToPoint robot_id="{robot_id}" x="{ball_x}" y="{ball_y}"
                    face_x="{target_x}" face_y="{target_y}" tolerance="0.0"
-                   planner="straight_line" max_speed="0.5"/>
+                   planner="straight_line" max_speed="10.0"/>
       </ReactiveFallback>
     </Sequence>
   </BehaviorTree>

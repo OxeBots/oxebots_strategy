@@ -59,7 +59,7 @@ public:
     this->declare_parameter<double>("max_gc_ms", 500.0);
     this->declare_parameter<double>("max_pose_ms", 150.0);
     this->declare_parameter<double>("max_ball_ms", 300.0);
-    this->declare_parameter<double>("max_linear_speed", 1.0);
+    this->declare_parameter<double>("max_linear_speed", 10.0);
     this->declare_parameter<double>("min_linear_speed", 0.0);
     this->declare_parameter<double>("max_angular_speed", 3.0);
     this->declare_parameter<double>("min_angular_speed", 0.0);

@@ -102,7 +102,7 @@
                     <Inverter>
                       <IsBallInOurHalf ball_x="{ball_x}" />
                     </Inverter>
-                    <IsBallClose robot_id="{robot_id}" distance_threshold="140.0" angle_threshold_deg="10.0"/>
+                    <IsBallClose robot_id="{robot_id}" distance_threshold="120.0" angle_threshold_deg="10.0"/>
                     <KickBall robot_id="{robot_id}" kick_speed="3.0"/>
                   </Sequence>
 
