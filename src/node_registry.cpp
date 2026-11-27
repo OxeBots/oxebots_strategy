@@ -107,6 +107,7 @@ void registerStrategyNodes(
   factory.registerNodeType<IsOpponentControllingBall>("IsOpponentControllingBall");
   factory.registerNodeType<ShadowBall>("ShadowBall");
   factory.registerNodeType<MarkOpponent>("MarkOpponent");
+  factory.registerNodeType<DefenderClear>("DefenderClear");
   factory.registerNodeType<GoToClamped>("GoToClamped");
 
   factory.registerSimpleCondition(

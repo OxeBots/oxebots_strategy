@@ -769,9 +769,20 @@ void DStarPlannerNode::goal_callback(const oxebots_interfaces::msg::RobotGoal::S
 {
     if (msg->robot_id == robot_id_)
     {
-        std::lock_guard<std::mutex> lock(node_mutex_);
-        target_goal_msg_ = msg;
-        consecutive_failures_ = 0;
+        bool publish_now = false;
+        {
+            std::lock_guard<std::mutex> lock(node_mutex_);
+            target_goal_msg_ = msg;
+            consecutive_failures_ = 0;
+            publish_now =
+                (msg->planner_type == oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE) &&
+                (last_map_data_ != nullptr);
+        }
+        // Linha reta custa microssegundos: publica na hora sem esperar o timer de 10 Hz
+        // (elimina até 100 ms de latência nas defesas do goleiro e interceptações diretas).
+        if (publish_now) {
+            plan_and_publish();
+        }
     }
 }
 
@@ -832,7 +843,9 @@ void DStarPlannerNode::plan_straight_line(const geometry_msgs::msg::Point& targe
     // fechar essa distância no fim é o objetivo, não um risco de colisão a evitar.
     constexpr double kClearanceM = 0.20;
 
-    if (dist > 1e-6) {
+    // O desvio local de bola na linha reta protege atacantes/defensores na aproximação final,
+    // mas o goleiro (robot_id_ == 0) quer INTERCEPTAR/BLOQUEAR a bola — nunca desviar dela.
+    if (dist > 1e-6 && robot_id_ != 0) {
         double ux = dx / dist;
         double uy = dy / dist;
         double perp_x = -uy;

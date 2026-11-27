@@ -8,6 +8,11 @@
      - Todos os alvos do defensor ficam FORA da pequena área própria (margem de 200 mm). Só o
        goleiro pode estar na própria área (R-22); sem profundidade da área o nó falha em vez de
        supor um valor (SC-17).
+     - Defensor agressivo na metade defensiva (Estágio 2.0): sempre que a bola está no nosso
+       campo e fora da pequena área do goleiro, o zagueiro vai direto na bola para dar o bote,
+       passar para um aliado livre ou afastar firme (<= 3,0 m/s). Só recua para cobertura
+       (MarkOpponent / ShadowBall) se a bola estiver dentro da pequena área do goleiro ou se
+       nosso próprio atacante já estiver colado dominando a bola.
   -->
   <BehaviorTree ID="DefenderTree">
 
@@ -18,8 +23,8 @@
 
         <!-- ============================================================ -->
         <!-- Estágio 1: Bola no campo adversário                          -->
-        <!-- Zagueiro fica na linha bola->gol (ângulo, como o goleiro),   -->
-        <!-- fora da pequena área e sem cruzar o meio-campo               -->
+        <!-- Zagueiro cobre o contra-ataque (coordenado com o goleiro     -->
+        <!-- e interceptando chutes diretos), fora da área e no seu campo -->
         <!-- ============================================================ -->
         <ReactiveSequence name="BallInOpponentField">
           <IsBallInOpponentField ball_x="{ball_x}" my_goal_x="{my_goal_x}"/>
@@ -30,21 +35,34 @@
         </ReactiveSequence>
 
         <!-- ============================================================ -->
-        <!-- Estágio 2: Bola no nosso campo                               -->
+        <!-- Estágio 2: Bola no nosso campo (zona do zagueiro)            -->
         <!-- ============================================================ -->
         <ReactiveFallback name="BallInOurField">
 
-          <!-- 2.1: Oponente com posse de bola                            -->
-          <!-- Marca o oponente: posiciona entre bola e gol a dist. fixa  -->
-          <!-- Nunca avança sobre o oponente, nunca entra na pequena área  -->
+          <!-- 2.0: Bola no nosso campo fora da pequena área do goleiro   -->
+          <!-- Zagueiro AGRESSIVO: vai na bola para passe ou chute p/fora -->
+          <ReactiveSequence name="AggressiveClearOrPass">
+            <Inverter>
+              <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+            </Inverter>
+            <Sequence name="DefenderEngageAndKick">
+              <DefenderClear
+                robot_id="{robot_id}"
+                ball_x="{ball_x}"
+                ball_y="{ball_y}"
+                my_goal_x="{my_goal_x}"
+                kick_speed="{def_kick_speed}"/>
+              <KickBall robot_id="{robot_id}" kick_speed="{def_kick_speed}"/>
+            </Sequence>
+          </ReactiveSequence>
+
+          <!-- 2.1: Fallback (bola na área do goleiro ou atacante na bola)-->
           <ReactiveSequence name="OpponentHasPossession">
             <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
             <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}"/>
           </ReactiveSequence>
 
-          <!-- 2.2: Oponente sem posse de bola                            -->
-          <!-- Em vez de brigar pela bola, o zagueiro cobre o ângulo do   -->
-          <!-- gol (ShadowBall, raio menor) para ajudar o goleiro         -->
+          <!-- 2.2: Cobertura do ângulo do gol fora da área               -->
           <ShadowBall
             ball="{ball}"
             ball_vel="{ball_vel}"

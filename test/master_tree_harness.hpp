@@ -59,8 +59,8 @@ inline const std::set<std::string> & runningLeafIds()
 {
   static const std::set<std::string> ids{
     "GoToPoint", "HoldPosition", "Goalkeeper", "KickOnce", "KickBall", "AlignToBall",
-    "GoalLineDefend", "LateralClear", "PositionBisector", "SmotherSave", "GoToClamped",
-    "PrecisionKick", "PenaltyKeeperLine"};
+    "GoalLineDefend", "LateralClear", "PositionBisector", "SmotherSave", "DefenderClear",
+    "GoToClamped", "PrecisionKick", "PenaltyKeeperLine"};
   return ids;
 }
 

@@ -526,8 +526,20 @@ void PathFollowerNode::calculate_and_move() {
         double d_lin = std::max(0.0, this->get_parameter("d_gain_linear").as_double());
         double max_accel = std::max(0.0, this->get_parameter("max_linear_accel").as_double());
 
-        double ex_m = (target_pt.x - current_pos.x) / 1000.0;
-        double ey_m = (target_pt.y - current_pos.y) / 1000.0;
+        // Pure Pursuit: direção vem do waypoint de lookahead, mas a magnitude de velocidade usa a
+        // distância restante até o objetivo final (ou fim da rota) para não travar em p_lin * lookahead.
+        const double final_goal_dist_mm = target_goal_.has_value()
+            ? check_dist
+            : ((last_path_ && !last_path_->poses.empty())
+                ? std::hypot(
+                    static_cast<double>(last_path_->poses.back().pose.position.x) * 1000.0 - current_pos.x,
+                    static_cast<double>(last_path_->poses.back().pose.position.y) * 1000.0 - current_pos.y)
+                : dist_to_target);
+        double ex_m = 0.0;
+        double ey_m = 0.0;
+        const double speed_dist_m = movement::computePurePursuitErrorVectorM(
+            current_pos.x, current_pos.y, target_pt.x, target_pt.y,
+            final_goal_dist_mm, picked_lookahead_waypoint, ex_m, ey_m);
         const bool damp_along_error =
             !picked_lookahead_waypoint || (target_goal_.has_value() && check_dist <= lookahead_dist);
         double v_cmd_x = 0.0;
@@ -538,7 +550,7 @@ void PathFollowerNode::calculate_and_move() {
 
         double v_mag = std::hypot(v_cmd_x, v_cmd_y);
         double v_brake_cap = (max_accel > 0.0)
-            ? std::min(max_lin, std::sqrt(2.0 * max_accel * (dist_to_target / 1000.0)))
+            ? std::min(max_lin, std::sqrt(2.0 * max_accel * speed_dist_m))
             : max_lin;
         if (v_mag > v_brake_cap && v_mag > 1e-9) {
             double scale = v_brake_cap / v_mag;

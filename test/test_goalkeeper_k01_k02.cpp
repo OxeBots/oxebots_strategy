@@ -371,4 +371,152 @@ TEST_F(GoalkeeperK01K02Test, K02_GoalkeeperModesPenaltyDefAndHold)
   EXPECT_TRUE(last_goal_->disable_arrival_latch);
 }
 
+// GoalLineDefend mantém disable_arrival_latch ativo e intercepta chutes usando fallback ball_vx/ball_vy
+TEST_F(GoalkeeperK01K02Test, GoalLineDefendDisablesLatchAndInterceptsViaBlackboardFallback)
+{
+  populateStandardGeometry(-4500.0);
+  populatePoseAndBall(0u, -4200.0, 0.0, 0.0, -2000.0, 100.0);
+  bb_->set("ball_vx", -2500.0);
+  bb_->set("ball_vy", 200.0);
+
+  auto tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_TRUE(last_goal_->disable_arrival_latch);
+  EXPECT_EQ(
+    last_goal_->planner_type,
+    oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE);
+  // Em interceptação recua para line_x (-4500 + 300 = -4200 mm) e antecipa o Y do chute (> 200 mm)
+  EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, -4200.0, 5.0);
+  EXPECT_GT(last_goal_->pose.pose.position.y * 1000.0, 200.0);
+}
+
+// LateralClear mantém disable_arrival_latch ativo e antecipa bola em movimento
+TEST_F(GoalkeeperK01K02Test, LateralClearDisablesLatchAndPredictsMovingBall)
+{
+  populateStandardGeometry(-4500.0);
+  populatePoseAndBall(0u, -4200.0, -100.0, 0.0, -3800.0, 0.0);
+  bb_->set("ball_vx", 0.0);
+  bb_->set("ball_vy", 1000.0);
+
+  auto tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <LateralClear robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}" kick_speed="{ks}"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_TRUE(last_goal_->disable_arrival_latch);
+  EXPECT_EQ(
+    last_goal_->planner_type,
+    oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE);
+  // Sem predição o alvo ficaria próximo a y=0; com ball_vy=1000 mm/s deve antecipar para y > 100 mm
+  EXPECT_GT(last_goal_->pose.pose.position.y * 1000.0, 100.0);
+}
+
+// GoalLineDefend intercepta chutes médios (1.2 m/s do meio-campo) e chutes no canto com margem em Y
+TEST_F(GoalkeeperK01K02Test, GoalLineDefendInterceptsMediumAndCornerShots)
+{
+  // Campo 4.5 m (igual ao do log): my_goal_x = +2250, area 505x1350, gol = 1000
+  bb_->set("my_goal_x", 2250.0);
+  bb_->set("own_goal_x", 2250.0);
+  bb_->set("field_width", 3000.0);
+  bb_->set("penalty_area_depth", 505.0);
+  bb_->set("penalty_area_width", 1350.0);
+  bb_->set("goal_width", 1000.0);
+
+  // 1. Chute médio (1.2 m/s) do meio-campo (x=0 -> d=2250 mm): antes falhava por atrito de 800 mm/s^2
+  populatePoseAndBall(0u, 1950.0, 0.0, M_PI, 0.0, 100.0);
+  bb_->set("ball_vx", 1200.0);
+  bb_->set("ball_vy", 150.0);
+
+  auto tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  // line_x = 2250 - 300 = 1950 mm; y_line = 100 + 150 * (1950 / 1200) = 343.75 mm
+  EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, 1950.0, 5.0);
+  EXPECT_NEAR(last_goal_->pose.pose.position.y * 1000.0, 343.75, 10.0);
+
+  // 2. Chute no canto com ruído (y_goal = 580 mm > half=500 mm, dentro da margem inicial de 150 mm):
+  // usa árvore nova (intercepting_=false) para validar a margem de entrada e o clamp na trave (500 mm)
+  last_goal_.reset();
+  bb_->set("ball_x", 250.0);
+  bb_->set("ball_y", 280.0);
+  bb_->set("ball_vx", 2000.0);
+  bb_->set("ball_vy", 300.0);  // y_goal = 280 + 300 * (2000/2000) = 580 mm; y_line = 535 -> clamp 500
+  auto corner_tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+  EXPECT_EQ(corner_tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_NEAR(last_goal_->pose.pose.position.x * 1000.0, 1950.0, 5.0);
+  EXPECT_NEAR(last_goal_->pose.pose.position.y * 1000.0, 500.0, 5.0);
+}
+
+// GoalLineDefend antecipa passes laterais em triangulação usando a velocidade da bola
+TEST_F(GoalkeeperK01K02Test, GoalLineDefendTriangulationLeadsLateralBallMotion)
+{
+  populateStandardGeometry(-4500.0);
+  populatePoseAndBall(0u, -4200.0, 0.0, 0.0, -1500.0, 0.0);
+
+  auto tree = factory_.createTreeFromText(
+    R"(
+    <root BTCPP_format="4">
+      <BehaviorTree ID="Main">
+        <GoalLineDefend robot_id="{robot_id}" ball_x="{ball_x}" ball_y="{ball_y}"/>
+      </BehaviorTree>
+    </root>
+    )",
+    bb_);
+
+  // Bola parada em (-1500, 0): triangulação centrada em y=0
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  const double static_y_mm = last_goal_->pose.pose.position.y * 1000.0;
+  EXPECT_NEAR(static_y_mm, 0.0, 5.0);
+
+  // Passe lateral rápido (+1200 mm/s em Y): deve antecipar positivamente em Y
+  last_goal_.reset();
+  bb_->set("ball_vx", 0.0);
+  bb_->set("ball_vy", 1200.0);
+  EXPECT_EQ(tree.tickOnce(), BT::NodeStatus::RUNNING);
+  spinBriefly();
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_GT(last_goal_->pose.pose.position.y * 1000.0, static_y_mm + 30.0);
+}
+
 }  // namespace oxebots_strategy

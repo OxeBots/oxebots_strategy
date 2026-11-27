@@ -335,6 +335,44 @@ inline void computePdLinearVectorWithFloor(
   out_vy = v_fwd * uy + dy_perp;
 }
 
+// Calcula o vetor de erro linear (m) para Pure Pursuit separando direção e magnitude:
+// - Direção: aponta para o ponto de lookahead (target_x_mm, target_y_mm), preservando curvas e
+//   desvio de obstáculos gerados pelo planner.
+// - Magnitude: usa a distância restante até o objetivo final (final_goal_dist_mm) enquanto segue
+//   waypoints intermediários, evitando que um lookahead curto (ex.: 140 mm) trave a velocidade
+//   em trajetos longos e mantendo desaceleração suave na aproximação ao destino.
+// Retorna a distância efetiva (m) usada para escalar velocidade e curva de frenagem.
+inline double computePurePursuitErrorVectorM(
+  double current_x_mm,
+  double current_y_mm,
+  double target_x_mm,
+  double target_y_mm,
+  double final_goal_dist_mm,
+  bool picked_lookahead_waypoint,
+  double & out_ex_m,
+  double & out_ey_m)
+{
+  out_ex_m = 0.0;
+  out_ey_m = 0.0;
+  const double dx_mm = target_x_mm - current_x_mm;
+  const double dy_mm = target_y_mm - current_y_mm;
+  const double lookahead_err_mm = std::hypot(dx_mm, dy_mm);
+  if (!std::isfinite(lookahead_err_mm) || lookahead_err_mm <= 1e-6) {
+    return 0.0;
+  }
+
+  const double goal_dist_mm = (std::isfinite(final_goal_dist_mm) && final_goal_dist_mm > 0.0)
+    ? final_goal_dist_mm
+    : lookahead_err_mm;
+  const double speed_dist_mm = picked_lookahead_waypoint
+    ? std::max(lookahead_err_mm, goal_dist_mm)
+    : lookahead_err_mm;
+  const double speed_dist_m = speed_dist_mm / 1000.0;
+  out_ex_m = (dx_mm / lookahead_err_mm) * speed_dist_m;
+  out_ey_m = (dy_mm / lookahead_err_mm) * speed_dist_m;
+  return speed_dist_m;
+}
+
 }  // namespace movement
 
 #endif  // OXEBOTS_STRATEGY__VELOCITY_LIMITS_HPP_

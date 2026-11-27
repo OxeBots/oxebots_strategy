@@ -58,6 +58,7 @@ struct Scenario
   bool is_kicker{false};
   uint32_t kicker_id{999};  // NO_ROBOT
   bool has_defender{true};  // P03: falso com só goleiro + atacante em campo
+  bool alone_defender_aggressive{false};  // false=Opção A (contenção), true=Opção B (bote direto)
 
   // --- Cor e lado ---
   bool is_yellow{false};
@@ -96,6 +97,7 @@ struct Scenario
     bb.set("is_kicker", is_kicker);
     bb.set("kicker_id", kicker_id);
     bb.set("has_defender", has_defender);
+    bb.set("alone_defender_aggressive", alone_defender_aggressive);
 
     bb.set("is_yellow", is_yellow);
     bb.set("side_sign", side_sign);
@@ -136,6 +138,7 @@ inline const std::map<std::string, std::type_index> & expectedKeyTypes()
     {"is_kicker", typeid(bool)},
     {"kicker_id", typeid(uint32_t)},
     {"has_defender", typeid(bool)},
+    {"alone_defender_aggressive", typeid(bool)},
     {"is_yellow", typeid(bool)},
     {"side_sign", typeid(int)},
     {"field_length", typeid(double)},

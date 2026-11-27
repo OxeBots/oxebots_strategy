@@ -56,6 +56,15 @@
       <output_port name="slot_y" type="double">Coordenada Y calculada (mm)</output_port>
       <output_port name="slot_w" type="double">Orientação calculada (rad)</output_port>
     </Action>
+    <Action ID="DefenderClear">
+      <input_port name="robot_id" default="{robot_id}" type="unsigned int">ID do robô defensor</input_port>
+      <input_port name="ball_x" type="double">Coordenada X da bola (mm)</input_port>
+      <input_port name="ball_y" type="double">Coordenada Y da bola (mm)</input_port>
+      <input_port name="my_goal_x" default="{my_goal_x}" type="double">X do próprio gol (mm)</input_port>
+      <input_port name="penalty_area_depth" type="double">Opcional: profundidade da pequena área (mm); cai para a blackboard raiz</input_port>
+      <input_port name="penalty_area_width" type="double">Opcional: largura da pequena área (mm); cai para a blackboard raiz</input_port>
+      <output_port name="kick_speed" type="double">Velocidade do chute escolhida (m/s): passe ou afastar</output_port>
+    </Action>
     <Action ID="GoToClamped">
       <input_port name="x" type="double">Coordenada X do alvo em mm (ex.: {ball_x})</input_port>
       <input_port name="y" type="double">Coordenada Y do alvo em mm (ex.: {ball_y})</input_port>

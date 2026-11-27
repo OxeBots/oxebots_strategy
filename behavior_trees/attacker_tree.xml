@@ -15,9 +15,12 @@
      ficavam RUNNING mudos); o RetryUntilSuccessful repete no tick seguinte.
 
   P03 — degradação (Capítulo 19): com só goleiro + atacante em campo (cartão amarelo ou robô perdido),
-  não há defensor (has_defender falso na blackboard). Enquanto a bola está no NOSSO campo, o atacante
-  cobre o gol como o defensor faria (marca o adversário com a bola, senão cobre o ângulo do gol); com a
-  bola no campo adversário ele ataca normalmente. Com defensor atribuído, o primeiro ramo nunca roda.
+  não há defensor (has_defender falso na blackboard). Enquanto a bola está no NOSSO campo, o robô
+  único atua defensivamente com contenção + bote: se o adversário está colado dominando a bola, fecha
+  a linha de chute (MarkOpponent a 280 mm); se a bola soltar fora da pequena área, intercepta e afasta
+  firme (DefenderClear -> KickBall <= 3,0 m/s); se estiver dentro da pequena área do goleiro (R-22),
+  cobre o rebote com ShadowBall. Com a bola no campo adversário ele ataca normalmente.
+  Com defensor atribuído, o primeiro ramo nunca roda.
 -->
 <root BTCPP_format="4">
   <BehaviorTree ID="AttackerTree">
@@ -29,10 +32,42 @@
         </Inverter>
         <IsBallInOurHalf ball_x="{ball_x}"/>
         <ReactiveFallback name="CoverGoalActions">
-          <ReactiveSequence name="MarkOpponentWithBall">
+          <!--
+            COMO TROCAR ENTRE OPÇÃO A e OPÇÃO B (cartão amarelo / -1 robô, sem recompilar):
+            Altere `alone_defender_aggressive` em oxebots_bringup/config/match_config.yaml:
+              - false (padrão) = Opção A: contém com MarkOpponent (280 mm) se o adversário estiver
+                                 dominando colado, e intercepta/afasta toda bola solta fora da área.
+              - true           = Opção B: pula a contenção e vai direto interceptar/afastar qualquer
+                                 bola fora da pequena área (mesmo com adversário colado).
+          -->
+          <!-- 1. Opção A (ativa quando alone_defender_aggressive == false):
+                  adversário dominando colado -> fecha a linha de chute mais justo (280 mm) -->
+          <ReactiveSequence name="ContainOpponentWithBall">
+            <Inverter>
+              <IsValueTrue value="{alone_defender_aggressive}"/>
+            </Inverter>
             <IsOpponentControllingBall opponent_controlling="{opponent_controlling}"/>
-            <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}"/>
+            <MarkOpponent ball="{ball}" my_goal_x="{my_goal_x}" block_distance="280.0"/>
           </ReactiveSequence>
+
+          <!-- 2. Bola livre/em movimento (Opção A) ou qualquer bola fora da área (Opção B):
+                  intercepta e afasta firme (<= 3,0 m/s) -->
+          <ReactiveSequence name="ClearLooseBallWhenAlone">
+            <Inverter>
+              <IsBallInArea ball_x="{ball_x}" ball_y="{ball_y}"/>
+            </Inverter>
+            <Sequence name="AloneEngageAndKick">
+              <DefenderClear
+                robot_id="{robot_id}"
+                ball_x="{ball_x}"
+                ball_y="{ball_y}"
+                my_goal_x="{my_goal_x}"
+                kick_speed="{alone_kick_speed}"/>
+              <KickBall robot_id="{robot_id}" kick_speed="{alone_kick_speed}"/>
+            </Sequence>
+          </ReactiveSequence>
+
+          <!-- 3. Bola na pequena área do goleiro (R-22): fecha ângulo/rebote fora da área -->
           <ShadowBall ball="{ball}" ball_vel="{ball_vel}" my_goal_x="{my_goal_x}" ratio="0.35"/>
         </ReactiveFallback>
       </ReactiveSequence>

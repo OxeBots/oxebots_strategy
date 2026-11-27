@@ -63,6 +63,7 @@ public:
     this->declare_parameter<double>("min_linear_speed", 0.0);
     this->declare_parameter<double>("max_angular_speed", 3.0);
     this->declare_parameter<double>("min_angular_speed", 0.0);
+    this->declare_parameter<bool>("alone_defender_aggressive", false);
 
     is_yellow_ = this->get_parameter("is_yellow_team").as_bool();
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
@@ -80,6 +81,7 @@ public:
       this->get_parameter("max_angular_speed").as_double());
     min_angular_speed_ = movement::effectiveMinSpeed(
       this->get_parameter("min_angular_speed").as_double(), max_angular_speed_);
+    alone_defender_aggressive_ = this->get_parameter("alone_defender_aggressive").as_bool();
 
     blackboard_ = BT::Blackboard::create();
     setup_blackboard();
@@ -297,6 +299,7 @@ private:
     // P03: verdadeiro enquanto há um defensor atribuído. Começa verdadeiro (antes do primeiro
     // RoleAssignment não se assume time reduzido); fica falso com só goleiro + atacante.
     blackboard_->set("has_defender", true);
+    blackboard_->set("alone_defender_aggressive", alone_defender_aggressive_);
     blackboard_->set("role", std::string("idle"));
     blackboard_->set("role_epoch", 0u);
     blackboard_->set("active_ids", std::vector<uint32_t>{});
@@ -659,10 +662,19 @@ public:
         min_enemy_dist = std::min(min_enemy_dist, dist);
       }
 
-      const bool opponent_controlling =
+      // Histerese de posse adversária: evita oscilação (60 Hz) entre MarkOpponent e ShadowBall
+      // quando a bola está disputada perto de possession_distance_mm_ (220 mm).
+      constexpr double kOpponentControlExitMarginMm = 60.0;
+      const bool opp_enter =
         std::isfinite(min_enemy_dist) &&
         (min_enemy_dist <= possession_distance_mm_) &&
         (!std::isfinite(min_ally_dist) || (min_enemy_dist + 30.0 < min_ally_dist));
+      const bool opp_stay =
+        std::isfinite(min_enemy_dist) &&
+        (min_enemy_dist <= possession_distance_mm_ + kOpponentControlExitMarginMm) &&
+        (!std::isfinite(min_ally_dist) || (min_enemy_dist - 20.0 < min_ally_dist));
+      opponent_controlling_state_ = opponent_controlling_state_ ? opp_stay : opp_enter;
+      const bool opponent_controlling = opponent_controlling_state_;
 
       blackboard_->set("ball_x", ball_x);
       blackboard_->set("ball_y", ball_y);
@@ -895,6 +907,7 @@ public:
   uint32_t kicker_id_{oxebots_interfaces::msg::RoleAssignment::NO_ROBOT};
 
   double possession_distance_mm_{220.0};
+  bool opponent_controlling_state_{false};
   bool require_gc_{true};
   double max_gc_ms_{500.0};
   double max_pose_ms_{150.0};
@@ -903,6 +916,7 @@ public:
   double min_linear_speed_{0.0};
   double max_angular_speed_{3.0};
   double min_angular_speed_{0.0};
+  bool alone_defender_aggressive_{false};
 
   bool has_last_ball_{false};
   Pose2D last_ball_{0.0, 0.0, 0.0};

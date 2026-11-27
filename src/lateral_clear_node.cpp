@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace oxebots_strategy
@@ -278,23 +279,97 @@ BT::NodeStatus LateralClearNode::onRunning()
     const rclcpp::Time now = node_->now();
     const bool urgent = (now - engage_start_).seconds() > kUrgentAfterS;
 
+    // Limites legais do alvo do goleiro (calculados antes da interceptação para manter o ponto previsto
+    // dentro da grande área ou da coleira permitida).
+    constexpr double kMaxGoalDepthMm = 180.0;
+    constexpr double kAreaMarginMm = 120.0;
+    const double leash_x = my_goal_x + dir * (gk::kDefaultLeashFraction * geo.halfLength() + kLeashTargetMarginMm);
+
+    double min_x, max_x;
+    if (my_goal_x < 0) {
+        min_x = my_goal_x - kMaxGoalDepthMm;
+        max_x = allow_leave_area ? leash_x : my_goal_x + p_depth - kAreaMarginMm;
+    } else {
+        min_x = allow_leave_area ? leash_x : my_goal_x - p_depth + kAreaMarginMm;
+        max_x = my_goal_x + kMaxGoalDepthMm;
+    }
+    const double max_y = allow_leave_area ? geo.halfWidth() - kFieldMarginMm : (p_width / 2.0) - kAreaMarginMm;
+
+    // Distância e rumo para a bola REAL (usados no gatilho físico do chute e no modo desespero)
+    const double real_vec_r_to_ball_x = ball_x - rx;
+    const double real_vec_r_to_ball_y = ball_y - ry;
+    const double dist_to_ball = std::hypot(real_vec_r_to_ball_x, real_vec_r_to_ball_y);
+    const double angle_to_ball = std::atan2(real_vec_r_to_ball_y, real_vec_r_to_ball_x);
+
+    // Predição cinemática da bola em movimento: evita que o goleiro corra atrás da posição passada
+    // quando sai para afastar uma bola rolando na área ou próxima à área.
+    double ball_vx = 0.0;
+    double ball_vy = 0.0;
+    (void)gk::readBallVelocity(config(), ball_vx, ball_vy);
+    const double ball_speed = std::hypot(ball_vx, ball_vy);
+
+    double aim_ball_x = ball_x;
+    double aim_ball_y = ball_y;
+    if (ball_speed > 150.0 && dist_to_ball > 150.0) {
+        double gk_speed_mms = 1500.0;
+        if (node_->has_parameter("max_linear_speed")) {
+            const double p = movement::sanitizeSpeedLimit(
+                node_->get_parameter("max_linear_speed").as_double());
+            if (p > 0.1) {
+                gk_speed_mms = p * 1000.0;
+            }
+        }
+        constexpr double kBallDecelMmS2 = kBallFrictionAccel * 1000.0;
+        constexpr double kMaxInterceptHorizonS = 0.60;
+        const double t_stop = ball_speed / kBallDecelMmS2;
+        const double ux = ball_vx / ball_speed;
+        const double uy = ball_vy / ball_speed;
+
+        auto predictBallAt = [&](double t) -> std::pair<double, double> {
+            const double te = std::min(t, t_stop);
+            const double travel = ball_speed * te - 0.5 * kBallDecelMmS2 * te * te;
+            return {
+                std::clamp(ball_x + ux * travel, min_x, max_x),
+                std::clamp(ball_y + uy * travel, -max_y, max_y)
+            };
+        };
+
+        double best_t = 0.0;
+        double best_deficit = std::numeric_limits<double>::infinity();
+        for (int step = 1; step <= 12; ++step) {
+            const double t = (kMaxInterceptHorizonS * static_cast<double>(step)) / 12.0;
+            const auto [px, py] = predictBallAt(t);
+            const double d_rob = std::hypot(px - rx, py - ry);
+            const double deficit = d_rob - gk_speed_mms * t;
+            if (deficit <= 80.0) {
+                best_t = t;
+                break;
+            }
+            if (deficit < best_deficit) {
+                best_deficit = deficit;
+                best_t = t;
+            }
+        }
+        const auto [ix, iy] = predictBallAt(best_t);
+        aim_ball_x = ix;
+        aim_ball_y = iy;
+    }
+
     // Direção do chute: passe para um aliado livre ou afastar. Depois que o robô se posiciona atrás da bola a
     // direção fica travada, senão um aliado ou adversário se movendo faz o robô reajustar o ângulo o tempo todo.
-    if (plan_locked_ && std::hypot(ball_x - rx, ball_y - ry) > kPlanUnlockDistMm) plan_locked_ = false;
-    const KickPlan plan = plan_locked_ ? locked_plan_ : planKick(ball_x, ball_y, geo, urgent);
+    if (plan_locked_ && dist_to_ball > kPlanUnlockDistMm) plan_locked_ = false;
+    const KickPlan plan = plan_locked_ ? locked_plan_ : planKick(aim_ball_x, aim_ball_y, geo, urgent);
     const double clear_dir_x = plan.dir_x;
     const double clear_dir_y = plan.dir_y;
     const double clear_angle = std::atan2(clear_dir_y, clear_dir_x);
 
-    // Projeção da posição do robô em relação à bola ao longo da linha de chute:
+    // Projeção da posição do robô em relação ao ponto de interceptação (navegação) e à bola REAL (chute):
     // behind_proj > 0 significa que o robô já está ATRÁS da bola (do lado do gol).
-    double vec_r_to_ball_x = ball_x - rx;
-    double vec_r_to_ball_y = ball_y - ry;
-    double behind_proj = vec_r_to_ball_x * clear_dir_x + vec_r_to_ball_y * clear_dir_y;
-    double lateral_err = std::abs(-vec_r_to_ball_x * clear_dir_y + vec_r_to_ball_y * clear_dir_x);
-
-    double dist_to_ball = std::hypot(vec_r_to_ball_x, vec_r_to_ball_y);
-    double angle_to_ball = std::atan2(vec_r_to_ball_y, vec_r_to_ball_x);
+    const double vec_r_to_aim_x = aim_ball_x - rx;
+    const double vec_r_to_aim_y = aim_ball_y - ry;
+    const double behind_proj = vec_r_to_aim_x * clear_dir_x + vec_r_to_aim_y * clear_dir_y;
+    const double lateral_err = std::abs(-vec_r_to_aim_x * clear_dir_y + vec_r_to_aim_y * clear_dir_x);
+    const double real_behind_proj = real_vec_r_to_ball_x * clear_dir_x + real_vec_r_to_ball_y * clear_dir_y;
 
     // Aproximação em duas fases exclusivamente para o goleiro:
     // - Fase 1 (posicionar atrás da bola): vai para 125mm atrás da bola (contornando se estiver na frente).
@@ -311,38 +386,21 @@ BT::NodeStatus LateralClearNode::onRunning()
     }
     double offset_mm = is_positioned_behind ? kContactOffsetMm : kPreClearOffsetMm;
 
-    double target_x = ball_x - clear_dir_x * offset_mm;
-    double target_y = ball_y - clear_dir_y * offset_mm;
+    double target_x = aim_ball_x - clear_dir_x * offset_mm;
+    double target_y = aim_ball_y - clear_dir_y * offset_mm;
 
     // Se o robô estiver na frente da bola (lado do campo), abre lateralmente para contornar
     if (behind_proj < 20.0 && lateral_err < 150.0) {
-        double detour_side = (ry >= ball_y) ? 1.0 : -1.0;
-        target_y = ball_y + detour_side * 180.0;
+        double detour_side = (ry >= aim_ball_y) ? 1.0 : -1.0;
+        target_y = aim_ball_y + detour_side * 180.0;
     }
-
-    // Limita o alvo para nunca sair da grande área, permitindo recuar até 180mm para dentro do gol.
-    // Com allow_leave_area (bola fora da área e mais perto do goleiro) o limite do lado do campo passa a ser
-    // a coleira (fração da metade aliada), e o lateral o do próprio campo.
-    constexpr double kMaxGoalDepthMm = 180.0;
-    constexpr double kAreaMarginMm = 120.0;
-    const double leash_x = my_goal_x + dir * (gk::kDefaultLeashFraction * geo.halfLength() + kLeashTargetMarginMm);
-
-    double min_x, max_x;
-    if (my_goal_x < 0) {
-        min_x = my_goal_x - kMaxGoalDepthMm;
-        max_x = allow_leave_area ? leash_x : my_goal_x + p_depth - kAreaMarginMm;
-    } else {
-        min_x = allow_leave_area ? leash_x : my_goal_x - p_depth + kAreaMarginMm;
-        max_x = my_goal_x + kMaxGoalDepthMm;
-    }
-    const double max_y = allow_leave_area ? geo.halfWidth() - kFieldMarginMm : (p_width / 2.0) - kAreaMarginMm;
 
     // Modo desespero: sem pressa o robô se posiciona atrás da bola na direção do chute; com pressa (e entre a bola
     // e o nosso gol) vai direto na bola
     const bool desperate = urgent && dir * (ball_x - rx) > 0.0 && dist_to_ball > 1.0;
     if (desperate) {
-        target_x = ball_x - (vec_r_to_ball_x / dist_to_ball) * kContactOffsetMm;
-        target_y = ball_y - (vec_r_to_ball_y / dist_to_ball) * kContactOffsetMm;
+        target_x = ball_x - (real_vec_r_to_ball_x / dist_to_ball) * kContactOffsetMm;
+        target_y = ball_y - (real_vec_r_to_ball_y / dist_to_ball) * kContactOffsetMm;
     }
 
     target_x = std::clamp(target_x, min_x, max_x);
@@ -373,6 +431,7 @@ BT::NodeStatus LateralClearNode::onRunning()
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
         goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+        goal_msg->disable_arrival_latch = true;
         goal_msg->pose.header.stamp = node_->now();
         goal_msg->pose.header.frame_id = "map";
         goal_msg->pose.pose.position.x = target_x / 1000.0;
@@ -398,7 +457,7 @@ BT::NodeStatus LateralClearNode::onRunning()
     // (10 s na área), a tolerância dobra.
     const double kick_dir_err = std::abs(std::remainder(clear_angle - ryaw, 2.0 * M_PI));
 
-    const bool contact_ready = behind_proj > 40.0 && dist_to_ball <= 150.0 && std::abs(kicker_ball_err) < 0.28;
+    const bool contact_ready = real_behind_proj > 40.0 && dist_to_ball <= 150.0 && std::abs(kicker_ball_err) < 0.28;
     if (!contact_ready) {
         contact_since_valid_ = false;
     } else if (!contact_since_valid_) {

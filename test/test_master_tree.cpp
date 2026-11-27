@@ -920,28 +920,62 @@ protected:
   std::unique_ptr<MasterTreeHarness> h;
 };
 
-TEST_F(LoneAttackerTest, WithoutDefenderAndBallInOurHalfTheAttackerCoversTheGoal)
+TEST_F(LoneAttackerTest, WithoutDefenderAndLooseBallInOurHalfTheAttackerInterceptsAndClears)
 {
   s().has_defender = false;
   h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
   h->tick();
   EXPECT_EQ(h->branch(), "CoverGoalWhenAlone");
-  EXPECT_TRUE(h->ran("ShadowBall"));
+  EXPECT_TRUE(h->ran("DefenderClear"));
+  EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_FALSE(h->ran("MarkOpponent"));
-  EXPECT_FALSE(h->ran("GoToPoint"));  // não persegue a bola
-  EXPECT_FALSE(h->ran("KickBall"));
+  EXPECT_FALSE(h->ran("GoToPoint"));
+
+  // Quando DefenderClear termina alinhado com a bola, dispara KickBall para afastar
+  h->setStatus("DefenderClear", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), "CoverGoalWhenAlone");
+  EXPECT_TRUE(h->ran("KickBall"));
 }
 
-TEST_F(LoneAttackerTest, WithoutDefenderAndOpponentWithTheBallTheAttackerMarksHim)
+TEST_F(LoneAttackerTest, WithoutDefenderAndOpponentWithBallTheAttackerContainsHim)
 {
   s().has_defender = false;
+  s().alone_defender_aggressive = false;  // Opção A (padrão)
   h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
   h->setStatus("IsOpponentControllingBall", NodeStatus::SUCCESS);
   h->tick();
   EXPECT_EQ(h->branch(), "CoverGoalWhenAlone");
   EXPECT_TRUE(h->ran("MarkOpponent"));
+  EXPECT_FALSE(h->ran("DefenderClear"));
   EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_FALSE(h->ran("GoToPoint"));
+}
+
+TEST_F(LoneAttackerTest, WithoutDefenderInAggressiveModeTheAttackerClearsEvenWhenOpponentControlsBall)
+{
+  s().has_defender = false;
+  s().alone_defender_aggressive = true;  // Opção B
+  h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
+  h->setStatus("IsOpponentControllingBall", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), "CoverGoalWhenAlone");
+  EXPECT_TRUE(h->ran("DefenderClear"));
+  EXPECT_FALSE(h->ran("MarkOpponent"));
+  EXPECT_FALSE(h->ran("ShadowBall"));
+}
+
+TEST_F(LoneAttackerTest, WithoutDefenderAndBallInAreaTheAttackerCoversOutsideArea)
+{
+  s().has_defender = false;
+  h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
+  h->setStatus("IsBallInArea", NodeStatus::SUCCESS);
+  h->tick();
+  EXPECT_EQ(h->branch(), "CoverGoalWhenAlone");
+  EXPECT_TRUE(h->ran("ShadowBall"));
+  EXPECT_FALSE(h->ran("DefenderClear"));
+  EXPECT_FALSE(h->ran("MarkOpponent"));
+  EXPECT_FALSE(h->ran("KickBall"));
 }
 
 TEST_F(LoneAttackerTest, WithoutDefenderAndBallInTheirHalfTheAttackerAttacks)
@@ -951,6 +985,7 @@ TEST_F(LoneAttackerTest, WithoutDefenderAndBallInTheirHalfTheAttackerAttacks)
   EXPECT_NE(h->branch(), "CoverGoalWhenAlone");
   EXPECT_TRUE(h->ran("UpdateBallPosition"));
   EXPECT_TRUE(h->ran("GoToPoint"));
+  EXPECT_FALSE(h->ran("DefenderClear"));
   EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_FALSE(h->ran("MarkOpponent"));
 }
@@ -961,6 +996,7 @@ TEST_F(LoneAttackerTest, WithDefenderTheAttackerNeverCoversTheGoal)
   h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
   h->setStatus("IsOpponentControllingBall", NodeStatus::SUCCESS);
   h->tick(5);
+  EXPECT_FALSE(h->ran("DefenderClear"));
   EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_FALSE(h->ran("MarkOpponent"));
   EXPECT_TRUE(h->ran("UpdateBallPosition"));
@@ -972,10 +1008,12 @@ TEST_F(LoneAttackerTest, DefenderReturningHandsTheGoalBackAndTheAttackResumes)
   h->setStatus("IsBallInOurHalf", NodeStatus::SUCCESS);
   h->tick();
   ASSERT_EQ(h->branch(), "CoverGoalWhenAlone");
+  ASSERT_TRUE(h->ran("DefenderClear"));
 
   s().has_defender = true;  // o cartão expirou ou o robô voltou à visão
   h->tick();
   EXPECT_NE(h->branch(), "CoverGoalWhenAlone");
+  EXPECT_FALSE(h->ran("DefenderClear"));
   EXPECT_FALSE(h->ran("ShadowBall"));
   EXPECT_TRUE(h->ran("UpdateBallPosition"));
 }

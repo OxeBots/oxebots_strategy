@@ -17,13 +17,19 @@ static constexpr double kAreaMarginMm = 20.0;
 // Abaixo dessa distância alvo->bola o rumo à bola fica instável: mantém a orientação anterior
 static constexpr double kMinFacingDistMm = 100.0;
 static constexpr double ANGLE_UPDATE_THRESHOLD = 0.05;
-static constexpr double kMinShotSpeed = 500.0;
+static constexpr double kMinShotSpeed = 450.0;
 static constexpr double kMaxImpactTime = 3.0;
+// Margem além das traves na detecção de chute (absorve ruído angular do Kalman em chutes no canto)
+static constexpr double kShotGoalMarginMm = 150.0;
 // Histerese da interceptação: limiares mais folgados para continuar interceptando um chute já detectado
 static constexpr double kHoldMinShotSpeed = 300.0;
-static constexpr double kHoldGoalMarginMm = 60.0;
+static constexpr double kHoldGoalMarginMm = 220.0;
 static constexpr double kHoldImpactTimeMarginS = 0.5;
 static constexpr double kInterceptHoldS = 0.25;
+// Antecipação da bola na triangulação (passes laterais, cruzamentos e conduções em movimento)
+static constexpr double kTriangMinLeadSpeedMmS = 200.0;
+static constexpr double kTriangLeadS = 0.25;
+static constexpr double kTriangMaxLeadMm = 450.0;
 // Predição mais velha que isso (visão perdida) é descartada
 static constexpr double kPredMaxAgeS = 0.15;
 
@@ -51,26 +57,15 @@ static std::optional<std::pair<double, double>> entryPoint(
     return std::make_pair(bx + t0 * d[0], by + t0 * d[1]);
 }
 
-// Menor t >= 0 em que p + v*t + a*t^2/2 alcança "target". Considera o atrito (a oposta a v): se a bola
-// para antes de chegar, ou só chegaria revertendo o movimento, devolve nullopt.
-static std::optional<double> timeToReachX(double p, double v, double a, double target)
+// Menor t >= 0 em que p + v*t alcança "target" em trajetória retilínea.
+// Como o atrito de rolamento no carpete atua sempre antiparalelo à velocidade, o ponto Y onde a bola
+// cruza a linha do gol/defesa independe do coeficiente de atrito; usar o raio linear evita descartar
+// chutes médios (0,9–1,8 m/s) quando o atrito assumido pelo Kalman (800 mm/s^2) é maior que o do campo.
+static std::optional<double> timeToReachXLinear(double p, double v, double target)
 {
-    const double d = target - p;
-    if (std::abs(a) < 1e-6) {
-        if (std::abs(v) < 1e-9) return std::nullopt;
-        const double t = d / v;
-        if (t < 0.0) return std::nullopt;
-        return t;
-    }
-    const double disc = v * v + 2.0 * a * d;
-    if (disc < 0.0) return std::nullopt;
-    const double sq = std::sqrt(disc);
-    double t = std::numeric_limits<double>::infinity();
-    for (const double r : {(-v + sq) / a, (-v - sq) / a}) {
-        if (r >= 0.0 && r < t) t = r;
-    }
-    if (std::isinf(t)) return std::nullopt;
-    if (a * v < 0.0 && t > -v / a) return std::nullopt;   // depois de a bola parar
+    if (std::abs(v) < 1e-9) return std::nullopt;
+    const double t = (target - p) / v;
+    if (t < 0.0) return std::nullopt;
     return t;
 }
 
@@ -146,32 +141,10 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     const double xmin   = std::min(my_goal_x_, x_far);
     const double xmax   = std::max(my_goal_x_, x_far);
     const double ylim   = area_width / 2.0 - ROBOT_RADIUS - kAreaMarginMm;
+    const double post_y = std::min(half, ylim);
 
-    // 1. Posição base: ponto médio da corda bola->postes na borda da área. Com os postes simétricos isso é o
-    // ponto da reta bola->centro do gol na borda da frente da área (o que tampa a maior parte do gol).
-    double target_x = line_x;
-    double target_y = std::clamp(ball_y, -half, half);
-    const char * mode = "atras da linha do gol";
-
-    if (dir * (ball_x - my_goal_x_) > 0.0) {   // bola à frente do gol
-        // Se o gol for mais largo que o retângulo de movimento, mira nas bordas dele (os postes ficariam fora do
-        // retângulo, as retas deixariam de cruzá-lo e o goleiro cairia no caso "segue a bola")
-        const double post_y = std::min(half, ylim);
-        auto e1 = entryPoint(ball_x, ball_y, my_goal_x_, -post_y, xmin, xmax, -ylim, ylim);
-        auto e2 = entryPoint(ball_x, ball_y, my_goal_x_,  post_y, xmin, xmax, -ylim, ylim);
-        if (e1 && e2) {
-            target_x = 0.5 * (e1->first  + e2->first);
-            target_y = 0.5 * (e1->second + e2->second);
-            mode = "triangulacao";
-        } else {
-            // Retas não cruzam a área: segue a bola limitada à área
-            target_x = std::clamp(ball_x, xmin, xmax);
-            target_y = std::clamp(ball_y, -ylim, ylim);
-            mode = "segue a bola (retas nao cruzam a area)";
-        }
-    }
-
-    // 2. Interceptação (só se o chute for ao gol), com atrito e histerese
+    // Leitura antecipada da cinemática da bola: usa /ball_predicted (Kalman) quando fresco e recorre
+    // a ball_vx/ball_vy no blackboard raiz caso /ball_predicted esteja ausente ou expirado.
     oxebots_interfaces::msg::BallPrediction::SharedPtr pred;
     rclcpp::Time pred_stamp(0, 0, RCL_ROS_TIME);
     {
@@ -183,19 +156,78 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     const rclcpp::Time now = node_->now();
     const bool pred_fresh = pred && (now - pred_stamp).seconds() <= kPredMaxAgeS;
 
+    double shot_x = ball_x;
+    double shot_y = ball_y;
+    double shot_vx = 0.0;
+    double shot_vy = 0.0;
+    bool has_shot_kinematics = false;
+
+    if (pred_fresh && std::isfinite(pred->x) && std::isfinite(pred->y) &&
+        std::isfinite(pred->vx) && std::isfinite(pred->vy)) {
+        shot_x = pred->x;
+        shot_y = pred->y;
+        shot_vx = pred->vx;
+        shot_vy = pred->vy;
+        has_shot_kinematics = true;
+    } else if (goalkeeper::readBallVelocity(config(), shot_vx, shot_vy)) {
+        has_shot_kinematics = true;
+    }
+
+    // 1. Posição base: triangulação bola->postes na borda da área usando uma posição levemente
+    // antecipada da bola quando ela está em movimento (acompanha passes laterais e dribles sem atraso).
+    double tri_ball_x = ball_x;
+    double tri_ball_y = ball_y;
+    if (has_shot_kinematics) {
+        const double ball_speed = std::hypot(shot_vx, shot_vy);
+        if (ball_speed >= kTriangMinLeadSpeedMmS) {
+            const double lead_dist = std::min(ball_speed * kTriangLeadS, kTriangMaxLeadMm);
+            const double lead_scale = lead_dist / ball_speed;
+            tri_ball_x = std::clamp(ball_x + shot_vx * lead_scale, -geo.halfLength(), geo.halfLength());
+            tri_ball_y = std::clamp(ball_y + shot_vy * lead_scale, -geo.halfWidth(), geo.halfWidth());
+            // Não projeta uma bola à frente do gol para trás da linha de fundo
+            if (dir * (ball_x - my_goal_x_) > 0.0 && dir * (tri_ball_x - my_goal_x_) <= 0.0) {
+                tri_ball_x = my_goal_x_ + dir * 1.0;
+            }
+        }
+    }
+
+    double target_x = line_x;
+    double target_y = std::clamp(tri_ball_y, -half, half);
+    const char * mode = "atras da linha do gol";
+
+    if (dir * (ball_x - my_goal_x_) > 0.0) {   // bola à frente do gol
+        // Se o gol for mais largo que o retângulo de movimento, mira nas bordas dele (os postes ficariam fora do
+        // retângulo, as retas deixariam de cruzá-lo e o goleiro cairia no caso "segue a bola")
+        auto e1 = entryPoint(tri_ball_x, tri_ball_y, my_goal_x_, -post_y, xmin, xmax, -ylim, ylim);
+        auto e2 = entryPoint(tri_ball_x, tri_ball_y, my_goal_x_,  post_y, xmin, xmax, -ylim, ylim);
+        if (e1 && e2) {
+            target_x = 0.5 * (e1->first  + e2->first);
+            target_y = 0.5 * (e1->second + e2->second);
+            mode = "triangulacao";
+        } else {
+            // Retas não cruzam a área: segue a bola limitada à área
+            target_x = std::clamp(tri_ball_x, xmin, xmax);
+            target_y = std::clamp(tri_ball_y, -ylim, ylim);
+            mode = "segue a bola (retas nao cruzam a area)";
+        }
+    }
+
+    // 2. Interceptação de trajetória futura (chutes em direção ao gol), com margem de ruído e histerese
     bool shot = false;
-    if (pred_fresh && dir * pred->vx < 0.0 && dir * (pred->x - my_goal_x_) > 0.0) {
+    if (has_shot_kinematics && dir * shot_vx < 0.0 && dir * (shot_x - my_goal_x_) > 0.0) {
         const double min_speed = intercepting_ ? kHoldMinShotSpeed : kMinShotSpeed;
-        const double y_margin  = intercepting_ ? kHoldGoalMarginMm : 0.0;
+        const double y_margin  = intercepting_ ? kHoldGoalMarginMm : kShotGoalMarginMm;
         const double max_time  = intercepting_ ? kMaxImpactTime + kHoldImpactTimeMarginS : kMaxImpactTime;
 
-        if (std::abs(pred->vx) >= min_speed) {
-            auto t_goal = timeToReachX(pred->x, pred->vx, pred->ax, my_goal_x_);
+        if (std::abs(shot_vx) >= min_speed) {
+            auto t_goal = timeToReachXLinear(shot_x, shot_vx, my_goal_x_);
             if (t_goal && *t_goal > 0.0 && *t_goal <= max_time) {
-                const double y_goal = pred->y + pred->vy * *t_goal + 0.5 * pred->ay * *t_goal * *t_goal;
+                const double y_goal = shot_y + shot_vy * *t_goal;
                 if (std::abs(y_goal) <= half + y_margin) {
-                    const double t_line = timeToReachX(pred->x, pred->vx, pred->ax, line_x).value_or(0.0);
-                    last_intercept_y_ = pred->y + pred->vy * t_line + 0.5 * pred->ay * t_line * t_line;
+                    const auto t_line = timeToReachXLinear(shot_x, shot_vx, line_x);
+                    const double y_intercept = t_line ? (shot_y + shot_vy * *t_line) : y_goal;
+                    // Clampeia nos limites dos postes para não sair do gol perseguindo chute para fora
+                    last_intercept_y_ = std::clamp(y_intercept, -post_y, post_y);
                     intercept_hold_until_ = now + rclcpp::Duration::from_seconds(kInterceptHoldS);
                     intercepting_ = true;
                     shot = true;
@@ -224,8 +256,8 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
     if (mode != last_mode_) {
         last_mode_ = mode;
         RCLCPP_INFO(node_->get_logger(),
-            "GoalLineDefend: %s | alvo=(%.0f, %.0f) bola=(%.0f, %.0f) | gol=%.0f area=%.0fx%.0f x:[%.0f, %.0f] |y|<=%.0f",
-            mode, target_x, target_y, ball_x, ball_y, geo.goal_width, area_depth, area_width, xmin, xmax, ylim);
+            "GoalLineDefend: %s | alvo=(%.0f, %.0f) bola=(%.0f, %.0f) vel=(%.0f, %.0f) | gol=%.0f area=%.0fx%.0f x:[%.0f, %.0f] |y|<=%.0f",
+            mode, target_x, target_y, ball_x, ball_y, shot_vx, shot_vy, geo.goal_width, area_depth, area_width, xmin, xmax, ylim);
     }
 
     // Orientação: kicker voltado para a bola (visto do ponto alvo). Com a bola muito perto do alvo o rumo
@@ -249,6 +281,7 @@ BT::NodeStatus GoalLineDefendNode::onRunning()
         auto goal_msg = std::make_unique<oxebots_interfaces::msg::RobotGoal>();
         goal_msg->robot_id = robot_id_;
         goal_msg->planner_type = oxebots_interfaces::msg::RobotGoal::PLANNER_STRAIGHT_LINE;
+        goal_msg->disable_arrival_latch = true;
         goal_msg->pose.header.stamp = node_ -> now();
         goal_msg->pose.header.frame_id = "map";
         goal_msg->pose.pose.position.x = target_x / 1000.0;

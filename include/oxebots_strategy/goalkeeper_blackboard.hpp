@@ -70,6 +70,23 @@ inline bool readRobotPose(const BT::NodeConfig & config, double & x, double & y,
   return root && root->get("robot_x", x) && root->get("robot_y", y) && root->get("robot_yaw", yaw);
 }
 
+inline bool readBallVelocity(const BT::NodeConfig & config, double & vx, double & vy)
+{
+  const auto root = rootBlackboard(config);
+  double bvx = 0.0;
+  double bvy = 0.0;
+  if (root && root->get("ball_vx", bvx) && root->get("ball_vy", bvy) &&
+    std::isfinite(bvx) && std::isfinite(bvy))
+  {
+    vx = bvx;
+    vy = bvy;
+    return true;
+  }
+  vx = 0.0;
+  vy = 0.0;
+  return false;
+}
+
 }  // namespace oxebots_strategy::goalkeeper
 
 #endif  // OXEBOTS_STRATEGY__GOALKEEPER_BLACKBOARD_HPP_

@@ -204,3 +204,39 @@ TEST(VelocityLimits, PdLinearWithFloorCrossTrackAndCoast)
   EXPECT_NEAR(vx, 0.25, 1e-6);
   EXPECT_NEAR(vy, 0.50, 1e-6);
 }
+
+TEST(VelocityLimits, PurePursuitErrorUsesLookaheadDirectionAndGoalDistance)
+{
+  double ex_m = 0.0, ey_m = 0.0;
+
+  // Trajeto longo (1500 mm) com lookahead curto (140 mm): deve escalar magnitude pela distância
+  // até o alvo final, permitindo atingir max_linear_speed (1.5 m/s) em vez de travar em 0.35 m/s.
+  const double dist_long = movement::computePurePursuitErrorVectorM(
+    0.0, 0.0, 140.0, 0.0, 1500.0, true, ex_m, ey_m);
+  EXPECT_NEAR(dist_long, 1.5, 1e-6);
+  EXPECT_NEAR(ex_m, 1.5, 1e-6);
+  EXPECT_NEAR(ey_m, 0.0, 1e-6);
+
+  double vx = 0.0, vy = 0.0;
+  movement::computePdLinearVectorWithFloor(
+    ex_m, ey_m, 0.0, 0.0, 2.5, 0.0, 0.35, 1.5, false, vx, vy);
+  float fx = static_cast<float>(vx);
+  float fy = static_cast<float>(vy);
+  movement::applyMinMaxLinearVector(fx, fy, 0.35, 1.5);
+  EXPECT_NEAR(fx, 1.5f, 1e-5);
+  EXPECT_NEAR(fy, 0.0f, 1e-5);
+
+  // Curva / desvio de obstáculo: direção segue o lookahead (+Y), magnitude segue o objetivo final
+  const double dist_curve = movement::computePurePursuitErrorVectorM(
+    100.0, 200.0, 100.0, 340.0, 800.0, true, ex_m, ey_m);
+  EXPECT_NEAR(dist_curve, 0.8, 1e-6);
+  EXPECT_NEAR(ex_m, 0.0, 1e-6);
+  EXPECT_NEAR(ey_m, 0.8, 1e-6);
+
+  // Aproximação final (sem waypoint de lookahead): usa distância real até o último ponto
+  const double dist_near = movement::computePurePursuitErrorVectorM(
+    0.0, 0.0, 80.0, 0.0, 80.0, false, ex_m, ey_m);
+  EXPECT_NEAR(dist_near, 0.08, 1e-6);
+  EXPECT_NEAR(ex_m, 0.08, 1e-6);
+  EXPECT_NEAR(ey_m, 0.0, 1e-6);
+}

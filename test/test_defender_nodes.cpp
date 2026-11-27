@@ -74,6 +74,7 @@ protected:
     factory_.registerNodeType<IsBallInOpponentField>("IsBallInOpponentField");
     factory_.registerNodeType<ShadowBall>("ShadowBall");
     factory_.registerNodeType<MarkOpponent>("MarkOpponent");
+    factory_.registerNodeType<DefenderClear>("DefenderClear");
     factory_.registerNodeType<oxebots_strategy::HasRoleCondition>("HasRole");
     factory_.registerNodeType<FakeAttack>("FakeAttack");
     factory_.registerNodeType<FakeDefend>("FakeDefend");
@@ -530,6 +531,210 @@ TEST_F(DefenderNodesTest, RoleOciosoNaoAtivaNenhumRamo)
   bb_->set("role", std::string("idle"));
   EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::FAILURE);
   EXPECT_EQ(FakeDefend::ticks, 0);
+}
+
+// ----------------------------------------------------------------------------------------------
+// Fase 1: bloqueio de trajetória de chute, divisão de cobertura com goleiro e DefenderClear ativo
+// ----------------------------------------------------------------------------------------------
+
+TEST_F(DefenderNodesTest, ShadowBallInterceptaTrajetoriaDeChuteNoCantoComStraightLine)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("goal_width", 800.0);
+  bb_->set("robot_x", -1300.0);
+  bb_->set("robot_y", 0.0);
+  // Bola em (-250, 0) chutada a 2000 mm/s mirando o canto superior (y = +300 na linha do gol x=-2250)
+  bb_->set("ball", Pose2D{-250.0, 0.0, 0.0});
+  bb_->set("ball_vel", Vector2D{-2000.0, 300.0});
+  auto tree = makeTree(kShadowXml);
+
+  const auto goal = tickAndGetGoal(tree);
+  ASSERT_TRUE(goal.has_value());
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_EQ(last_goal_->planner_type, RobotGoal::PLANNER_STRAIGHT_LINE);
+  EXPECT_TRUE(last_goal_->disable_arrival_latch);
+  // Alvo deve ficar sobre a reta do chute (y positivo, crescendo conforme x se aproxima do gol)
+  const double expected_y = 0.0 + 300.0 * ((goal->first - (-250.0)) / (-2000.0));
+  EXPECT_NEAR(goal->second, expected_y, 15.0);
+  // E estritamente fora da pequena área
+  const bool fora_em_x = (goal->first - (-kFieldHalfLength)) >= kPenaltyDepth + kAreaMargin - 1.0;
+  const bool fora_em_y = std::abs(goal->second) >= kPenaltyWidth * 0.5 + kAreaMargin - 1.0;
+  EXPECT_TRUE(fora_em_x || fora_em_y);
+}
+
+TEST_F(DefenderNodesTest, ShadowBallDivideCoberturaComGoleiroNoCantoOposto)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("goal_width", 800.0);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("goalkeeper_id", 0u);
+  bb_->set("ball", Pose2D{0.0, 0.0, 0.0});
+  bb_->set("ball_vel", Vector2D{0.0, 0.0});
+
+  auto gd = std::make_shared<oxebots_interfaces::msg::GameData>();
+  oxebots_interfaces::msg::RobotGameData gk;
+  gk.id = 0;
+  gk.x = static_cast<float>(-kFieldHalfLength + 120.0);
+  gk.y = 200.0f;  // goleiro fechando o canto superior (+Y)
+  gd->robots.allies.push_back(gk);
+  setDefenderGameDataForTest(gd);
+
+  auto tree = makeTree(kShadowXml);
+  const auto goal = tickAndGetGoal(tree);
+  setDefenderGameDataForTest(nullptr);
+
+  ASSERT_TRUE(goal.has_value());
+  // Goleiro em +Y -> zagueiro desloca para cobrir o canto oposto (-Y)
+  EXPECT_LT(goal->second, -20.0);
+}
+
+TEST_F(DefenderNodesTest, DefenderClearPassaParaAliadoLivreQuandoAlinhado)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("field_length", 2.0 * kFieldHalfLength);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("goalkeeper_id", 0u);
+  bb_->set("ball_x", -1000.0);
+  bb_->set("ball_y", 0.0);
+  // Defensor atrás da bola (a 110 mm) apontando exatamente para o aliado livre à frente (+X)
+  bb_->set("robot_x", -1110.0);
+  bb_->set("robot_y", 0.0);
+  bb_->set("robot_yaw", 0.0);
+
+  auto gd = std::make_shared<oxebots_interfaces::msg::GameData>();
+  oxebots_interfaces::msg::RobotGameData ally;
+  ally.id = 2;
+  ally.x = 200.0f;  // 1200 mm à frente, corredor completamente livre
+  ally.y = 0.0f;
+  gd->robots.allies.push_back(ally);
+  setDefenderGameDataForTest(gd);
+
+  auto tree = makeTree(
+    "<DefenderClear robot_id=\"{robot_id}\" ball_x=\"{ball_x}\" ball_y=\"{ball_y}\" "
+    "my_goal_x=\"{my_goal_x}\" kick_speed=\"{def_kick_speed}\"/>");
+  const auto status = tree.tickExactlyOnce();
+  setDefenderGameDataForTest(nullptr);
+
+  EXPECT_EQ(status, BT::NodeStatus::SUCCESS);
+  double speed = 0.0;
+  ASSERT_TRUE(bb_->get("def_kick_speed", speed));
+  EXPECT_GE(speed, 1.2);
+  EXPECT_LE(speed, 3.0);
+}
+
+TEST_F(DefenderNodesTest, DefenderClearAfastaFirmeSobPressaoEForaDaArea)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("field_length", 2.0 * kFieldHalfLength);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("goalkeeper_id", 0u);
+  bb_->set("ball_x", -1450.0);
+  bb_->set("ball_y", 200.0);
+  bb_->set("robot_x", -1550.0);
+  bb_->set("robot_y", 400.0);
+  bb_->set("robot_yaw", 0.0);
+
+  auto gd = std::make_shared<oxebots_interfaces::msg::GameData>();
+  oxebots_interfaces::msg::RobotGameData opp;
+  opp.id = 1;
+  opp.x = -1300.0f;  // adversário colado pressionando a 150 mm
+  opp.y = 200.0f;
+  gd->robots.enemies.push_back(opp);
+  setDefenderGameDataForTest(gd);
+
+  auto tree = makeTree(
+    "<DefenderClear robot_id=\"{robot_id}\" ball_x=\"{ball_x}\" ball_y=\"{ball_y}\" "
+    "my_goal_x=\"{my_goal_x}\" kick_speed=\"{def_kick_speed}\"/>");
+  last_goal_.reset();
+  const auto status = tree.tickExactlyOnce();
+  setDefenderGameDataForTest(nullptr);
+
+  EXPECT_EQ(status, BT::NodeStatus::RUNNING);
+  const auto goal_x = publishedGoalX();
+  ASSERT_TRUE(goal_x.has_value());
+  ASSERT_TRUE(last_goal_.has_value());
+  const double goal_y = last_goal_->pose.pose.position.y * 1000.0;
+  const bool fora_em_x = (*goal_x - (-kFieldHalfLength)) >= kPenaltyDepth + kAreaMargin - 1.0;
+  const bool fora_em_y = std::abs(goal_y) >= kPenaltyWidth * 0.5 + kAreaMargin - 1.0;
+  EXPECT_TRUE(fora_em_x || fora_em_y);
+}
+
+TEST_F(DefenderNodesTest, DefenderClearCedeQuandoAtacanteAliadoJaDominaABola)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("field_length", 2.0 * kFieldHalfLength);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("goalkeeper_id", 0u);
+  bb_->set("ball_x", -800.0);
+  bb_->set("ball_y", 0.0);
+  bb_->set("robot_x", -1300.0);  // defensor a 500 mm
+  bb_->set("robot_y", 0.0);
+  bb_->set("robot_yaw", 0.0);
+
+  auto gd = std::make_shared<oxebots_interfaces::msg::GameData>();
+  oxebots_interfaces::msg::RobotGameData attacker;
+  attacker.id = 1;
+  attacker.x = -920.0f;  // atacante a 120 mm dominando a bola
+  attacker.y = 0.0f;
+  gd->robots.allies.push_back(attacker);
+  setDefenderGameDataForTest(gd);
+
+  auto tree = makeTree(
+    "<DefenderClear robot_id=\"{robot_id}\" ball_x=\"{ball_x}\" ball_y=\"{ball_y}\" "
+    "my_goal_x=\"{my_goal_x}\" kick_speed=\"{def_kick_speed}\"/>");
+  const auto status = tree.tickExactlyOnce();
+  setDefenderGameDataForTest(nullptr);
+
+  EXPECT_EQ(status, BT::NodeStatus::FAILURE);
+}
+
+TEST_F(DefenderNodesTest, DefenderClearFalhaSemProfundidadeDaArea)
+{
+  setDefenseBlackboard(-kFieldHalfLength, /*with_depth=*/false);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("ball_x", -1000.0);
+  bb_->set("ball_y", 0.0);
+  bb_->set("robot_x", -1150.0);
+  bb_->set("robot_y", 0.0);
+  bb_->set("robot_yaw", 0.0);
+
+  auto tree = makeTree(
+    "<DefenderClear robot_id=\"{robot_id}\" ball_x=\"{ball_x}\" ball_y=\"{ball_y}\" "
+    "my_goal_x=\"{my_goal_x}\" kick_speed=\"{def_kick_speed}\"/>");
+  last_goal_.reset();
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::FAILURE);
+  spinFor(100);
+  EXPECT_FALSE(last_goal_.has_value());
+}
+
+TEST_F(DefenderNodesTest, DefenderClearInterceptaBolaRapidaEmMovimentoComLinhaReta)
+{
+  setDefenseBlackboard(-kFieldHalfLength);
+  bb_->set("field_length", 2.0 * kFieldHalfLength);
+  bb_->set("robot_id", kTestRobotId);
+  bb_->set("goalkeeper_id", 0u);
+  // Bola em (-300, 100) vindo rápido em direção ao nosso gol (-X) e descendo em Y
+  bb_->set("ball_x", -300.0);
+  bb_->set("ball_y", 100.0);
+  bb_->set("ball_vx", -1500.0);
+  bb_->set("ball_vy", -400.0);
+  // Defensor posicionado mais atrás em (-1100, -300)
+  bb_->set("robot_x", -1100.0);
+  bb_->set("robot_y", -300.0);
+  bb_->set("robot_yaw", 0.0);
+
+  auto tree = makeTree(
+    "<DefenderClear robot_id=\"{robot_id}\" ball_x=\"{ball_x}\" ball_y=\"{ball_y}\" "
+    "my_goal_x=\"{my_goal_x}\" kick_speed=\"{def_kick_speed}\"/>");
+  last_goal_.reset();
+  EXPECT_EQ(tree.tickExactlyOnce(), BT::NodeStatus::RUNNING);
+  const auto goal_x = publishedGoalX();
+  ASSERT_TRUE(goal_x.has_value());
+  ASSERT_TRUE(last_goal_.has_value());
+  EXPECT_EQ(last_goal_->planner_type, RobotGoal::PLANNER_STRAIGHT_LINE);
+  // Deve antecipar a bola à frente da trajetória (-X e -Y), não perseguir (-300, 100)
+  EXPECT_LT(*goal_x, -500.0);
+  EXPECT_LT(last_goal_->pose.pose.position.y * 1000.0, 50.0);
 }
 
 }  // namespace
