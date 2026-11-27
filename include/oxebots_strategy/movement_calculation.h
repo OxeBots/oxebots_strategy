@@ -130,12 +130,13 @@ private:
     oxebots_interfaces::msg::RobotMotionOverride::SharedPtr last_override_msg_;
     std::chrono::steady_clock::time_point last_override_time_;
 
-    // Estado da máquina de chute, portado de KickBallNode: dispara por kKickFireWindow, depois
-    // aplica kKickCooldown antes de aceitar outro pedido. Persiste entre ativações (não é
-    // resetado quando o override volta a NONE), já que o cooldown só importa para o PRÓXIMO
-    // pedido de chute, não para o modo atualmente ativo.
-    enum class KickPhase { IDLE, FIRING };
-    static constexpr std::chrono::milliseconds kKickFireWindow{200};
+    // Estado da máquina de chute, portado de KickBallNode: pré-avança por kick_advance_delay_ms
+    // (sem acionar o kicker, para vencer a inércia e garantir contato com a bola), depois dispara
+    // por kick_fire_window_ms e aplica kKickCooldown antes de aceitar outro pedido.
+    // O cooldown persiste entre ativações, já que só importa para o PRÓXIMO pedido de chute.
+    enum class KickPhase { IDLE, ADVANCING, FIRING };
+    static constexpr int kDefaultKickAdvanceDelayMs = 50;
+    static constexpr int kDefaultKickFireWindowMs = 150;
     static constexpr std::chrono::milliseconds kKickCooldown{600};
     KickPhase kick_phase_ = KickPhase::IDLE;
     std::chrono::steady_clock::time_point kick_start_time_;

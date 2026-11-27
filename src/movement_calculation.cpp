@@ -41,8 +41,8 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     invert_sides_ = this->get_parameter("invert_sides").as_bool();
     this->declare_parameter("path_renews_watchdog", false);
     path_renews_watchdog_ = this->get_parameter("path_renews_watchdog").as_bool();
-    
-    this->declare_parameter("max_linear_speed", 10.0);
+
+    this->declare_parameter("max_linear_speed", 6.5);
     this->declare_parameter("min_linear_speed", 0.0);
     this->declare_parameter("p_gain_linear", 5.0);
     this->declare_parameter("d_gain_linear", 0.0);
@@ -54,13 +54,15 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     this->declare_parameter("angle_tolerance", 0.04);
     this->declare_parameter("use_kalman_filter", true);
     this->declare_parameter("latency_comp_s", 0.045);
+    this->declare_parameter("kick_advance_delay_ms", kDefaultKickAdvanceDelayMs);
+    this->declare_parameter("kick_fire_window_ms", kDefaultKickFireWindowMs);
     // --- Distância de Lookahead (Pure Pursuit) ---
     // Padrão calibrado: 140.0 mm (~2.8 células do grid do D* de 50 mm).
     // Filtra o efeito escada da grade e evita correções agressivas de rota/zigue-zague sem cortar curvas.
     this->declare_parameter("lookahead_distance", 140.0); // mm
 
     std::string robot_prefix = "/robot_" + std::to_string(robot_id_);
-    
+
     cmd_vel_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotCmd>("/robot_commands", rclcpp::SensorDataQoS());
     status_pub_ = this->create_publisher<oxebots_interfaces::msg::RobotMotionStatus>("/robot_motion_status", 10);
 
@@ -99,7 +101,7 @@ PathFollowerNode::PathFollowerNode() : Node("path_follower_node") {
     // Loop de controle a 50 Hz (20ms) em vez de 20 Hz (50ms) para reduzir atraso de malha e overshoot angular
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(20), std::bind(&PathFollowerNode::calculate_and_move, this));
-    
+
     RCLCPP_INFO(this->get_logger(), "Seguidor de Caminho iniciado para o robô %d ouvindo %s/path", robot_id_, robot_prefix.c_str());
 }
 
@@ -262,7 +264,7 @@ void PathFollowerNode::override_callback(const oxebots_interfaces::msg::RobotMot
 
 void PathFollowerNode::game_data_callback(const oxebots_interfaces::msg::GameData::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(data_mutex_);
-    last_game_data_ = msg; 
+    last_game_data_ = msg;
     game_data_received_ = true;
 }
 
@@ -276,9 +278,9 @@ void PathFollowerNode::robot_prediction_callback(
 
 void PathFollowerNode::calculate_and_move() {
     std::lock_guard<std::mutex> lock(data_mutex_);
-    
+
     if (!game_data_received_ || !last_game_data_) {
-        return; 
+        return;
     }
 
     movement::Coordinate current_pos;
@@ -377,6 +379,13 @@ void PathFollowerNode::calculate_and_move() {
         }
     }
 
+    if (effective_mode != oxebots_interfaces::msg::RobotMotionOverride::MODE_KICK) {
+        if (kick_phase_ == KickPhase::FIRING) {
+            kick_cooldown_until_ = now_ctrl + kKickCooldown;
+        }
+        kick_phase_ = KickPhase::IDLE;
+    }
+
     if (effective_mode == oxebots_interfaces::msg::RobotMotionOverride::MODE_HALT) {
         publishHalt();
         return;
@@ -403,7 +412,7 @@ void PathFollowerNode::calculate_and_move() {
                 float px = pose_stamped.pose.position.x * 1000.0f;
                 float py = pose_stamped.pose.position.y * 1000.0f;
                 double d = std::hypot(px - current_pos.x, py - current_pos.y);
-                
+
                 if (d > lookahead_dist) {
                     const auto& q = pose_stamped.pose.orientation;
                     float qw = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.y * q.y + q.z * q.z));
@@ -689,24 +698,47 @@ void PathFollowerNode::runAlign(const movement::Coordinate& current_pos, uint8_t
 }
 
 // Máquina de estados do chute, portada de KickBallNode. Enquanto MODE_KICK estiver ativo:
-// dispara (avanço + kick_speed) por kKickFireWindow, incrementa kick_fire_count_ ao terminar a
-// janela, e então segura kKickCooldown antes de aceitar outro pedido — sem isso, um pedido de
-// chute que continue chegando (o leaf reenvia a cada tick enquanto RUNNING) dispararia de novo
-// instantaneamente, virando uma "metralhadora" que nunca solta a bola direito.
+// 1) ADVANCING: avança por kick_advance_delay_ms com kick_speed=0 para vencer inércia e garantir contato;
+// 2) FIRING: mantém o avanço + kick_speed por kick_fire_window_ms, incrementa kick_fire_count_ ao terminar
+//    a janela, e então segura kKickCooldown antes de aceitar outro pedido — sem isso, um pedido de chute
+//    que continue chegando (o leaf reenvia a cada tick enquanto RUNNING) dispararia de novo instantaneamente.
 void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
     auto now = std::chrono::steady_clock::now();
+    const int advance_delay_ms = std::max(0, static_cast<int>(
+        this->get_parameter("kick_advance_delay_ms").as_int()));
+    const int fire_window_ms = std::max(1, static_cast<int>(
+        this->get_parameter("kick_fire_window_ms").as_int()));
 
     if (kick_phase_ == KickPhase::IDLE && now >= kick_cooldown_until_) {
-        kick_phase_ = KickPhase::FIRING;
+        kick_phase_ = (advance_delay_ms > 0) ? KickPhase::ADVANCING : KickPhase::FIRING;
         kick_start_time_ = now;
     }
 
-    if (kick_phase_ == KickPhase::FIRING) {
+    if (kick_phase_ == KickPhase::ADVANCING) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - kick_start_time_);
-        if (elapsed < kKickFireWindow) {
+        if (elapsed.count() >= advance_delay_ms) {
+            kick_phase_ = KickPhase::FIRING;
+            kick_start_time_ = now;
+            if (last_game_data_) {
+                const double dist = std::hypot(
+                    last_game_data_->ball.x - current_pos.x,
+                    last_game_data_->ball.y - current_pos.y);
+                RCLCPP_INFO(this->get_logger(),
+                    "Robô %d: pré-avanço concluído (%lld ms), disparando chute (dist=%.1f mm, vel=%.2f m/s).",
+                    robot_id_, static_cast<long long>(elapsed.count()),
+                    dist, last_override_msg_->kick_speed);
+            }
+        }
+    }
+
+    if (kick_phase_ == KickPhase::ADVANCING || kick_phase_ == KickPhase::FIRING) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - kick_start_time_);
+        if (kick_phase_ == KickPhase::ADVANCING || elapsed.count() < fire_window_ms) {
             oxebots_interfaces::msg::RobotCmdData cmd_data;
             cmd_data.id = robot_id_;
-            cmd_data.kick_speed = last_override_msg_->kick_speed;
+            cmd_data.kick_speed = (kick_phase_ == KickPhase::FIRING)
+                ? last_override_msg_->kick_speed
+                : 0.0f;
             // Avançar enquanto chuta, para garantir contato — na direção que o robô está
             // REALMENTE olhando (current_pos.orientation), não em +X global fixo. RobotCmdData
             // usa velocidades em referencial global (mesma convenção do resto deste arquivo, ver
@@ -717,7 +749,7 @@ void PathFollowerNode::runKick(const movement::Coordinate& current_pos) {
             // (kick_fire_count subia, timer terminava) mas a bola nunca se movia nem um
             // milímetro, mesmo com contato próximo (confirmado em teste: deslocamento=0.0mm em
             // toda tentativa, exclusivo do time amarelo).
-            constexpr double kKickAdvanceSpeed = 6.0;
+            constexpr double kKickAdvanceSpeed = 3.0;
             const double max_lin = this->get_parameter("max_linear_speed").as_double();
             const double min_lin = this->get_parameter("min_linear_speed").as_double();
             const double kick_advance = movement::applyMinMaxLinearSpeed(kKickAdvanceSpeed, min_lin, max_lin);
